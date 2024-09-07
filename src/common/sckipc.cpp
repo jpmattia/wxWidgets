@@ -53,6 +53,7 @@ namespace
 // wxIPC protocol!)
 enum IPCCode
 {
+    IPC_NULL            = 0,
     IPC_EXECUTE         = 1,
     IPC_REQUEST         = 2,
     IPC_POKE            = 3,
@@ -341,6 +342,150 @@ private:
 };
 
 } // anonymous namespace
+
+// --------------------------------------------------------------------------
+// wxIPCMessageBase
+// --------------------------------------------------------------------------
+
+// This class manages the socket reading and writing of data from the
+// socket.
+// 
+class wxIPCMessageBase
+{
+public:
+    wxIPCMessageBase(wxSocketBase* socket) { Init(socket); }
+    
+protected:
+    void Init(wxSocketBase* socket);
+
+
+protected: // primitives for read/write to socket
+
+    bool Read32(wxUint32& word)
+    {
+        m_socket->Read(reinterpret_cast<char *>(&word), 4);
+
+        return !m_socket->Error() && m_socket->LastReadCount() == 4;
+    }
+        
+    // Reads nbytes of data from the socket into a pre-allocated buffer
+    bool ReadData(void* buffer, wxUint32& nbytes)
+    {
+        m_socket->Read(buffer, nbytes);
+
+        return !m_socket->Error() && m_socket->LastReadCount() == nbytes;
+    }
+
+    bool ReadSizeAndData(void** bufptr, wxUint32& nbytes);
+    bool ReadString(wxString& str);
+
+    bool Write32(wxUint32 word)
+    {
+        m_socket->Write(reinterpret_cast<char *>(&word), 4);
+
+        return !m_socket->Error() && m_socket->LastWriteCount() == 4;
+    }        
+
+    bool WriteData(const void* data, wxUint32 nbytes)
+    {
+        m_socket->Write(data, nbytes);
+
+        return !m_socket->Error() && m_socket->LastWriteCount() == nbytes;
+    }
+
+    bool WriteSizeAndData(const void* data, wxUint32 nbytes)
+    {
+        if (!Write32(nbytes))
+            return false;
+
+        return WriteData(data,nbytes);
+    }
+
+    bool WriteString(const wxString& str);
+
+    wxSocketBase* m_socket;
+    IPCCode m_ipc_code;
+    wxIPCFormat m_ipc_format;
+
+    wxDECLARE_NO_COPY_CLASS(wxIPCMessageBase);    
+};
+
+void wxIPCMessageBase::Init(wxSocketBase* socket)
+{
+    m_socket = socket;
+    m_ipc_code = IPC_NULL;
+    m_ipc_format = wxIPC_PRIVATE;
+}
+
+// Reads a 32-bit size from the socket, allocates a buffer of that size,
+// then read nbytes worth of data from the socket. Returned buffer should
+// be freed after use with delete[]
+bool wxIPCMessageBase::ReadSizeAndData(void** dataptr, wxUint32& nbytes)
+{
+    if (!Read32(nbytes))
+        return false;
+    
+    char *buf = new char[nbytes];
+    m_socket->Read(buf, nbytes);
+
+    if (m_socket->Error() || m_socket->LastReadCount() != nbytes)
+    {
+        delete[] buf;
+        return false;
+    }
+
+    *dataptr = buf;
+
+    return true;
+}
+
+bool wxIPCMessageBase::ReadString(wxString& str)
+{
+    wxUint32 len = 0;
+    if ( !Read32(len) )
+        return false;
+         
+    if ( len > 0 )
+    {
+
+#if wxUSE_UNICODE
+        wxCharBuffer buf(len);
+        if ( !buf || !ReadData(buf.data(), len) )
+            return false;
+#else
+        wxStringBuffer buf(str, len);
+        if ( !buf || !ReadData(buf,len) )
+            return false;
+#endif
+
+        if (m_socket->Error() ||  m_socket->LastReadCount() != len)
+            return false;
+
+#if wxUSE_UNICODE
+        str = wxConvUTF8.cMB2WC(buf.data(), len, NULL);
+#endif        
+    }
+
+    return true;
+}
+
+
+bool wxIPCMessageBase::WriteString(const wxString& str)
+{
+#if wxUSE_UNICODE
+    const wxWX2MBbuf buf = str.mb_str(wxConvUTF8);
+    size_t len = buf.length();
+#else
+    const wxWX2MBbuf buf = str.mb_str();
+    size_t len = str.size();
+#endif
+
+    if (len > 0)
+        return Write32(len) && WriteData(buf, len);
+    else
+        return Write32(len);
+}
+
 
 // ==========================================================================
 // implementation
