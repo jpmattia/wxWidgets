@@ -355,6 +355,18 @@ class wxIPCMessageBase
 public:
     wxIPCMessageBase(wxSocketBase* socket) { Init(socket); }
     
+    IPCCode GetIPCCode() const { return m_ipc_code; }
+    void SetIPCCode(IPCCode ipc_code) { m_ipc_code = ipc_code; }
+
+    wxIPCFormat GetIPCFormat() const { return m_ipc_format; }
+    void SetIPCFormat(wxIPCFormat ipc_format) { m_ipc_format = ipc_format; }
+
+    wxSocketBase* GetSocket() const { return m_socket; }
+    void SetSocket(wxSocketBase* socket) { m_socket = socket; }
+
+    wxSocketError GetError() const { return m_error; }
+    void SetError(wxSocketError error) { m_error = error; }
+
 protected:
     void Init(wxSocketBase* socket);
 
@@ -407,14 +419,19 @@ protected: // primitives for read/write to socket
     IPCCode m_ipc_code;
     wxIPCFormat m_ipc_format;
 
+    wxSocketBase* m_socket;
+    wxSocketError m_error;
+ 
     wxDECLARE_NO_COPY_CLASS(wxIPCMessageBase);    
 };
 
 void wxIPCMessageBase::Init(wxSocketBase* socket)
 {
-    m_socket = socket;
-    m_ipc_code = IPC_NULL;
-    m_ipc_format = wxIPC_PRIVATE;
+    SetIPCCode(IPC_NULL);
+    SetIPCFormat(wxIPC_PRIVATE);
+
+    SetSocket(socket);
+    SetError(wxSOCKET_NOERROR);
 }
 
 // Reads a 32-bit size from the socket, allocates a buffer of that size,
