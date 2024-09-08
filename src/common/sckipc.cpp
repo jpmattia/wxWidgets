@@ -377,7 +377,7 @@ protected: // primitives for read/write to socket
     {
         m_socket->Read(reinterpret_cast<char *>(&word), 4);
 
-        return !m_socket->Error() && m_socket->LastReadCount() == 4;
+        return VerifyLastReadCount(4);
     }
         
     // Reads nbytes of data from the socket into a pre-allocated buffer
@@ -390,19 +390,35 @@ protected: // primitives for read/write to socket
 
     bool ReadSizeAndData(void** bufptr, wxUint32& nbytes);
     bool ReadString(wxString& str);
+    bool VerifyLastReadCount(wxUint32 nbytes)
+    {
+        if (m_socket->Error())
+        {
+            SetError(m_socket->GetError());
+            return false;
+        }
+
+        if (m_socket->LastReadCount() != nbytes)
+        {
+            // The expected data is misaligned, which is bad.
+            SetError(wxSOCKET_IOERR);
+            return false;
+        }
+        return true;
+    }
 
     bool Write32(wxUint32 word)
     {
         m_socket->Write(reinterpret_cast<char *>(&word), 4);
 
-        return !m_socket->Error() && m_socket->LastWriteCount() == 4;
+        return VerifyLastWriteCount(4);
     }        
 
     bool WriteData(const void* data, wxUint32 nbytes)
     {
         m_socket->Write(data, nbytes);
 
-        return !m_socket->Error() && m_socket->LastWriteCount() == nbytes;
+        return VerifyLastWriteCount(nbytes);
     }
 
     bool WriteSizeAndData(const void* data, wxUint32 nbytes)
@@ -415,7 +431,22 @@ protected: // primitives for read/write to socket
 
     bool WriteString(const wxString& str);
 
-    wxSocketBase* m_socket;
+    bool VerifyLastWriteCount(wxUint32 nbytes)
+    {
+        if (m_socket->Error())
+        {
+            SetError(m_socket->GetError());
+            return false;
+        }
+
+        if (m_socket->LastWriteCount() != nbytes)
+        {
+            SetError(wxSOCKET_IOERR);
+            return false;
+        }
+        return true;
+    }
+
     IPCCode m_ipc_code;
     wxIPCFormat m_ipc_format;
 
@@ -445,7 +476,7 @@ bool wxIPCMessageBase::ReadSizeAndData(void** dataptr, wxUint32& nbytes)
     char *buf = new char[nbytes];
     m_socket->Read(buf, nbytes);
 
-    if (m_socket->Error() || m_socket->LastReadCount() != nbytes)
+    if ( !VerifyLastReadCount(nbytes)) 
     {
         delete[] buf;
         return false;
@@ -475,7 +506,7 @@ bool wxIPCMessageBase::ReadString(wxString& str)
             return false;
 #endif
 
-        if (m_socket->Error() ||  m_socket->LastReadCount() != len)
+        if ( !VerifyLastReadCount(len))
             return false;
 
 #if wxUSE_UNICODE
