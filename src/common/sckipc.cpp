@@ -396,6 +396,9 @@ public:
     size_t GetSize() const { return m_size; }
     void SetSize(size_t size) { m_size = size; }
 
+    wxString GetItem() const { return m_item; }
+    void SetItem(const wxString& item) { m_item = item; }
+
 protected:
     void Init(wxSocketBase* socket)
     {
@@ -533,6 +536,7 @@ protected: // primitives for read/write to socket
     void *m_data;
     wxUint32 m_size;
     wxIPCFormat m_ipc_format;
+    wxString m_item;
 
     wxDECLARE_NO_COPY_CLASS(wxIPCMessageBase);    
 };
