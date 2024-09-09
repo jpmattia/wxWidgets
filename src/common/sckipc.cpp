@@ -366,6 +366,7 @@ class wxIPCMessageBase
 {
 public:
     wxIPCMessageBase(wxSocketBase* socket) { Init(socket); }
+    virtual ~wxIPCMessageBase();
     
     wxIPCMessageBase* ReadMessage();
     bool WriteMesssage();
@@ -383,7 +384,14 @@ public:
     void SetError(wxSocketError error) { m_error = error; }
 
 protected:
-    void Init(wxSocketBase* socket);
+    void Init(wxSocketBase* socket)
+    {
+        SetIPCCode(IPC_NULL);
+        SetIPCFormat(wxIPC_PRIVATE);
+
+        SetSocket(socket);
+        SetError(wxSOCKET_NOERROR);
+    }
 
     virtual bool DataFromSocket() = 0;
     virtual bool DataToSocket() = 0;
@@ -496,40 +504,6 @@ protected: // primitives for read/write to socket
     wxDECLARE_NO_COPY_CLASS(wxIPCMessageBase);    
 };
 
-void wxIPCMessageBase::Init(wxSocketBase* socket)
-{
-    SetIPCCode(IPC_NULL);
-    SetIPCFormat(wxIPC_PRIVATE);
-
-    SetSocket(socket);
-    SetError(wxSOCKET_NOERROR);
-}
-
-
-// Reads a single message from the socket. Returns nullptr when no message was
-// read.  The returned message must be freed by the caller.
-wxIPCMessageBase* wxIPCMessageBase::ReadMessage()
-{
-    // ensure that we read from the socket without any read call from another
-    // thread
-    wxCRIT_SECT_LOCKER(lock, gs_critical_read);
-
-    // stub
-    return nullptr;
-}
-
-
-// Writes this message object to the socket.
-bool wxIPCMessageBase::WriteMesssage()
-{
-    // ensure that we write to the socket without any write call from another
-    // thread
-    wxCRIT_SECT_LOCKER(lock, gs_critical_write);
-
-    return WriteIPCCode() && DataToSocket();
-}
-
-
 
 
 // Reads a 32-bit size from the socket, allocates a buffer of that size,
@@ -599,6 +573,113 @@ bool wxIPCMessageBase::WriteString(const wxString& str)
         return Write32(len) && WriteData(buf, len);
     else
         return Write32(len);
+}
+
+
+// ==========================================================================
+// wxIPCMessages
+// ==========================================================================
+
+class wxIPCMessageConnect : public wxIPCMessageBase
+{
+public:
+    wxIPCMessageConnect(wxSocketBase* socket, const wxString& topic)
+        : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_CONNECT);
+        SetTopic(topic);
+    }
+
+    wxIPCMessageConnect(wxSocketBase* socket)
+        : wxIPCMessageBase(socket)
+    {
+        SetSocket(socket);
+    }
+
+    wxString GetTopic() const { return m_topic; }
+    void SetTopic(const wxString& topic) { m_topic = topic; }
+
+protected:
+    bool DataToSocket() override
+    {
+        return WriteString(m_topic);
+    }
+
+    bool DataFromSocket() override
+    {
+        return ReadString(m_topic);
+    }
+
+    wxString m_topic;
+};
+
+class wxIPCMessageDisconnect : public wxIPCMessageBase
+{
+public:
+    wxIPCMessageDisconnect(wxSocketBase* socket)
+        : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_DISCONNECT);
+    }
+
+protected:
+    bool DataToSocket() override
+    {
+        return true;
+    }
+
+    bool DataFromSocket() override
+    {
+        return true;
+    }
+};
+
+// Reads a single message from the socket. Returns nullptr when no message was
+// read.  The returned message must be freed by the caller.
+wxIPCMessageBase* wxIPCMessageBase::ReadMessage()
+{
+    // ensure that we read from the socket without any read call from another
+    // thread
+    wxCRIT_SECT_LOCKER(lock, gs_critical_read);
+
+    if ( !ReadIPCCode() )
+        return nullptr;
+
+    wxIPCMessageBase* msg = nullptr;
+
+    switch ( GetIPCCode() )
+    {
+        case IPC_CONNECT:
+            msg = new wxIPCMessageConnect(GetSocket());
+            break;
+        
+        case IPC_DISCONNECT:
+            msg = new wxIPCMessageDisconnect(GetSocket());
+            break;
+        
+        default:
+            // faulty message indicates data misalignment
+            SetError(wxSOCKET_IOERR);
+            return nullptr;
+    }
+
+    if (msg->DataFromSocket())
+    {
+        delete msg;
+        return nullptr;
+    }
+
+    return msg;
+}
+
+// Writes this message object to the socket.
+bool wxIPCMessageBase::WriteMesssage()
+{
+    // ensure that we write to the socket without any write call from another
+    // thread
+    wxCRIT_SECT_LOCKER(lock, gs_critical_write);
+
+    return WriteIPCCode() && DataToSocket();
 }
 
 
