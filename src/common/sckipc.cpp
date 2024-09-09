@@ -650,22 +650,88 @@ protected:
 };
 
 
+class wxIPCMessageRequest : public wxIPCMessageBase
+{
+public:
+    wxIPCMessageRequest(wxSocketBase* socket)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_REQUEST);
+        SetIPCFormat(wxIPC_INVALID);
+    }
+
+    wxIPCMessageRequest(wxSocketBase* socket,
+                        const wxString& item,
+                        wxIPCFormat format)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_REQUEST);
+        SetItem(item);
+        SetIPCFormat(format);
+    }
 
 protected:
     bool DataToSocket() override
     {
-        return WriteIPCFormat(m_format) && WriteSizeAndData(m_data, m_size);
+        return WriteIPCFormat() && WriteString(m_item);
     }
 
     bool DataFromSocket() override
     {
-        return ReadIPCFormat(m_format) && ReadSizeAndData(&m_data, m_size);
+        return ReadIPCFormat() && ReadString(m_item);
+    }
+};
+
+class wxIPCMessageRequestReply : public wxIPCMessageBase
+{
+public:
+    wxIPCMessageRequestReply(wxSocketBase* socket)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_REQUEST_REPLY);
+    }
+
+    wxIPCMessageRequestReply(wxSocketBase* socket,
+                             void* user_data,
+                             size_t user_size,
+                             const wxString& item,
+                             wxIPCFormat format)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_REQUEST_REPLY);
+        SetItem(item);
+        SetIPCFormat(format);
+        SetData(user_data);
+
+        wxUint32 len;
+        if ( user_size == wxNO_LEN )
+        {
+            switch ( format )
+            {
+            case wxIPC_TEXT:
+            case wxIPC_UTF8TEXT:
+                len = strlen((const char *)user_data) + 1;  // includes final NUL
+                break;
+            case wxIPC_UNICODETEXT:
+                len = (wcslen((const wchar_t *)user_data) + 1) * sizeof(wchar_t);  // includes final NUL
+                break;
+            default:
+                len = 0;
+            }
+        }
+        SetSize(len);
     }
 
 protected:
-    void *m_data;
-    wxUint32 m_size;
-    wxIPCFormat m_format;
+    bool DataToSocket() override
+    {
+        return WriteIPCFormat() && WriteString(m_item) && WriteSizeAndData();
+    }
+
+    bool DataFromSocket() override
+    {
+        return ReadIPCFormat() && ReadString(m_item) && ReadSizeAndData();
+    }
 };
 
 
