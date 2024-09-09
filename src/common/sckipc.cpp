@@ -734,6 +734,40 @@ protected:
     }
 };
 
+class wxIPCMessagePoke : public wxIPCMessageBase
+{
+public:
+    wxIPCMessagePoke(wxSocketBase* socket)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_POKE);
+    }
+
+    wxIPCMessagePoke(wxSocketBase* socket,
+                     const wxString& item,
+                     void* data,
+                     size_t size,
+                     wxIPCFormat format)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_POKE);
+        SetItem(item);
+        SetIPCFormat(format);
+        SetData(data);
+        SetSize(size);
+    }
+
+protected:
+    bool DataToSocket() override
+    {
+        return WriteIPCFormat() && WriteString(m_item) && WriteSizeAndData();
+    }
+
+    bool DataFromSocket() override
+    {
+        return ReadIPCFormat() && ReadString(m_item) && ReadSizeAndData();
+    }
+};
 
 class wxIPCMessageConnect : public wxIPCMessageBase
 {
