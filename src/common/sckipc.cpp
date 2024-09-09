@@ -769,6 +769,97 @@ protected:
     }
 };
 
+class wxIPCMessageAdviseStart : public wxIPCMessageBase
+{
+public:
+    wxIPCMessageAdviseStart(wxSocketBase* socket)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_ADVISE_START);
+    }
+
+    wxIPCMessageAdviseStart(wxSocketBase* socket, const wxString& item)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_ADVISE_START);
+        SetItem(item);
+    }
+
+protected:
+    bool DataToSocket() override
+    {
+        return WriteString(m_item);
+    }
+
+    bool DataFromSocket() override
+    {
+        return ReadString(m_item);
+    }
+};
+
+class wxIPCMessageAdviseStop : public wxIPCMessageBase
+{
+public:
+    wxIPCMessageAdviseStop(wxSocketBase* socket)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_ADVISE_STOP);
+    }
+
+    wxIPCMessageAdviseStop(wxSocketBase* socket, const wxString& item)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_ADVISE_STOP);
+        SetItem(item);
+    }
+
+protected:
+    bool DataToSocket() override
+    {
+        return WriteString(m_item);
+    }
+
+    bool DataFromSocket() override
+    {
+        return ReadString(m_item);
+    }
+};
+
+class wxIPCMessageAdvise : public wxIPCMessageBase
+{
+public:
+    wxIPCMessageAdvise(wxSocketBase* socket)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_ADVISE);
+    }
+
+    wxIPCMessageAdvise(wxSocketBase* socket,
+                       const wxString& item,
+                       void* data,
+                       size_t size,
+                       wxIPCFormat format)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_ADVISE);
+        SetItem(item);
+        SetIPCFormat(format);
+        SetData(data);
+        SetSize(size);
+    }
+
+protected:
+    bool DataToSocket() override
+    {
+        return WriteIPCFormat() && WriteString(m_item) && WriteSizeAndData();
+    }
+
+    bool DataFromSocket() override
+    {
+        return ReadIPCFormat() && ReadString(m_item) && ReadSizeAndData();
+    }
+};
+
 class wxIPCMessageConnect : public wxIPCMessageBase
 {
 public:
