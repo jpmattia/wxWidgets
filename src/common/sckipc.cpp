@@ -366,16 +366,18 @@ class wxIPCMessageBase
 {
 public:
     wxIPCMessageBase(wxSocketBase* socket) { Init(socket); }
-    virtual ~wxIPCMessageBase();
+    virtual ~wxIPCMessageBase()
+    {
+        if (m_data)
+            delete[] static_cast<const char *>(m_data);
+    }
     
     wxIPCMessageBase* ReadMessage();
     bool WriteMesssage();
 
+    // Accessors for the base object
     IPCCode GetIPCCode() const { return m_ipc_code; }
     void SetIPCCode(IPCCode ipc_code) { m_ipc_code = ipc_code; }
-
-    wxIPCFormat GetIPCFormat() const { return m_ipc_format; }
-    void SetIPCFormat(wxIPCFormat ipc_format) { m_ipc_format = ipc_format; }
 
     wxSocketBase* GetSocket() const { return m_socket; }
     void SetSocket(wxSocketBase* socket) { m_socket = socket; }
@@ -383,14 +385,27 @@ public:
     wxSocketError GetError() const { return m_error; }
     void SetError(wxSocketError error) { m_error = error; }
 
+    // These accessors are here to avoid repetition in the derived objects,
+    // most of which need these members.
+    wxIPCFormat GetIPCFormat() const { return m_ipc_format; }
+    void SetIPCFormat(wxIPCFormat ipc_format) { m_ipc_format = ipc_format; }
+
+    void* GetData() const { return m_data; }
+    void SetData(void *data) { m_data = data; }
+
+    size_t GetSize() const { return m_size; }
+    void SetSize(size_t size) { m_size = size; }
+
 protected:
     void Init(wxSocketBase* socket)
     {
         SetIPCCode(IPC_NULL);
-        SetIPCFormat(wxIPC_PRIVATE);
-
         SetSocket(socket);
         SetError(wxSOCKET_NOERROR);
+
+        SetIPCFormat(wxIPC_INVALID);
+        SetSize(0);
+        SetData(nullptr);
     }
 
     virtual bool DataFromSocket() = 0;
@@ -510,11 +525,15 @@ protected: // primitives for read/write to socket
     }
 
     IPCCode m_ipc_code;
-    wxIPCFormat m_ipc_format;
 
     wxSocketBase* m_socket;
     wxSocketError m_error;
- 
+
+    // Members used in most of the derived messages
+    void *m_data;
+    wxUint32 m_size;
+    wxIPCFormat m_ipc_format;
+
     wxDECLARE_NO_COPY_CLASS(wxIPCMessageBase);    
 };
 
@@ -601,9 +620,6 @@ public:
        : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_EXECUTE);
-        SetIPCFormat(wxIPC_INVALID);
-        SetSize(0);
-        SetData(nullptr);
     }
 
     wxIPCMessageExecute(wxSocketBase* socket,
@@ -618,20 +634,19 @@ public:
         SetIPCFormat(format);
     }
 
-    ~wxIPCMessageExecute()
+protected:
+    bool DataToSocket() override
     {
-        if (m_data)
-            delete[] static_cast<const char *>(m_data);
+        return WriteIPCFormat(m_format) && WriteSizeAndData(m_data, m_size);
     }
 
-    void* GetData() const { return m_data; }
-    void SetData(void *data) { m_data = data; }
+    bool DataFromSocket() override
+    {
+        return ReadIPCFormat(m_format) && ReadSizeAndData(&m_data, m_size);
+    }
+};
 
-    size_t GetSize() const { return m_size; }
-    void SetSize(size_t size) { m_size = size; }
 
-    wxIPCFormat GetIPCFormat() const { return m_format; }
-    void SetIPCFormat(wxIPCFormat format) { m_format = format; }
 
 protected:
     bool DataToSocket() override
