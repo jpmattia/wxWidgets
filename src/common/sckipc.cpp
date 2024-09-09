@@ -43,6 +43,13 @@
 #include "wx/socket.h"
 
 // --------------------------------------------------------------------------
+// Global variables
+// --------------------------------------------------------------------------
+
+wxCRIT_SECT_DECLARE_MEMBER(gs_critical_read);
+wxCRIT_SECT_DECLARE_MEMBER(gs_critical_write);
+
+// --------------------------------------------------------------------------
 // macros and constants
 // --------------------------------------------------------------------------
 
@@ -67,6 +74,11 @@ enum IPCCode
     IPC_DISCONNECT      = 11,
     IPC_MAX
 };
+
+// A random header, which is used to detect a loss-of-sync on the IPC
+// data stream. The header is 24-bits, and the IPCCode above is sent in the
+// last 8 bits.
+const wxUint32 IPCCodeHeader=0x439d9600;
 
 } // anonymous namespace
 
@@ -355,6 +367,9 @@ class wxIPCMessageBase
 public:
     wxIPCMessageBase(wxSocketBase* socket) { Init(socket); }
     
+    wxIPCMessageBase* ReadMessage();
+    bool WriteMesssage();
+
     IPCCode GetIPCCode() const { return m_ipc_code; }
     void SetIPCCode(IPCCode ipc_code) { m_ipc_code = ipc_code; }
 
@@ -370,6 +385,8 @@ public:
 protected:
     void Init(wxSocketBase* socket);
 
+    virtual bool DataFromSocket() = 0;
+    virtual bool DataToSocket() = 0;
 
 protected: // primitives for read/write to socket
 
@@ -379,16 +396,33 @@ protected: // primitives for read/write to socket
 
         return VerifyLastReadCount(4);
     }
-        
+
     // Reads nbytes of data from the socket into a pre-allocated buffer
     bool ReadData(void* buffer, wxUint32& nbytes)
     {
         m_socket->Read(buffer, nbytes);
 
-        return !m_socket->Error() && m_socket->LastReadCount() == nbytes;
+        return VerifyLastReadCount(nbytes);
     }
 
     bool ReadSizeAndData(void** bufptr, wxUint32& nbytes);
+    bool ReadIPCCode()
+    {
+        wxUint32 code_with_header;
+        if (!Read32(code_with_header))
+            return false;
+
+        if ((code_with_header & 0xFFFFFF00) != IPCCodeHeader)
+        {
+            // The expected data is misaligned, which is bad.
+            SetError(wxSOCKET_IOERR);
+            return false;
+        }
+
+        SetIPCCode(static_cast<IPCCode>(code_with_header & 0xFF));
+        return true;
+    }
+
     bool ReadString(wxString& str);
     bool VerifyLastReadCount(wxUint32 nbytes)
     {
@@ -429,6 +463,12 @@ protected: // primitives for read/write to socket
         return WriteData(data,nbytes);
     }
 
+    bool WriteIPCCode()
+    {
+        wxUint32 code_with_header = IPCCodeHeader & GetIPCCode();
+        return Write32(code_with_header);
+    }
+
     bool WriteString(const wxString& str);
 
     bool VerifyLastWriteCount(wxUint32 nbytes)
@@ -464,6 +504,33 @@ void wxIPCMessageBase::Init(wxSocketBase* socket)
     SetSocket(socket);
     SetError(wxSOCKET_NOERROR);
 }
+
+
+// Reads a single message from the socket. Returns nullptr when no message was
+// read.  The returned message must be freed by the caller.
+wxIPCMessageBase* wxIPCMessageBase::ReadMessage()
+{
+    // ensure that we read from the socket without any read call from another
+    // thread
+    wxCRIT_SECT_LOCKER(lock, gs_critical_read);
+
+    // stub
+    return nullptr;
+}
+
+
+// Writes this message object to the socket.
+bool wxIPCMessageBase::WriteMesssage()
+{
+    // ensure that we write to the socket without any write call from another
+    // thread
+    wxCRIT_SECT_LOCKER(lock, gs_critical_write);
+
+    return WriteIPCCode() && DataToSocket();
+}
+
+
+
 
 // Reads a 32-bit size from the socket, allocates a buffer of that size,
 // then read nbytes worth of data from the socket. Returned buffer should
