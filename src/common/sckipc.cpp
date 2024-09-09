@@ -428,7 +428,7 @@ protected: // primitives for read/write to socket
         return VerifyLastReadCount(nbytes);
     }
 
-    bool ReadSizeAndData(void** bufptr, wxUint32& nbytes);
+    bool ReadSizeAndData();
     bool ReadIPCCode()
     {
         wxUint32 code_with_header;
@@ -446,9 +446,9 @@ protected: // primitives for read/write to socket
         return true;
     }
 
-    bool ReadIPCFormat(wxIPCFormat format)
+    bool ReadIPCFormat()
     {
-        m_socket->Read(reinterpret_cast<char *>(&format), 1);
+        m_socket->Read(reinterpret_cast<char *>(&m_ipc_format), 1);
 
         return VerifyLastReadCount(1);
     }
@@ -485,12 +485,12 @@ protected: // primitives for read/write to socket
         return VerifyLastWriteCount(nbytes);
     }
 
-    bool WriteSizeAndData(const void* data, wxUint32 nbytes)
+    bool WriteSizeAndData()
     {
-        if (!Write32(nbytes))
+        if (!Write32(m_size))
             return false;
 
-        return WriteData(data,nbytes);
+        return WriteData(m_data,m_size);
     }
 
     bool WriteIPCCode()
@@ -499,9 +499,9 @@ protected: // primitives for read/write to socket
         return Write32(code_with_header);
     }
 
-    bool WriteIPCFormat(wxIPCFormat format)
+    bool WriteIPCFormat()
     {
-        m_socket->Write(reinterpret_cast<char *>(&format), 1);
+        m_socket->Write(reinterpret_cast<char *>(&m_ipc_format), 1);
 
         return VerifyLastWriteCount(1);
     }
@@ -539,24 +539,23 @@ protected: // primitives for read/write to socket
 
 
 
-// Reads a 32-bit size from the socket, allocates a buffer of that size,
-// then read nbytes worth of data from the socket. Returned buffer should
-// be freed after use with delete[], as a char*
-bool wxIPCMessageBase::ReadSizeAndData(void** dataptr, wxUint32& nbytes)
+// Reads a 32-bit size from the socket, allocates a buffer of that size, then
+// read nbytes worth of data from the socket into m_data. Returned buffer
+// should be freed after use with delete[], as a char*
+bool wxIPCMessageBase::ReadSizeAndData()
 {
-    if (!Read32(nbytes))
+    if (!Read32(m_size))
         return false;
     
-    char *buf = new char[nbytes];
-    m_socket->Read(buf, nbytes);
+    m_data = new char[m_size];
+    m_socket->Read(m_data, m_size);
 
-    if ( !VerifyLastReadCount(nbytes)) 
+    if ( !VerifyLastReadCount(m_size)) 
     {
-        delete[] buf;
+        delete[] static_cast<const char *>(m_data);
+        m_data = nullptr;
         return false;
     }
-
-    *dataptr = buf;
 
     return true;
 }
@@ -637,12 +636,12 @@ public:
 protected:
     bool DataToSocket() override
     {
-        return WriteIPCFormat(m_format) && WriteSizeAndData(m_data, m_size);
+        return WriteIPCFormat() && WriteSizeAndData();
     }
 
     bool DataFromSocket() override
     {
-        return ReadIPCFormat(m_format) && ReadSizeAndData(&m_data, m_size);
+        return ReadIPCFormat() && ReadSizeAndData();
     }
 };
 
