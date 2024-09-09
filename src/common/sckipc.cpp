@@ -594,6 +594,63 @@ bool wxIPCMessageBase::WriteString(const wxString& str)
 // wxIPCMessages
 // ==========================================================================
 
+class wxIPCMessageExecute : public wxIPCMessageBase
+{
+public:
+    wxIPCMessageExecute(wxSocketBase* socket)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_EXECUTE);
+        SetIPCFormat(wxIPC_INVALID);
+        SetSize(0);
+        SetData(nullptr);
+    }
+
+    wxIPCMessageExecute(wxSocketBase* socket,
+                        void *data,
+                        size_t size,
+                        wxIPCFormat format)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_EXECUTE);
+        SetData(data);
+        SetSize((wxUint32) size);
+        SetIPCFormat(format);
+    }
+
+    ~wxIPCMessageExecute()
+    {
+        if (m_data)
+            delete[] static_cast<const char *>(m_data);
+    }
+
+    void* GetData() const { return m_data; }
+    void SetData(void *data) { m_data = data; }
+
+    size_t GetSize() const { return m_size; }
+    void SetSize(size_t size) { m_size = size; }
+
+    wxIPCFormat GetIPCFormat() const { return m_format; }
+    void SetIPCFormat(wxIPCFormat format) { m_format = format; }
+
+protected:
+    bool DataToSocket() override
+    {
+        return WriteIPCFormat(m_format) && WriteSizeAndData(m_data, m_size);
+    }
+
+    bool DataFromSocket() override
+    {
+        return ReadIPCFormat(m_format) && ReadSizeAndData(&m_data, m_size);
+    }
+
+protected:
+    void *m_data;
+    wxUint32 m_size;
+    wxIPCFormat m_format;
+};
+
+
 class wxIPCMessageConnect : public wxIPCMessageBase
 {
 public:
