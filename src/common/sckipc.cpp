@@ -431,6 +431,13 @@ protected: // primitives for read/write to socket
         return true;
     }
 
+    bool ReadIPCFormat(wxIPCFormat format)
+    {
+        m_socket->Read(reinterpret_cast<char *>(&format), 1);
+
+        return VerifyLastReadCount(1);
+    }
+
     bool ReadString(wxString& str);
     bool VerifyLastReadCount(wxUint32 nbytes)
     {
@@ -454,7 +461,7 @@ protected: // primitives for read/write to socket
         m_socket->Write(reinterpret_cast<char *>(&word), 4);
 
         return VerifyLastWriteCount(4);
-    }        
+    }
 
     bool WriteData(const void* data, wxUint32 nbytes)
     {
@@ -475,6 +482,13 @@ protected: // primitives for read/write to socket
     {
         wxUint32 code_with_header = IPCCodeHeader & GetIPCCode();
         return Write32(code_with_header);
+    }
+
+    bool WriteIPCFormat(wxIPCFormat format)
+    {
+        m_socket->Write(reinterpret_cast<char *>(&format), 1);
+
+        return VerifyLastWriteCount(1);
     }
 
     bool WriteString(const wxString& str);
@@ -508,7 +522,7 @@ protected: // primitives for read/write to socket
 
 // Reads a 32-bit size from the socket, allocates a buffer of that size,
 // then read nbytes worth of data from the socket. Returned buffer should
-// be freed after use with delete[]
+// be freed after use with delete[], as a char*
 bool wxIPCMessageBase::ReadSizeAndData(void** dataptr, wxUint32& nbytes)
 {
     if (!Read32(nbytes))
