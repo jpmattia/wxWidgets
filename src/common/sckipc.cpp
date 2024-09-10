@@ -860,6 +860,35 @@ protected:
     }
 };
 
+// Member var item to be used for failure reason (for debug)
+class wxIPCMessageFail : public wxIPCMessageBase
+{
+public:
+    wxIPCMessageFail(wxSocketBase* socket)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_FAIL);
+    }
+
+    wxIPCMessageFail(wxSocketBase* socket, const wxString& item)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_FAIL);
+        SetItem(item);
+    }
+
+protected:
+    bool DataToSocket() override
+    {
+        return WriteString(m_item);
+    }
+
+    bool DataFromSocket() override
+    {
+        return ReadString(m_item);
+    }
+};
+
 class wxIPCMessageConnect : public wxIPCMessageBase
 {
 public:
