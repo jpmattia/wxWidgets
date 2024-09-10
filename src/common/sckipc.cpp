@@ -461,7 +461,7 @@ protected: // primitives for read/write to socket
     {
         if (m_socket->Error())
         {
-            SetError(m_socket->GetError());
+            SetError(m_socket->LastError());
             return false;
         }
 
@@ -515,7 +515,7 @@ protected: // primitives for read/write to socket
     {
         if (m_socket->Error())
         {
-            SetError(m_socket->GetError());
+            SetError(m_socket->LastError());
             return false;
         }
 
