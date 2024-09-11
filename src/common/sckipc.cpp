@@ -371,9 +371,11 @@ public:
         if (m_data)
             delete[] static_cast<const char *>(m_data);
     }
-    
-    wxIPCMessageBase* ReadMessage();
+
+    static wxIPCMessageBase* ReadMessage(wxSocketBase* socket);
     bool WriteMesssage();
+
+    bool IsOk() const { return m_ipc_code != IPC_NULL; }
 
     // Accessors for the base object
     IPCCode GetIPCCode() const { return m_ipc_code; }
@@ -889,6 +891,28 @@ protected:
     }
 };
 
+// Message returned when socket fails to read an wxIPCMessage
+class wxIPCMessageNull : public wxIPCMessageBase
+{
+public:
+    wxIPCMessageNull(wxSocketBase* socket)
+       : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_NULL);
+    }
+
+protected:
+    bool DataToSocket() override
+    {
+        return false;
+    }
+
+    bool DataFromSocket() override
+    {
+        return false;
+    }
+};
+
 class wxIPCMessageConnect : public wxIPCMessageBase
 {
 public:
@@ -943,43 +967,79 @@ protected:
     }
 };
 
-// Reads a single message from the socket. Returns nullptr when no message was
-// read.  The returned message must be freed by the caller.
-wxIPCMessageBase* wxIPCMessageBase::ReadMessage()
+// Reads a single message from the socket. Returns wxIPCMessageNull when no
+// message was read.  The returned message must be freed by the caller.
+wxIPCMessageBase* wxIPCMessageBase::ReadMessage(wxSocketBase* socket)
 {
     // ensure that we read from the socket without any read call from another
     // thread
     wxCRIT_SECT_LOCKER(lock, gs_critical_read);
 
-    if ( !ReadIPCCode() )
-        return nullptr;
+    wxIPCMessageNull* null_msg = new wxIPCMessageNull(socket);
+    if ( !null_msg->ReadIPCCode() )
+        return null_msg;
 
-    wxIPCMessageBase* msg = nullptr;
+    wxIPCMessageBase *msg = nullptr; // return msg for success
 
-    switch ( GetIPCCode() )
+    switch ( null_msg->GetIPCCode() )
     {
-        case IPC_CONNECT:
-            msg = new wxIPCMessageConnect(GetSocket());
-            break;
-        
-        case IPC_DISCONNECT:
-            msg = new wxIPCMessageDisconnect(GetSocket());
-            break;
-        
-        default:
-            // faulty message indicates data misalignment
-            SetError(wxSOCKET_IOERR);
-            return nullptr;
+    case IPC_EXECUTE:
+        msg = new wxIPCMessageExecute(socket);
+        break;
+
+    case IPC_REQUEST:
+        msg = new wxIPCMessageRequest(socket);
+        break;
+
+    case IPC_POKE:
+        msg = new wxIPCMessagePoke(socket);
+        break;
+
+    case IPC_ADVISE_START:
+        msg = new wxIPCMessageAdviseStart(socket);
+        break;
+
+    case IPC_ADVISE:
+        msg = new wxIPCMessageAdvise(socket);
+        break;
+
+    case IPC_ADVISE_STOP:
+        msg = new wxIPCMessageAdviseStop(socket);
+        break;
+
+    case IPC_REQUEST_REPLY:
+        msg = new wxIPCMessageRequestReply(socket);
+        break;
+
+    case IPC_FAIL:
+        msg = new wxIPCMessageFail(socket);
+        break;
+
+    case IPC_CONNECT:
+        msg = new wxIPCMessageConnect(socket);
+        break;
+
+    case IPC_DISCONNECT:
+        msg = new wxIPCMessageDisconnect(socket);
+        break;
+
+    default:
+        // faulty message indicates data misalignment
+        null_msg->SetError(wxSOCKET_IOERR);
+        return null_msg;
     }
 
     if (msg->DataFromSocket())
     {
+        null_msg->SetError(msg->GetError());
         delete msg;
-        return nullptr;
+        return null_msg;
     }
 
+    delete null_msg;
+
     return msg;
-}
+};
 
 // Writes this message object to the socket.
 bool wxIPCMessageBase::WriteMesssage()
