@@ -376,7 +376,7 @@ public:
     }
 
     static wxIPCMessageBase* ReadMessage(wxSocketBase* socket);
-    bool WriteMesssage();
+    bool WriteMessage();
 
     bool IsOk() const { return m_ipc_code != IPC_NULL; }
 
@@ -1045,7 +1045,7 @@ wxIPCMessageBase* wxIPCMessageBase::ReadMessage(wxSocketBase* socket)
 };
 
 // Writes this message object to the socket.
-bool wxIPCMessageBase::WriteMesssage()
+bool wxIPCMessageBase::WriteMessage()
 {
     // ensure that we write to the socket without any write call from another
     // thread
