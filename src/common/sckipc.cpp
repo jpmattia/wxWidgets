@@ -361,7 +361,6 @@ private:
 
 // This class manages the socket reading and writing of data from the
 // socket.
-// 
 class wxIPCMessageBase
 {
 public:
@@ -540,7 +539,7 @@ protected: // primitives for read/write to socket
     wxIPCFormat m_ipc_format;
     wxString m_item;
 
-    wxDECLARE_NO_COPY_CLASS(wxIPCMessageBase);    
+    wxDECLARE_NO_COPY_CLASS(wxIPCMessageBase);
 };
 
 
@@ -552,11 +551,11 @@ bool wxIPCMessageBase::ReadSizeAndData()
 {
     if (!Read32(m_size))
         return false;
-    
+
     m_data = new char[m_size];
     m_socket->Read(m_data, m_size);
 
-    if ( !VerifyLastReadCount(m_size)) 
+    if ( !VerifyLastReadCount(m_size))
     {
         delete[] static_cast<const char *>(m_data);
         m_data = nullptr;
@@ -571,7 +570,7 @@ bool wxIPCMessageBase::ReadString(wxString& str)
     wxUint32 len = 0;
     if ( !Read32(len) )
         return false;
-         
+
     if ( len > 0 )
     {
 
@@ -590,7 +589,7 @@ bool wxIPCMessageBase::ReadString(wxString& str)
 
 #if wxUSE_UNICODE
         str = wxConvUTF8.cMB2WC(buf.data(), len, NULL);
-#endif        
+#endif
     }
 
     return true;
@@ -1049,7 +1048,8 @@ bool wxIPCMessageBase::WriteMesssage()
     wxCRIT_SECT_LOCKER(lock, gs_critical_write);
 
     return WriteIPCCode() && DataToSocket();
-}
+};
+
 
 // Utility to ensure deletion of wxIPCMessageBase after use
 class wxIPCMessageBaseLocker
