@@ -1585,6 +1585,7 @@ void wxTCPEventHandler::Client_OnRequest(wxSocketEvent &event)
         IPCOutput(streams).Write8(IPC_FAIL);
 }
 
+// This method is called for incoming connections to wxServer only.
 void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
 {
     wxSocketServer *server = (wxSocketServer *) event.GetSocket();
@@ -1609,28 +1610,28 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
         return;
     }
 
-    wxIPCSocketStreams *streams = new wxIPCSocketStreams(*sock);
+    wxIPCMessageBase* msg = wxIPCMessageBase::ReadMessage(sock);
+    wxIPCMessageBaseLocker lock(msg);
 
+    if (msg->GetIPCCode() == IPC_CONNECT)
     {
-        IPCOutput out(streams);
+        wxString topic =
+            reinterpret_cast<wxIPCMessageConnect*>(msg)->GetTopic();
 
-        const int msg = streams->Read8();
-        if ( msg == IPC_CONNECT )
+        wxTCPConnection *new_connection =
+            (wxTCPConnection *) ipcserv->OnAcceptConnection(topic);
+
+        if (new_connection)
         {
-            const wxString topic = streams->ReadString();
-
-            wxTCPConnection *new_connection =
-                (wxTCPConnection *)ipcserv->OnAcceptConnection (topic);
-
-            if (new_connection)
+            if (wxDynamicCast(new_connection, wxTCPConnection))
             {
-                if (wxDynamicCast(new_connection, wxTCPConnection))
-                {
-                    // Acknowledge success
-                    out.Write8(IPC_CONNECT);
+                // Acknowledge success
+                wxIPCMessageConnect msg_reply(sock, topic);
 
+                if (msg_reply.WriteMessage())
+                {
                     new_connection->m_sock = sock;
-                    new_connection->m_streams = streams;
+                    // new_connection->m_streams = streams;
                     new_connection->m_topic = topic;
                     sock->SetEventHandler(wxTCPEventHandlerModule::GetHandler(),
                                           _CLIENT_ONREQUEST_ID);
@@ -1639,20 +1640,17 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
                     sock->Notify(true);
                     return;
                 }
-                else
-                {
-                    delete new_connection;
-                    // and fall through to delete everything else
-                }
             }
+
+            delete new_connection;
+            // and fall through to delete everything else
         }
+    }
 
-        // Something went wrong, send failure message and delete everything
-        out.Write8(IPC_FAIL);
-    } // IPCOutput object is destroyed here, before destroying stream
-
-    delete streams;
+    SendFailMessage(sock,
+                    "IPC CONNECT failed to create valid connection");
     sock->Destroy();
+}
 
 void wxTCPEventHandler::SendFailMessage(wxSocketBase* sock,
                                         const wxString& reason) const
