@@ -136,6 +136,10 @@ public:
 private:
     void HandleDisconnect(wxTCPConnection *connection);
 
+    // utility
+    void SendFailMessage(wxSocketBase* sock,
+                         const wxString& reason) const;
+
     wxDECLARE_EVENT_TABLE();
     wxDECLARE_NO_COPY_CLASS(wxTCPEventHandler);
 };
@@ -1649,6 +1653,13 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
 
     delete streams;
     sock->Destroy();
+
+void wxTCPEventHandler::SendFailMessage(wxSocketBase* sock,
+                                        const wxString& reason) const
+{
+    wxIPCMessageFail msg(sock, reason);
+    if (!msg.WriteMessage())
+        wxLogDebug(reason);
 }
 
 #endif // wxUSE_SOCKETS && wxUSE_IPC && wxUSE_STREAMS
