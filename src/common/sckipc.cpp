@@ -1105,7 +1105,6 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
         return nullptr;
 
     wxSocketClient * const client = new wxSocketClient(wxSOCKET_WAITALL);
-    wxIPCSocketStreams * const streams = new wxIPCSocketStreams(*client);
 
     bool ok = client->Connect(*addr);
     delete addr;
@@ -1113,12 +1112,18 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
     if ( ok )
     {
         // Send topic name, and enquire whether this has succeeded
-        IPCOutput(streams).Write(IPC_CONNECT, topic);
+        wxIPCMessageConnect msg(client, topic);
+        if (!msg.WriteMessage())
+        {
+            client->Destroy();
+            return nullptr;
+        }
 
-        unsigned char msg = streams->Read8();
+        wxIPCMessageBase* msg_reply = wxIPCMessageBase::ReadMessage(client);
+        wxIPCMessageBaseLocker lock(msg_reply);
 
         // OK! Confirmation.
-        if (msg == IPC_CONNECT)
+        if (msg_reply->GetIPCCode() == IPC_CONNECT)
         {
             wxTCPConnection *
                 connection = (wxTCPConnection *)OnMakeConnection ();
@@ -1129,7 +1134,6 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
                 {
                     connection->m_topic = topic;
                     connection->m_sock  = client;
-                    connection->m_streams = streams;
                     client->SetEventHandler(wxTCPEventHandlerModule::GetHandler(),
                                             _CLIENT_ONREQUEST_ID);
                     client->SetClientData(connection);
@@ -1144,10 +1148,15 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
                 }
             }
         }
+        else if (msg_reply->GetIPCCode() == IPC_FAIL)
+        {
+            wxString fail_reason =
+                reinterpret_cast<wxIPCMessageFail*>(msg_reply)->GetItem();
+            wxLogDebug(fail_reason);
+        }
     }
 
-    // Something went wrong, delete everything
-    delete streams;
+    // Something went wrong
     client->Destroy();
 
     return nullptr;
