@@ -368,11 +368,21 @@ private:
 class wxIPCMessageBase
 {
 public:
-    wxIPCMessageBase(wxSocketBase* socket) { Init(socket); }
+    wxIPCMessageBase(wxSocketBase* socket)
+        : m_write_data(nullptr)
+    {
+        Init(socket);
+    }
+
+    wxIPCMessageBase(wxSocketBase* socket, const void* data)
+        : m_write_data(data)
+    {
+        Init(socket);
+    }
     virtual ~wxIPCMessageBase()
     {
-        if (m_data)
-            delete[] static_cast<const char *>(m_data);
+        if (m_read_data)
+            delete[] static_cast<const char *>(m_read_data);
     }
 
     static wxIPCMessageBase* ReadMessage(wxSocketBase* socket);
@@ -395,8 +405,8 @@ public:
     wxIPCFormat GetIPCFormat() const { return m_ipc_format; }
     void SetIPCFormat(wxIPCFormat ipc_format) { m_ipc_format = ipc_format; }
 
-    void* GetData() const { return m_data; }
-    void SetData(void *data) { m_data = data; }
+    void* GetReadData() const { return m_read_data; }
+    void SetReadData(void *data) { m_read_data = data; }
 
     size_t GetSize() const { return m_size; }
     void SetSize(size_t size) { m_size = size; }
@@ -413,7 +423,6 @@ protected:
 
         SetIPCFormat(wxIPC_INVALID);
         SetSize(0);
-        SetData(nullptr);
     }
 
     virtual bool DataFromSocket() = 0;
@@ -498,7 +507,7 @@ protected: // primitives for read/write to socket
         if (!Write32(m_size))
             return false;
 
-        return WriteData(m_data,m_size);
+        return WriteData(m_write_data, m_size);
     }
 
     bool WriteIPCCode()
@@ -538,10 +547,15 @@ protected: // primitives for read/write to socket
     wxSocketError m_error;
 
     // Members used in most of the derived messages
-    void *m_data;
     wxUint32 m_size;
     wxIPCFormat m_ipc_format;
     wxString m_item;
+
+    // immutable pointer to data that is given to us externally
+    const void* m_write_data;
+
+    // pointer to data that this object allots and manages
+    void* m_read_data;
 
     wxDECLARE_NO_COPY_CLASS(wxIPCMessageBase);
 };
@@ -549,20 +563,19 @@ protected: // primitives for read/write to socket
 
 
 // Reads a 32-bit size from the socket, allocates a buffer of that size, then
-// read nbytes worth of data from the socket into m_data. Returned buffer
-// should be freed after use with delete[], as a char*
+// read nbytes worth of data from the socket into m_read_data.
 bool wxIPCMessageBase::ReadSizeAndData()
 {
     if (!Read32(m_size))
         return false;
 
-    m_data = new char[m_size];
-    m_socket->Read(m_data, m_size);
+    m_read_data = new char[m_size];
+    m_socket->Read(m_read_data, m_size);
 
     if ( !VerifyLastReadCount(m_size))
     {
-        delete[] static_cast<const char *>(m_data);
-        m_data = nullptr;
+        delete[] static_cast<const char *>(m_read_data);
+        m_read_data = nullptr;
         return false;
     }
 
@@ -625,7 +638,7 @@ class wxIPCMessageExecute : public wxIPCMessageBase
 {
 public:
     wxIPCMessageExecute(wxSocketBase* socket)
-       : wxIPCMessageBase(socket)
+        : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_EXECUTE);
     }
@@ -634,10 +647,9 @@ public:
                         void *data,
                         size_t size,
                         wxIPCFormat format)
-       : wxIPCMessageBase(socket)
+        : wxIPCMessageBase(socket, data)
     {
         SetIPCCode(IPC_EXECUTE);
-        SetData(data);
         SetSize((wxUint32) size);
         SetIPCFormat(format);
     }
@@ -668,7 +680,7 @@ public:
     wxIPCMessageRequest(wxSocketBase* socket,
                         const wxString& item,
                         wxIPCFormat format)
-       : wxIPCMessageBase(socket)
+        : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_REQUEST);
         SetItem(item);
@@ -691,7 +703,7 @@ class wxIPCMessageRequestReply : public wxIPCMessageBase
 {
 public:
     wxIPCMessageRequestReply(wxSocketBase* socket)
-       : wxIPCMessageBase(socket)
+        : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_REQUEST_REPLY);
     }
@@ -701,14 +713,13 @@ public:
                              size_t user_size,
                              const wxString& item,
                              wxIPCFormat format)
-       : wxIPCMessageBase(socket)
+        : wxIPCMessageBase(socket, user_data)
     {
         SetIPCCode(IPC_REQUEST_REPLY);
         SetItem(item);
         SetIPCFormat(format);
-        SetData(user_data);
 
-        wxUint32 len;
+        wxUint32 len = user_size;
         if ( user_size == wxNO_LEN )
         {
             switch ( format )
@@ -743,7 +754,7 @@ class wxIPCMessagePoke : public wxIPCMessageBase
 {
 public:
     wxIPCMessagePoke(wxSocketBase* socket)
-       : wxIPCMessageBase(socket)
+        : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_POKE);
     }
@@ -753,12 +764,11 @@ public:
                      void* data,
                      size_t size,
                      wxIPCFormat format)
-       : wxIPCMessageBase(socket)
+        : wxIPCMessageBase(socket, data)
     {
         SetIPCCode(IPC_POKE);
         SetItem(item);
         SetIPCFormat(format);
-        SetData(data);
         SetSize(size);
     }
 
@@ -834,7 +844,7 @@ class wxIPCMessageAdvise : public wxIPCMessageBase
 {
 public:
     wxIPCMessageAdvise(wxSocketBase* socket)
-       : wxIPCMessageBase(socket)
+        : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_ADVISE);
     }
@@ -844,12 +854,12 @@ public:
                        void* data,
                        size_t size,
                        wxIPCFormat format)
-       : wxIPCMessageBase(socket)
+        : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_ADVISE);
         SetItem(item);
         SetIPCFormat(format);
-        SetData(data);
+        SetReadData(data);
         SetSize(size);
     }
 
