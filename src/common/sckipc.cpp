@@ -1677,35 +1677,41 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
 
     if (msg->GetIPCCode() == IPC_CONNECT)
     {
-        wxString topic =
-            reinterpret_cast<wxIPCMessageConnect*>(msg)->GetTopic();
+        wxIPCMessageConnect* msg_conn = (wxIPCMessageConnect*) msg;
 
-        wxTCPConnection *new_connection =
-            (wxTCPConnection *) ipcserv->OnAcceptConnection(topic);
-
-        if (new_connection)
+        if (msg_conn)
         {
-            if (wxDynamicCast(new_connection, wxTCPConnection))
+            if (wxDynamicCast(msg, wxIPCMessageConnect))
             {
-                // Acknowledge success
-                wxIPCMessageConnect msg_reply(sock, topic);
+                wxString topic = msg_conn->GetTopic();
 
-                if (msg_reply.WriteMessage())
+                wxTCPConnection *new_connection =
+                    (wxTCPConnection *) ipcserv->OnAcceptConnection(topic);
+
+                if (new_connection)
                 {
-                    new_connection->m_sock = sock;
-                    // new_connection->m_streams = streams;
-                    new_connection->m_topic = topic;
-                    sock->SetEventHandler(wxTCPEventHandlerModule::GetHandler(),
-                                          _CLIENT_ONREQUEST_ID);
-                    sock->SetClientData(new_connection);
-                    sock->SetNotify(wxSOCKET_INPUT_FLAG | wxSOCKET_LOST_FLAG);
-                    sock->Notify(true);
-                    return;
+                    if (wxDynamicCast(new_connection, wxTCPConnection))
+                    {
+                        // Acknowledge success
+                        wxIPCMessageConnect msg_reply(sock, topic);
+
+                        if (msg_reply.WriteMessage())
+                        {
+                            new_connection->m_sock = sock;
+                            // new_connection->m_streams = streams;
+                            new_connection->m_topic = topic;
+                            sock->SetEventHandler(wxTCPEventHandlerModule::GetHandler(),
+                                                  _CLIENT_ONREQUEST_ID);
+                            sock->SetClientData(new_connection);
+                            sock->SetNotify(wxSOCKET_INPUT_FLAG | wxSOCKET_LOST_FLAG);
+                            sock->Notify(true);
+                            return;
+                        }
+                    }
+
+                    delete new_connection;
                 }
             }
-
-            delete new_connection;
-            // and fall through to delete everything else
         }
     }
 
@@ -1719,7 +1725,7 @@ void wxTCPEventHandler::SendFailMessage(wxSocketBase* sock,
 {
     wxIPCMessageFail msg(sock, reason);
     if (!msg.WriteMessage())
-        wxLogDebug(reason);
+        wxLogDebug("Failed to send IPC_FAIL message: " + reason);
 }
 
 #endif // wxUSE_SOCKETS && wxUSE_IPC && wxUSE_STREAMS
