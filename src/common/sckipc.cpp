@@ -1362,11 +1362,13 @@ bool wxTCPConnection::Disconnect()
     if ( !GetConnected() )
         return true;
 
-    // Send the disconnect message to the peer.
-    IPCOutput(m_streams).Write8(IPC_DISCONNECT);
-
     if ( m_sock )
     {
+        // Send the disconnect message to the peer.
+        wxIPCMessageDisconnect msg(m_sock);
+        if ( !msg.WriteMessage() )
+            wxLogDebug("Failed to send IPC_DISCONNECT message");
+
         m_sock->Notify(false);
         m_sock->Close();
     }
