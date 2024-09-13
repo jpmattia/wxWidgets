@@ -387,7 +387,6 @@ public:
 
     static wxIPCMessageBase* ReadMessage(wxSocketBase* socket);
     bool WriteMessage();
-
     bool IsOk() const { return m_ipc_code != IPC_NULL; }
 
     // Accessors for the base object
@@ -400,8 +399,7 @@ public:
     wxSocketError GetError() const { return m_error; }
     void SetError(wxSocketError error) { m_error = error; }
 
-    // These accessors are here to avoid repetition in the derived objects,
-    // most of which need these members.
+    // These accessors are here to avoid repetition in the derived objects.
     wxIPCFormat GetIPCFormat() const { return m_ipc_format; }
     void SetIPCFormat(wxIPCFormat ipc_format) { m_ipc_format = ipc_format; }
 
@@ -431,16 +429,32 @@ protected:
 
 protected: // primitives for read/write to socket
 
+    bool VerifyValidSocket()
+    {
+        if (m_socket) return true;
+
+        SetError(wxSOCKET_INVSOCK);
+        return false;
+    }
+
     bool Read32(wxUint32& word)
     {
         word = 0;
+
+        if ( !VerifyValidSocket() )
+            return false;
+
         m_socket->Read(reinterpret_cast<char *>(&word), 4);
+
         return VerifyLastReadCount(4);
     }
 
     // Reads nbytes of data from the socket into a pre-allocated buffer
     bool ReadData(void* buffer, wxUint32& nbytes)
     {
+        if ( !VerifyValidSocket() )
+            return false;
+
         m_socket->Read(buffer, nbytes);
 
         return VerifyLastReadCount(nbytes);
@@ -466,6 +480,9 @@ protected: // primitives for read/write to socket
 
     bool ReadIPCFormat()
     {
+        if ( !VerifyValidSocket() )
+            return false;
+
         m_socket->Read(reinterpret_cast<char *>(&m_ipc_format), 1);
 
         return VerifyLastReadCount(1);
@@ -474,6 +491,9 @@ protected: // primitives for read/write to socket
     bool ReadString(wxString& str);
     bool VerifyLastReadCount(wxUint32 nbytes)
     {
+        if ( !VerifyValidSocket() )
+            return false;
+
         if (m_socket->Error())
         {
             SetError(m_socket->LastError());
@@ -491,6 +511,9 @@ protected: // primitives for read/write to socket
 
     bool Write32(wxUint32 word)
     {
+        if ( !VerifyValidSocket() )
+            return false;
+
         m_socket->Write(reinterpret_cast<char *>(&word), 4);
 
         return VerifyLastWriteCount(4);
@@ -498,6 +521,9 @@ protected: // primitives for read/write to socket
 
     bool WriteData(const void* data, wxUint32 nbytes)
     {
+        if ( !VerifyValidSocket() )
+            return false;
+
         m_socket->Write(data, nbytes);
 
         return VerifyLastWriteCount(nbytes);
@@ -519,6 +545,9 @@ protected: // primitives for read/write to socket
 
     bool WriteIPCFormat()
     {
+        if ( !VerifyValidSocket() )
+            return false;
+
         m_socket->Write(reinterpret_cast<char *>(&m_ipc_format), 1);
 
         return VerifyLastWriteCount(1);
@@ -528,6 +557,9 @@ protected: // primitives for read/write to socket
 
     bool VerifyLastWriteCount(wxUint32 nbytes)
     {
+        if ( !VerifyValidSocket() )
+            return false;
+
         if (m_socket->Error())
         {
             SetError(m_socket->LastError());
