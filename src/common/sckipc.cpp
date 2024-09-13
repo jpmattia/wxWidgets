@@ -365,10 +365,10 @@ private:
 
 // This class manages the socket reading and writing of data from the
 // socket.
-class wxIPCMessageBase
+class wxIPCMessageBase : public wxObject
 {
 public:
-    wxIPCMessageBase(wxSocketBase* socket)
+    wxIPCMessageBase(wxSocketBase* socket = nullptr)
         : m_write_data(nullptr)
     {
         Init(socket);
@@ -422,6 +422,7 @@ protected:
         SetError(wxSOCKET_NOERROR);
 
         SetIPCFormat(wxIPC_INVALID);
+        SetReadData(nullptr);
         SetSize(0);
     }
 
@@ -432,8 +433,8 @@ protected: // primitives for read/write to socket
 
     bool Read32(wxUint32& word)
     {
+        word = 0;
         m_socket->Read(reinterpret_cast<char *>(&word), 4);
-
         return VerifyLastReadCount(4);
     }
 
@@ -512,7 +513,7 @@ protected: // primitives for read/write to socket
 
     bool WriteIPCCode()
     {
-        wxUint32 code_with_header = IPCCodeHeader & GetIPCCode();
+        wxUint32 code_with_header = IPCCodeHeader | GetIPCCode();
         return Write32(code_with_header);
     }
 
@@ -558,6 +559,7 @@ protected: // primitives for read/write to socket
     void* m_read_data;
 
     wxDECLARE_NO_COPY_CLASS(wxIPCMessageBase);
+    wxDECLARE_CLASS(wxIPCMessageBase);
 };
 
 
@@ -637,14 +639,14 @@ bool wxIPCMessageBase::WriteString(const wxString& str)
 class wxIPCMessageExecute : public wxIPCMessageBase
 {
 public:
-    wxIPCMessageExecute(wxSocketBase* socket)
+    wxIPCMessageExecute(wxSocketBase* socket = nullptr)
         : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_EXECUTE);
     }
 
     wxIPCMessageExecute(wxSocketBase* socket,
-                        void *data,
+                        const void* data,
                         size_t size,
                         wxIPCFormat format)
         : wxIPCMessageBase(socket, data)
@@ -664,13 +666,15 @@ protected:
     {
         return ReadIPCFormat() && ReadSizeAndData();
     }
+
+    wxDECLARE_DYNAMIC_CLASS(wxIPCMessageExecute);
 };
 
 
 class wxIPCMessageRequest : public wxIPCMessageBase
 {
 public:
-    wxIPCMessageRequest(wxSocketBase* socket)
+    wxIPCMessageRequest(wxSocketBase* socket = nullptr)
        : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_REQUEST);
@@ -697,19 +701,21 @@ protected:
     {
         return ReadIPCFormat() && ReadString(m_item);
     }
+
+    wxDECLARE_DYNAMIC_CLASS(wxIPCMessageRequest);
 };
 
 class wxIPCMessageRequestReply : public wxIPCMessageBase
 {
 public:
-    wxIPCMessageRequestReply(wxSocketBase* socket)
+    wxIPCMessageRequestReply(wxSocketBase* socket = nullptr)
         : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_REQUEST_REPLY);
     }
 
     wxIPCMessageRequestReply(wxSocketBase* socket,
-                             void* user_data,
+                             const void* user_data,
                              size_t user_size,
                              const wxString& item,
                              wxIPCFormat format)
@@ -748,12 +754,13 @@ protected:
     {
         return ReadIPCFormat() && ReadString(m_item) && ReadSizeAndData();
     }
+    wxDECLARE_DYNAMIC_CLASS(wxIPCMessageRequestReply);
 };
 
 class wxIPCMessagePoke : public wxIPCMessageBase
 {
 public:
-    wxIPCMessagePoke(wxSocketBase* socket)
+    wxIPCMessagePoke(wxSocketBase* socket = nullptr)
         : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_POKE);
@@ -761,7 +768,7 @@ public:
 
     wxIPCMessagePoke(wxSocketBase* socket,
                      const wxString& item,
-                     void* data,
+                     const void* data,
                      size_t size,
                      wxIPCFormat format)
         : wxIPCMessageBase(socket, data)
@@ -782,12 +789,14 @@ protected:
     {
         return ReadIPCFormat() && ReadString(m_item) && ReadSizeAndData();
     }
+
+    wxDECLARE_DYNAMIC_CLASS(wxIPCMessagePoke);
 };
 
 class wxIPCMessageAdviseStart : public wxIPCMessageBase
 {
 public:
-    wxIPCMessageAdviseStart(wxSocketBase* socket)
+    wxIPCMessageAdviseStart(wxSocketBase* socket = nullptr)
        : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_ADVISE_START);
@@ -810,12 +819,14 @@ protected:
     {
         return ReadString(m_item);
     }
+
+    wxDECLARE_DYNAMIC_CLASS(wxIPCMessageAdviseStart);
 };
 
 class wxIPCMessageAdviseStop : public wxIPCMessageBase
 {
 public:
-    wxIPCMessageAdviseStop(wxSocketBase* socket)
+    wxIPCMessageAdviseStop(wxSocketBase* socket = nullptr)
        : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_ADVISE_STOP);
@@ -838,12 +849,14 @@ protected:
     {
         return ReadString(m_item);
     }
+
+    wxDECLARE_DYNAMIC_CLASS(wxIPCMessageAdviseStop);
 };
 
 class wxIPCMessageAdvise : public wxIPCMessageBase
 {
 public:
-    wxIPCMessageAdvise(wxSocketBase* socket)
+    wxIPCMessageAdvise(wxSocketBase* socket = nullptr)
         : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_ADVISE);
@@ -851,15 +864,14 @@ public:
 
     wxIPCMessageAdvise(wxSocketBase* socket,
                        const wxString& item,
-                       void* data,
+                       const void* data,
                        size_t size,
                        wxIPCFormat format)
-        : wxIPCMessageBase(socket)
+        : wxIPCMessageBase(socket, data)
     {
         SetIPCCode(IPC_ADVISE);
         SetItem(item);
         SetIPCFormat(format);
-        SetReadData(data);
         SetSize(size);
     }
 
@@ -873,13 +885,15 @@ protected:
     {
         return ReadIPCFormat() && ReadString(m_item) && ReadSizeAndData();
     }
+
+    wxDECLARE_DYNAMIC_CLASS(wxIPCMessageAdvise);
 };
 
 // Member var item to be used for failure reason (for debug)
 class wxIPCMessageFail : public wxIPCMessageBase
 {
 public:
-    wxIPCMessageFail(wxSocketBase* socket)
+    wxIPCMessageFail(wxSocketBase* socket = nullptr)
        : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_FAIL);
@@ -902,13 +916,15 @@ protected:
     {
         return ReadString(m_item);
     }
+
+    wxDECLARE_DYNAMIC_CLASS(wxIPCMessageFail);
 };
 
 // Message returned when socket fails to read an wxIPCMessage
 class wxIPCMessageNull : public wxIPCMessageBase
 {
 public:
-    wxIPCMessageNull(wxSocketBase* socket)
+    wxIPCMessageNull(wxSocketBase* socket = nullptr)
        : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_NULL);
@@ -924,22 +940,24 @@ protected:
     {
         return false;
     }
+
+    wxDECLARE_DYNAMIC_CLASS(wxIPCMessageNull);
 };
 
 class wxIPCMessageConnect : public wxIPCMessageBase
 {
 public:
+    wxIPCMessageConnect(wxSocketBase* socket = nullptr)
+        : wxIPCMessageBase(socket)
+    {
+        SetIPCCode(IPC_CONNECT);
+    }
+
     wxIPCMessageConnect(wxSocketBase* socket, const wxString& topic)
         : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_CONNECT);
         SetTopic(topic);
-    }
-
-    wxIPCMessageConnect(wxSocketBase* socket)
-        : wxIPCMessageBase(socket)
-    {
-        SetSocket(socket);
     }
 
     wxString GetTopic() const { return m_topic; }
@@ -948,21 +966,27 @@ public:
 protected:
     bool DataToSocket() override
     {
+        wxLogMessage("write topic: " + m_topic);
         return WriteString(m_topic);
     }
 
     bool DataFromSocket() override
     {
-        return ReadString(m_topic);
+        bool b = ReadString(m_topic);
+        wxLogMessage("read topic: " + m_topic);
+        return b;
     }
 
     wxString m_topic;
+
+    wxDECLARE_DYNAMIC_CLASS(wxIPCMessageConnect);
 };
+
 
 class wxIPCMessageDisconnect : public wxIPCMessageBase
 {
 public:
-    wxIPCMessageDisconnect(wxSocketBase* socket)
+    wxIPCMessageDisconnect(wxSocketBase* socket = nullptr)
         : wxIPCMessageBase(socket)
     {
         SetIPCCode(IPC_DISCONNECT);
@@ -978,6 +1002,8 @@ protected:
     {
         return true;
     }
+
+    wxDECLARE_DYNAMIC_CLASS(wxIPCMessageDisconnect);
 };
 
 // Reads a single message from the socket. Returns wxIPCMessageNull when no
@@ -1042,7 +1068,7 @@ wxIPCMessageBase* wxIPCMessageBase::ReadMessage(wxSocketBase* socket)
         return null_msg;
     }
 
-    if (msg->DataFromSocket())
+    if (!msg->DataFromSocket())
     {
         null_msg->SetError(msg->GetError());
         delete msg;
@@ -1089,6 +1115,21 @@ public:
 wxIMPLEMENT_DYNAMIC_CLASS(wxTCPServer, wxServerBase);
 wxIMPLEMENT_DYNAMIC_CLASS(wxTCPClient, wxClientBase);
 wxIMPLEMENT_CLASS(wxTCPConnection, wxConnectionBase);
+
+wxIMPLEMENT_CLASS(wxIPCMessageBase,wxObject);
+wxIMPLEMENT_DYNAMIC_CLASS(wxIPCMessageExecute,wxIPCMessageBase);
+wxIMPLEMENT_DYNAMIC_CLASS(wxIPCMessageRequest,wxIPCMessageBase);
+wxIMPLEMENT_DYNAMIC_CLASS(wxIPCMessageRequestReply,wxIPCMessageBase);
+wxIMPLEMENT_DYNAMIC_CLASS(wxIPCMessagePoke,wxIPCMessageBase);
+
+wxIMPLEMENT_DYNAMIC_CLASS(wxIPCMessageAdviseStart,wxIPCMessageBase);
+wxIMPLEMENT_DYNAMIC_CLASS(wxIPCMessageAdviseStop,wxIPCMessageBase);
+wxIMPLEMENT_DYNAMIC_CLASS(wxIPCMessageAdvise,wxIPCMessageBase);
+
+wxIMPLEMENT_DYNAMIC_CLASS(wxIPCMessageConnect,wxIPCMessageBase);
+wxIMPLEMENT_DYNAMIC_CLASS(wxIPCMessageDisconnect,wxIPCMessageBase);
+wxIMPLEMENT_DYNAMIC_CLASS(wxIPCMessageFail,wxIPCMessageBase);
+wxIMPLEMENT_DYNAMIC_CLASS(wxIPCMessageNull,wxIPCMessageBase);
 
 // --------------------------------------------------------------------------
 // wxTCPClient
@@ -1160,9 +1201,11 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
         }
         else if (msg_reply->GetIPCCode() == IPC_FAIL)
         {
-            wxString fail_reason =
-                reinterpret_cast<wxIPCMessageFail*>(msg_reply)->GetItem();
-            wxLogDebug(fail_reason);
+            wxIPCMessageFail* msg_fail =
+                wxDynamicCast(msg_reply, wxIPCMessageFail);
+
+            if (msg_fail)
+                wxLogDebug(msg_fail->GetItem());
         }
     }
 
