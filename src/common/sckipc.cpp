@@ -1383,14 +1383,9 @@ bool wxTCPConnection::DoExecute(const void *data,
     if ( !m_sock->IsConnected() )
         return false;
 
-    // Prepare EXECUTE message
-    IPCOutput out(m_streams);
-    out.Write8(IPC_EXECUTE);
-    out.Write8(format);
+    wxIPCMessageExecute msg(m_sock, data, size, format);
 
-    out.WriteData(data, size);
-
-    return true;
+    return msg.WriteMessage();
 }
 
 const void *wxTCPConnection::Request(const wxString& item,
@@ -1519,20 +1514,25 @@ void wxTCPEventHandler::Client_OnRequest(wxSocketEvent &event)
     wxString item;
 
     bool error = false;
+    wxString errmsg;
 
-    const int msg = streams->Read8();
-    switch ( msg )
+    wxIPCMessageBase* msg = wxIPCMessageBase::ReadMessage(sock);
+    wxIPCMessageBaseLocker lock(msg);
+
+    switch ( msg->GetIPCCode() )
     {
         case IPC_EXECUTE:
             {
-                wxIPCFormat format;
-                size_t size wxDUMMY_INITIALIZE(0);
-                void * const
-                    data = streams->ReadFormatData(connection, &format, &size);
-                if ( data )
-                    connection->OnExecute(topic, data, size, format);
+                wxIPCMessageExecute* msg_execute =
+                    wxDynamicCast(msg, wxIPCMessageExecute);
+
+                if ( msg_execute && msg_execute->GetReadData() )
+                    connection->OnExecute(topic,
+                                          msg_execute->GetReadData(),
+                                          msg_execute->GetSize(),
+                                          msg_execute->GetIPCFormat());
                 else
-                    error = true;
+                    errmsg = "No data read for IPC Execute";
             }
             break;
 
