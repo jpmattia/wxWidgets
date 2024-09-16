@@ -42,6 +42,8 @@
 
 #include "wx/socket.h"
 
+class wxIPCMessageBase;
+
 // --------------------------------------------------------------------------
 // Global variables
 // --------------------------------------------------------------------------
@@ -135,14 +137,6 @@ public:
 
 private:
     void HandleDisconnect(wxTCPConnection *connection);
-
-
-    // Processing of wxIPCMessages
-    bool ProcessMessage(wxTCPConnection *connection,
-                        wxSocketBase* socket,
-                        wxIPCSocketStreams * const streams);
-    void SendFailMessage(wxSocketBase* sock,
-                         const wxString& reason) const;
 
     wxDECLARE_EVENT_TABLE();
     wxDECLARE_NO_COPY_CLASS(wxTCPEventHandler);
@@ -389,10 +383,6 @@ public:
             delete[] static_cast<const char *>(m_read_data);
     }
 
-    static wxIPCMessageBase* ReadMessage(wxSocketBase* socket);
-    bool WriteMessage();
-    static bool PeekMessage(wxSocketBase* socket);
-
     bool IsOk() const { return m_ipc_code != IPC_NULL; }
 
     // Accessors for the base object
@@ -433,11 +423,11 @@ protected:
     virtual bool DataFromSocket() = 0;
     virtual bool DataToSocket() = 0;
 
-protected: // primitives for read/write to socket
+    // primitives for read/write to socket
 
     bool VerifyValidSocket()
     {
-        if (m_socket) return true;
+        if (m_socket && m_socket->IsOk()) return true;
 
         SetError(wxSOCKET_INVSOCK);
         return false;
@@ -595,6 +585,8 @@ protected: // primitives for read/write to socket
 
     // pointer to data that this object allots and manages
     void* m_read_data;
+
+    friend class wxIPCMessageManager;  // JPDELETE
 
     wxDECLARE_NO_COPY_CLASS(wxIPCMessageBase);
     wxDECLARE_CLASS(wxIPCMessageBase);
@@ -1044,60 +1036,343 @@ protected:
     wxDECLARE_DYNAMIC_CLASS(wxIPCMessageDisconnect);
 };
 
+// Utility to ensure deletion of wxIPCMessageBase after use
+class wxIPCMessageBaseLocker
+{
+public:
+    wxIPCMessageBaseLocker(wxIPCMessageBase* msg)
+    {
+        m_msg = msg;
+    }
+
+    ~wxIPCMessageBaseLocker()
+    {
+        if (m_msg) delete m_msg;
+    }
+
+    wxIPCMessageBase* m_msg;
+};
+
+// --------------------------------------------------------------------------
+// wxIPCMessageManager
+// --------------------------------------------------------------------------
+
+class wxIPCMessageManager
+{
+public:
+    // wxIPCMessageManager(wxSocketBase* socket, wxTCPConnection* connection)
+    wxIPCMessageManager(wxSocketBase* socket)
+    {
+        m_socket = socket;
+        m_disconnect = false;
+    }
+
+    ~wxIPCMessageManager() {
+        m_disconnect = true;
+        m_critsect_disconnect.Enter(); // wait for any pending ops with socket
+        m_socket = nullptr;
+    }
+
+    // More than one wxIPCMessage can be sent to the socket before the
+    // socket notifies us of a read event, so loop until there is no
+    // new message.
+    void ProcessIncomingMessages()
+    {
+        while (!m_disconnect &&
+               PeekAtMessageInSocket() &&
+               ReadAndExecuteMessage())
+        {};
+    }
+
+    // Processing of wxIPCMessages
+    bool ReadAndExecuteMessage(wxIPCMessageBase** msgptr = nullptr);
+    bool FindMessage(IPCCode code,
+                     wxIPCMessageBase** msgptr);
+
+    wxIPCMessageBase* ReadMessageFromSocket();
+    bool WriteMessageToSocket(wxIPCMessageBase& msg);
+    bool PeekAtMessageInSocket();
+
+    static void HandleDisconnect(wxTCPConnection *connection);
+    void SendFailMessage(const wxString& reason);
+
+    wxSocketBase* m_socket;
+    wxString m_topic;
+
+    wxCriticalSection m_critsect_disconnect;
+    bool m_disconnect;
+};
+
+// Find a wxIPCMessage with IPCCode code, and return it in msgptr.
+// Returns true when a valid message is found, and caller is responsible for
+// deleting the returned message.
+bool wxIPCMessageManager::FindMessage(IPCCode code,
+                                      wxIPCMessageBase** msgptr)
+{
+    if ( !msgptr )
+        return false;
+
+    while ( PeekAtMessageInSocket() &&
+            ReadAndExecuteMessage(msgptr))
+    {
+        if ( !(*msgptr) )
+            return false;
+
+        if ( code == (*msgptr)->GetIPCCode() )
+        {
+            // The correct message has been found, but there may still be
+            // messages waiting in the socket data buffer. Place an event in
+            // the socket event queue that will read them out later.
+
+            if (m_socket && m_socket->GetEventHandler())
+            {
+                wxSocketEvent event(wxID_ANY);
+                event.m_event = wxSOCKET_INPUT;
+                event.m_clientData = m_socket->GetClientData();
+                event.SetEventObject(m_socket);
+
+                m_socket->GetEventHandler()->AddPendingEvent(event);
+                wxLogDebug("Adding pending message to m_sock->m_handler");
+            }
+
+            return true;
+        }
+
+        // Not the correct msg to be returned. It was processed above and now
+        // we're done with it.
+        delete *msgptr;
+        msgptr = nullptr;
+    };
+
+    return false;
+}
+
+// todo kill streams  jpdelete
+//
+// Process a single wxIPCMessage from the socket. Returns true if processing
+// can continue, or false if processing should stop because a disconnect was
+// received.
+bool wxIPCMessageManager::ReadAndExecuteMessage(wxIPCMessageBase** msgptr /* = nullptr */)
+{
+    // so we can work incrementally and compile. DELETE THIS.
+    wxIPCSocketStreams * const streams = new wxIPCSocketStreams(*m_socket); // JPDELETE
+
+    if (msgptr)
+        *msgptr = nullptr;
+
+    if ( !(m_socket && m_socket->IsOk() ))
+        return false;
+
+    wxTCPConnection * const
+        connection = static_cast<wxTCPConnection *>(m_socket->GetClientData());
+
+    // This socket is being deleted; skip this event
+    if ( !(connection && connection->GetConnected() ))
+        return false;
+
+    wxIPCMessageBase* msg = ReadMessageFromSocket();
+    if ( !msg->IsOk() )
+    {
+        delete msg;
+        return false;
+    }
+
+    wxString item;
+
+    bool error = false; // JPDELETE
+    wxString errmsg;
+
+    switch ( msg->GetIPCCode() )
+    {
+    case IPC_EXECUTE:
+    {
+        wxIPCMessageExecute* msg_execute =
+            wxDynamicCast(msg, wxIPCMessageExecute);
+
+        if ( msg_execute && msg_execute->GetReadData() )
+            connection->OnExecute(m_topic,
+                                  msg_execute->GetReadData(),
+                                  msg_execute->GetSize(),
+                                  msg_execute->GetIPCFormat());
+        else
+            errmsg = "No data read for IPC Execute";
+    }
+    break;
+
+    case IPC_ADVISE:
+    {
+        item = streams->ReadString();
+
+        wxIPCFormat format;
+        size_t size wxDUMMY_INITIALIZE(0);
+        void * const
+            data = streams->ReadFormatData(connection, &format, &size);
+
+        if ( data )
+            connection->OnAdvise(m_topic, item, data, size, format);
+        else
+            error = true;
+    }
+    break;
+
+    case IPC_ADVISE_START:
+    {
+        item = streams->ReadString();
+
+        IPCOutput(streams).Write8(connection->OnStartAdvise(m_topic, item)
+                                  ? IPC_ADVISE_START
+                                  : IPC_FAIL);
+    }
+    break;
+
+    case IPC_ADVISE_STOP:
+    {
+        item = streams->ReadString();
+
+        IPCOutput(streams).Write8(connection->OnStopAdvise(m_topic, item)
+                                  ? IPC_ADVISE_STOP
+                                  : IPC_FAIL);
+    }
+    break;
+
+    case IPC_POKE:
+    {
+        item = streams->ReadString();
+        wxIPCFormat format = (wxIPCFormat)streams->Read8();
+
+        size_t size wxDUMMY_INITIALIZE(0);
+        void * const data = streams->ReadData(connection, &size);
+
+        if ( data )
+            connection->OnPoke(m_topic, item, data, size, format);
+        else
+            error = true;
+    }
+    break;
+
+    case IPC_REQUEST:
+    {
+        item = streams->ReadString();
+
+        wxIPCFormat format = (wxIPCFormat)streams->Read8();
+
+        size_t user_size = wxNO_LEN;
+        const void *user_data = connection->OnRequest(m_topic,
+                                                      item,
+                                                      &user_size,
+                                                      format);
+
+        if ( !user_data )
+        {
+            IPCOutput(streams).Write8(IPC_FAIL);
+            break;
+        }
+
+        IPCOutput out(streams);
+        out.Write8(IPC_REQUEST_REPLY);
+
+        if ( user_size == wxNO_LEN )
+        {
+            switch ( format )
+            {
+            case wxIPC_TEXT:
+            case wxIPC_UTF8TEXT:
+                user_size = strlen((const char *)user_data) + 1;  // includes final NUL
+                break;
+            case wxIPC_UNICODETEXT:
+                user_size = (wcslen((const wchar_t *)user_data) + 1) * sizeof(wchar_t);  // includes final NUL
+                break;
+            default:
+                user_size = 0;
+            }
+        }
+
+        out.WriteData(user_data, user_size);
+    }
+    break;
+
+    case IPC_DISCONNECT:
+        HandleDisconnect(connection);
+        return false;
+        break;
+
+    case IPC_FAIL:
+        wxLogDebug("Unexpected IPC_FAIL received");
+        error = true;
+        break;
+
+    default:
+        wxLogDebug("Unknown message code %d received.", msg);
+        error = true;
+        break;
+    }
+
+    if ( error )
+        IPCOutput(streams).Write8(IPC_FAIL);
+
+    if (msgptr)
+        *msgptr = msg;
+    else
+        delete msg;
+
+    return true;
+}
+
 // Reads a single message from the socket. Returns wxIPCMessageNull when no
 // message was read.  The returned message must be freed by the caller.
-wxIPCMessageBase* wxIPCMessageBase::ReadMessage(wxSocketBase* socket)
+wxIPCMessageBase* wxIPCMessageManager::ReadMessageFromSocket()
 {
     // ensure that we read from the socket without any read call from another
     // thread
     wxCRIT_SECT_LOCKER(lock, gs_critical_read);
 
-    wxIPCMessageNull* null_msg = new wxIPCMessageNull(socket);
+    wxIPCMessageNull* null_msg = new wxIPCMessageNull(m_socket);
     if ( !null_msg->ReadIPCCode() )
         return null_msg;
 
-    wxIPCMessageBase *msg = nullptr; // return msg for success
+    // ptr to returned message when successful
+    wxIPCMessageBase *msg = nullptr;
 
     switch ( null_msg->GetIPCCode() )
     {
     case IPC_EXECUTE:
-        msg = new wxIPCMessageExecute(socket);
+        msg = new wxIPCMessageExecute(m_socket);
         break;
 
     case IPC_REQUEST:
-        msg = new wxIPCMessageRequest(socket);
+        msg = new wxIPCMessageRequest(m_socket);
         break;
 
     case IPC_POKE:
-        msg = new wxIPCMessagePoke(socket);
+        msg = new wxIPCMessagePoke(m_socket);
         break;
 
     case IPC_ADVISE_START:
-        msg = new wxIPCMessageAdviseStart(socket);
+        msg = new wxIPCMessageAdviseStart(m_socket);
         break;
 
     case IPC_ADVISE:
-        msg = new wxIPCMessageAdvise(socket);
+        msg = new wxIPCMessageAdvise(m_socket);
         break;
 
     case IPC_ADVISE_STOP:
-        msg = new wxIPCMessageAdviseStop(socket);
+        msg = new wxIPCMessageAdviseStop(m_socket);
         break;
 
     case IPC_REQUEST_REPLY:
-        msg = new wxIPCMessageRequestReply(socket);
+        msg = new wxIPCMessageRequestReply(m_socket);
         break;
 
     case IPC_FAIL:
-        msg = new wxIPCMessageFail(socket);
+        msg = new wxIPCMessageFail(m_socket);
         break;
 
     case IPC_CONNECT:
-        msg = new wxIPCMessageConnect(socket);
+        msg = new wxIPCMessageConnect(m_socket);
         break;
 
     case IPC_DISCONNECT:
-        msg = new wxIPCMessageDisconnect(socket);
+        msg = new wxIPCMessageDisconnect(m_socket);
         break;
 
     default:
@@ -1119,47 +1394,54 @@ wxIPCMessageBase* wxIPCMessageBase::ReadMessage(wxSocketBase* socket)
 };
 
 // Writes this message object to the socket.
-bool wxIPCMessageBase::WriteMessage()
+bool wxIPCMessageManager::WriteMessageToSocket(wxIPCMessageBase& msg)
 {
     // ensure that we write to the socket without any write call from another
     // thread
     wxCRIT_SECT_LOCKER(lock, gs_critical_write);
 
-    return WriteIPCCode() && DataToSocket();
+    return msg.WriteIPCCode() && msg.DataToSocket();
 };
 
 // We determine if there is more data waiting in the socket buffer for read.
 // Return true if there are enough bytes there for the IPCCodeHeader and
 // IPCCode.
-bool wxIPCMessageBase::PeekMessage(wxSocketBase* socket)
+bool wxIPCMessageManager::PeekAtMessageInSocket()
 {
-    wxCRIT_SECT_LOCKER(lock, gs_critical_write);
-    if ( !socket )
+    wxCRIT_SECT_LOCKER(lock, gs_critical_read);
+
+    if ( !m_socket || !m_socket->IsOk() )
         return false;
 
     wxUint32 code_with_header = 0;
 
-    socket->Peek(reinterpret_cast<char *>(&code_with_header), 4);
+    m_socket->Peek(reinterpret_cast<char *>(&code_with_header), 4);
 
-    return socket->LastReadCount() == 4;
+    return m_socket->LastCount() == 4;
 }
 
-// Utility to ensure deletion of wxIPCMessageBase after use
-class wxIPCMessageBaseLocker
+void wxIPCMessageManager::HandleDisconnect(wxTCPConnection *connection)
 {
-public:
-    wxIPCMessageBaseLocker(wxIPCMessageBase* msg)
-    {
-        m_msg = msg;
-    }
+    // connection was closed (either gracefully or not): destroy everything
+    connection->m_sock->Notify(false);
+    connection->m_sock->Close();
 
-    ~wxIPCMessageBaseLocker()
-    {
-        if (m_msg) delete m_msg;
-    }
+    // don't leave references to this soon-to-be-dangling connection in the
+    // socket as it won't be destroyed immediately as its destruction will be
+    // delayed in case there are more events pending for it
+    connection->m_sock->SetClientData(nullptr);
 
-    wxIPCMessageBase* m_msg;
-};
+    connection->SetConnected(false);
+    connection->OnDisconnect();
+}
+
+void wxIPCMessageManager::SendFailMessage(const wxString& reason)
+{
+    wxIPCMessageFail msg(m_socket, reason);
+
+    if (!WriteMessageToSocket(msg))
+        wxLogDebug("Failed to send IPC_FAIL message: " + reason);
+}
 
 // ==========================================================================
 // implementation
@@ -1213,17 +1495,20 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
     bool ok = client->Connect(*addr);
     delete addr;
 
+
     if ( ok )
     {
+        wxIPCMessageManager *msg_manager = new wxIPCMessageManager(client);
+
         // Send topic name, and enquire whether this has succeeded
         wxIPCMessageConnect msg(client, topic);
-        if (!msg.WriteMessage())
+        if (!msg_manager->WriteMessageToSocket(msg))
         {
             client->Destroy();
             return nullptr;
         }
 
-        wxIPCMessageBase* msg_reply = wxIPCMessageBase::ReadMessage(client);
+        wxIPCMessageBase* msg_reply = msg_manager->ReadMessageFromSocket();
         wxIPCMessageBaseLocker lock(msg_reply);
 
         // OK! Confirmation.
@@ -1236,8 +1521,10 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
             {
                 if (wxDynamicCast(connection, wxTCPConnection))
                 {
-                    connection->m_topic = topic;
-                    connection->m_sock  = client;
+                    connection->m_sock = client;
+                    connection->m_msg_manager = msg_manager;
+                    connection->m_msg_manager->m_topic = topic;
+
                     client->SetEventHandler(wxTCPEventHandlerModule::GetHandler(),
                                             _CLIENT_ONREQUEST_ID);
                     client->SetClientData(connection);
@@ -1389,6 +1676,7 @@ void wxTCPConnection::Init()
 {
     m_sock = nullptr;
     m_streams = nullptr;
+    m_msg_manager = nullptr;
 }
 
 wxTCPConnection::~wxTCPConnection()
@@ -1402,6 +1690,7 @@ wxTCPConnection::~wxTCPConnection()
     }
 
     delete m_streams;
+    delete m_msg_manager;
 }
 
 void wxTCPConnection::Compress(bool WXUNUSED(on))
@@ -1415,11 +1704,11 @@ bool wxTCPConnection::Disconnect()
     if ( !GetConnected() )
         return true;
 
-    if ( m_sock )
+    if ( m_sock && m_msg_manager)
     {
         // Send the disconnect message to the peer.
         wxIPCMessageDisconnect msg(m_sock);
-        if ( !msg.WriteMessage() )
+        if ( !m_msg_manager->WriteMessageToSocket(msg) )
             wxLogDebug("Failed to send IPC_DISCONNECT message");
 
         m_sock->Notify(false);
@@ -1435,12 +1724,12 @@ bool wxTCPConnection::DoExecute(const void *data,
                                 size_t size,
                                 wxIPCFormat format)
 {
-    if ( !m_sock->IsConnected() )
+    if ( !m_sock->IsConnected() || !m_msg_manager )
         return false;
 
     wxIPCMessageExecute msg(m_sock, data, size, format);
 
-    return msg.WriteMessage();
+    return m_msg_manager->WriteMessageToSocket(msg);
 }
 
 const void *wxTCPConnection::Request(const wxString& item,
@@ -1527,21 +1816,6 @@ wxBEGIN_EVENT_TABLE(wxTCPEventHandler, wxEvtHandler)
     EVT_SOCKET(_SERVER_ONREQUEST_ID, wxTCPEventHandler::Server_OnRequest)
 wxEND_EVENT_TABLE()
 
-void wxTCPEventHandler::HandleDisconnect(wxTCPConnection *connection)
-{
-    // connection was closed (either gracefully or not): destroy everything
-    connection->m_sock->Notify(false);
-    connection->m_sock->Close();
-
-    // don't leave references to this soon-to-be-dangling connection in the
-    // socket as it won't be destroyed immediately as its destruction will be
-    // delayed in case there are more events pending for it
-    connection->m_sock->SetClientData(nullptr);
-
-    connection->SetConnected(false);
-    connection->OnDisconnect();
-}
-
 void wxTCPEventHandler::Client_OnRequest(wxSocketEvent &event)
 {
     wxSocketBase *sock = event.GetSocket();
@@ -1558,183 +1832,16 @@ void wxTCPEventHandler::Client_OnRequest(wxSocketEvent &event)
 
     if ( evt == wxSOCKET_LOST )
     {
-        HandleDisconnect(connection);
+        wxIPCMessageManager::HandleDisconnect(connection);
         return;
     }
 
-    // Receive message number.
-    wxIPCSocketStreams * const streams = connection->m_streams;
+    wxIPCMessageManager* mngr = connection->m_msg_manager;
 
-    bool data_waiting = true;
-
-    while ( more_data_waiting &&
-            connection->GetConnected() &&
-            ProcessMessage(connection, sock, streams))
-    {
-        // More than one wxIPCMessage can be sent to the socket before the
-        // socket notifies us of a read event, so we use peek to see if
-        // there is another message waiting.
-
-        data_waiting = wxIPCMessageBase::PeekMessage(sock);
-    };
-
-    wxLogDebug("Onrequest done");
+    if (mngr)
+        mngr->ProcessIncomingMessages();
 }
 
-// todo kill streams
-//
-// Process a single wxIPCMessage from the socket. Returns true if processing
-// can continue, or false if processing should stop because a disconnect was
-// received.
-bool wxTCPEventHandler::ProcessMessage(wxTCPConnection *connection,
-                                       wxSocketBase* socket,
-                                       wxIPCSocketStreams * const streams)
-{
-    if ( !socket || !socket->IsOk() )
-        return false;
-
-    wxIPCMessageBase* msg = wxIPCMessageBase::ReadMessage(socket);
-    wxIPCMessageBaseLocker lock(msg);
-
-    if ( !msg->IsOk() )
-        return false;
-
-    wxString topic = connection->m_topic;
-    wxString item;
-
-    bool error = false; // JPDELETE
-    wxString errmsg;
-
-    switch ( msg->GetIPCCode() )
-    {
-        case IPC_EXECUTE:
-            {
-                wxIPCMessageExecute* msg_execute =
-                    wxDynamicCast(msg, wxIPCMessageExecute);
-
-                if ( msg_execute && msg_execute->GetReadData() )
-                    connection->OnExecute(topic,
-                                          msg_execute->GetReadData(),
-                                          msg_execute->GetSize(),
-                                          msg_execute->GetIPCFormat());
-                else
-                    errmsg = "No data read for IPC Execute";
-            }
-            break;
-
-        case IPC_ADVISE:
-            {
-                item = streams->ReadString();
-
-                wxIPCFormat format;
-                size_t size wxDUMMY_INITIALIZE(0);
-                void * const
-                    data = streams->ReadFormatData(connection, &format, &size);
-
-                if ( data )
-                    connection->OnAdvise(topic, item, data, size, format);
-                else
-                    error = true;
-            }
-            break;
-
-        case IPC_ADVISE_START:
-            {
-                item = streams->ReadString();
-
-                IPCOutput(streams).Write8(connection->OnStartAdvise(topic, item)
-                                            ? IPC_ADVISE_START
-                                            : IPC_FAIL);
-            }
-            break;
-
-        case IPC_ADVISE_STOP:
-            {
-                item = streams->ReadString();
-
-                IPCOutput(streams).Write8(connection->OnStopAdvise(topic, item)
-                                             ? IPC_ADVISE_STOP
-                                             : IPC_FAIL);
-            }
-            break;
-
-        case IPC_POKE:
-            {
-                item = streams->ReadString();
-                wxIPCFormat format = (wxIPCFormat)streams->Read8();
-
-                size_t size wxDUMMY_INITIALIZE(0);
-                void * const data = streams->ReadData(connection, &size);
-
-                if ( data )
-                    connection->OnPoke(topic, item, data, size, format);
-                else
-                    error = true;
-            }
-            break;
-
-        case IPC_REQUEST:
-            {
-                item = streams->ReadString();
-
-                wxIPCFormat format = (wxIPCFormat)streams->Read8();
-
-                size_t user_size = wxNO_LEN;
-                const void *user_data = connection->OnRequest(topic,
-                                                              item,
-                                                              &user_size,
-                                                              format);
-
-                if ( !user_data )
-                {
-                    IPCOutput(streams).Write8(IPC_FAIL);
-                    break;
-                }
-
-                IPCOutput out(streams);
-                out.Write8(IPC_REQUEST_REPLY);
-
-                if ( user_size == wxNO_LEN )
-                {
-                    switch ( format )
-                    {
-                        case wxIPC_TEXT:
-                        case wxIPC_UTF8TEXT:
-                            user_size = strlen((const char *)user_data) + 1;  // includes final NUL
-                            break;
-                        case wxIPC_UNICODETEXT:
-                            user_size = (wcslen((const wchar_t *)user_data) + 1) * sizeof(wchar_t);  // includes final NUL
-                            break;
-                        default:
-                            user_size = 0;
-                    }
-                }
-
-                out.WriteData(user_data, user_size);
-            }
-            break;
-
-        case IPC_DISCONNECT:
-            HandleDisconnect(connection);
-            return false;
-            break;
-
-        case IPC_FAIL:
-            wxLogDebug("Unexpected IPC_FAIL received");
-            error = true;
-            break;
-
-        default:
-            wxLogDebug("Unknown message code %d received.", msg);
-            error = true;
-            break;
-    }
-
-    if ( error )
-        IPCOutput(streams).Write8(IPC_FAIL);
-
-    return true;
-}
 
 // This method is called for incoming connections to wxServer only.
 void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
@@ -1761,7 +1868,9 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
         return;
     }
 
-    wxIPCMessageBase* msg = wxIPCMessageBase::ReadMessage(sock);
+    wxIPCMessageManager* msg_manager = new wxIPCMessageManager(sock);
+
+    wxIPCMessageBase* msg = msg_manager->ReadMessageFromSocket();
     wxIPCMessageBaseLocker lock(msg);
 
     if (msg->GetIPCCode() == IPC_CONNECT)
@@ -1784,11 +1893,11 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
                         // Acknowledge success
                         wxIPCMessageConnect msg_reply(sock, topic);
 
-                        if (msg_reply.WriteMessage())
+                        if (msg_manager->WriteMessageToSocket(msg_reply))
                         {
                             new_connection->m_sock = sock;
-                            // new_connection->m_streams = streams;
-                            new_connection->m_topic = topic;
+                            new_connection->m_msg_manager = msg_manager;
+                            new_connection->m_msg_manager->m_topic = topic;
                             sock->SetEventHandler(wxTCPEventHandlerModule::GetHandler(),
                                                   _CLIENT_ONREQUEST_ID);
                             sock->SetClientData(new_connection);
@@ -1804,17 +1913,9 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
         }
     }
 
-    SendFailMessage(sock,
-                    "IPC CONNECT failed to create valid connection");
+    msg_manager->SendFailMessage("IPC CONNECT failed to create valid connection");
+    delete msg_manager;
     sock->Destroy();
-}
-
-void wxTCPEventHandler::SendFailMessage(wxSocketBase* sock,
-                                        const wxString& reason) const
-{
-    wxIPCMessageFail msg(sock, reason);
-    if (!msg.WriteMessage())
-        wxLogDebug("Failed to send IPC_FAIL message: " + reason);
 }
 
 #endif // wxUSE_SOCKETS && wxUSE_IPC && wxUSE_STREAMS
