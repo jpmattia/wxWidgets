@@ -159,8 +159,13 @@ LRESULT CALLBACK wxSocket_Internal_WinProc(HWND hWnd,
                                            WPARAM wParam,
                                            LPARAM lParam)
 {
+    // wxLogMessage("wxSocket_Internal_WinProc start");
+
     if ( uMsg < WM_USER || uMsg > (WM_USER + MAXSOCKETS - 1))
+    {
+        // wxLogMessage("wxSocket_Internal_WinProc DefWindowProc"); // how?
         return DefWindowProc(hWnd, uMsg, wParam, lParam);
+    }
 
     wxSocketImplMSW *socket;
     wxSocketNotify event = (wxSocketNotify)-1;
@@ -169,17 +174,61 @@ LRESULT CALLBACK wxSocket_Internal_WinProc(HWND hWnd,
 
         socket = socketList[(uMsg - WM_USER)];
         if ( !socket )
+        {
+            wxLogMessage("wxSocket_Internal_WinProc no socket!");
             return 0;
+        }
 
         // the socket may be already closed but we could still receive
         // notifications for it sent (asynchronously) before it got closed
         if ( socket->m_fd == INVALID_SOCKET )
+        {
+            wxLogMessage("wxSocket_Internal_WinProc invalid socket!");
             return 0;
+        }
 
         wxASSERT_MSG( socket->m_fd == (SOCKET)wParam,
                       "mismatch between message and socket?" );
 
-        switch ( WSAGETSELECTEVENT(lParam) )
+        int event_type = WSAGETSELECTEVENT(lParam);
+        int cnt=0;
+
+        if (event_type & FD_READ) cnt++;
+        if (event_type & FD_WRITE) cnt++;
+        if (event_type & FD_ACCEPT) cnt++;
+        if (event_type & FD_CONNECT) cnt++;
+        if (event_type & FD_CLOSE) cnt++;
+
+        if (event_type & FD_OOB) {
+            cnt++;
+            wxLogMessage("FD_OOB received");
+        }
+
+        if (event_type & FD_QOS) {
+            cnt++;
+            wxLogMessage("FD_OOB received");
+        }
+
+        if (event_type & FD_GROUP_QOS) {
+            cnt++;
+            wxLogMessage("FD_GROUP_OOB received");
+        }
+
+        if (event_type & FD_ROUTING_INTERFACE_CHANGE) {
+            cnt++;
+            wxLogMessage("FD_GROUP_QOSFD_ROUTING_INTERFACE_CHANGE received");
+        }
+
+        if (event_type & FD_ADDRESS_LIST_CHANGE) {
+            cnt++;
+            wxLogMessage("FD_ADDRESS_LIST_CHANGE received");
+        }
+
+        if (cnt > 1)
+            wxLogMessage("Notification count = %d", cnt);
+
+
+        switch ( event_type )
         {
             case FD_READ:
                 // We may get a FD_READ notification even when there is no data
@@ -194,8 +243,11 @@ LRESULT CALLBACK wxSocket_Internal_WinProc(HWND hWnd,
                     wxFD_ZERO(&fds);
                     wxFD_SET(socket->m_fd, &fds);
 
-                    if ( select(socket->m_fd + 1, &fds, nullptr, nullptr, &tv) != 1 )
+                    if ( 0 &&  select(socket->m_fd + 1, &fds, nullptr, nullptr, &tv) != 1 )
+                    {
+                        wxLogMessage("wxSocket_Internal_WinProc no data condition");
                         return 0;
+                    }
                 }
 
                 event = wxSOCKET_INPUT;
@@ -289,7 +341,7 @@ wxSocketError wxSocketImplMSW::GetLastError() const
 {
     int errnum = WSAGetLastError();
 
-    wxLogMessage("wxSocketImplMSW::GetLastError errnum = %d", errnum);
+    // wxLogMessage("wxSocketImplMSW::GetLastError errnum = %d", errnum);
 
     switch ( errnum )
     {

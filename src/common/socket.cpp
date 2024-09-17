@@ -606,7 +606,7 @@ void wxSocketImpl::NotifyOnStateChange(wxSocketNotify event)
         s = "UNKNNOWN!";
     }
 
-    wxLogMessage("wxSocketImpl::NotifyOnStateChange " + s);
+    // wxLogMessage("wxSocketImpl::NotifyOnStateChange " + s);
     m_wxsocket->OnRequest(event);
 }
 

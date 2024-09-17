@@ -1818,7 +1818,7 @@ wxEND_EVENT_TABLE()
 
 void wxTCPEventHandler::Client_OnRequest(wxSocketEvent &event)
 {
-    wxLogMessage("wxTCPEventHandler::Client_OnRequest start");
+    // wxLogMessage("wxTCPEventHandler::Client_OnRequest start");
 
     wxSocketBase *sock = event.GetSocket();
     if (!sock)
