@@ -287,7 +287,11 @@ void wxSocketImplMSW::DoClose()
 
 wxSocketError wxSocketImplMSW::GetLastError() const
 {
-    switch ( WSAGetLastError() )
+    int errnum = WSAGetLastError();
+
+    wxLogMessage("wxSocketImplMSW::GetLastError errnum = %d", errnum);
+
+    switch ( errnum )
     {
         case 0:
             return wxSOCKET_NOERROR;
@@ -295,6 +299,8 @@ wxSocketError wxSocketImplMSW::GetLastError() const
         case WSAENOTSOCK:
             return wxSOCKET_INVSOCK;
 
+        case 5:
+        case 10053:
         case WSAEWOULDBLOCK:
             return wxSOCKET_WOULDBLOCK;
 

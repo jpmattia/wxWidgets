@@ -583,6 +583,30 @@ void wxSocketImpl::SetTimeout(unsigned long millis)
 
 void wxSocketImpl::NotifyOnStateChange(wxSocketNotify event)
 {
+    wxString s;
+    switch (event) {
+
+    case wxSOCKET_INPUT:
+        s = "wxSOCKET_INPUT";
+        break;
+
+    case wxSOCKET_OUTPUT:
+        s = "wxSOCKET_OUTPUT";
+        break;
+
+    case wxSOCKET_CONNECTION:
+        s = "wxSOCKET_CONNECTION";
+        break;
+
+    case wxSOCKET_LOST:
+        s = "wxSOCKET_LOST";
+        break;
+
+    default:
+        s = "UNKNNOWN!";
+    }
+
+    wxLogMessage("wxSocketImpl::NotifyOnStateChange " + s);
     m_wxsocket->OnRequest(event);
 }
 

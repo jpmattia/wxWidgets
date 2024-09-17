@@ -1069,7 +1069,7 @@ public:
 
     ~wxIPCMessageManager() {
         m_disconnect = true;
-        m_critsect_disconnect.Enter(); // wait for any pending ops with socket
+        // m_critsect_disconnect.Enter(); // wait for any pending ops with socket
         m_socket = nullptr;
     }
 
@@ -1545,7 +1545,7 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
                 wxDynamicCast(msg_reply, wxIPCMessageFail);
 
             if (msg_fail)
-                wxLogDebug(msg_fail->GetItem());
+                wxLogDebug("FailMessage received: " + msg_fail->GetItem());
         }
     }
 
@@ -1818,6 +1818,8 @@ wxEND_EVENT_TABLE()
 
 void wxTCPEventHandler::Client_OnRequest(wxSocketEvent &event)
 {
+    wxLogMessage("wxTCPEventHandler::Client_OnRequest start");
+
     wxSocketBase *sock = event.GetSocket();
     if (!sock)
         return;
@@ -1903,6 +1905,7 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
                             sock->SetClientData(new_connection);
                             sock->SetNotify(wxSOCKET_INPUT_FLAG | wxSOCKET_LOST_FLAG);
                             sock->Notify(true);
+                            wxLogMessage("Server connection valid");
                             return;
                         }
                     }

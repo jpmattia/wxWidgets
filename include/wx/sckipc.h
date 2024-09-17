@@ -52,6 +52,7 @@ class WXDLLIMPEXP_FWD_NET wxTCPServer;
 class WXDLLIMPEXP_FWD_NET wxTCPClient;
 
 class wxIPCSocketStreams;
+class wxIPCMessageManager;
 
 class WXDLLIMPEXP_NET wxTCPConnection : public wxConnectionBase
 {
@@ -95,10 +96,15 @@ protected:
     wxSocketBase *m_sock;
 
     // various streams that we use
-    wxIPCSocketStreams *m_streams;
+    wxIPCSocketStreams *m_streams; // JPDELETE
+
+    // Manager for r/w of messages to the socket
+    wxIPCMessageManager *m_msg_manager;
 
     // the topic of this connection
     wxString m_topic;
+    // wxString m_topic;  // JPDELETE
+
 
 private:
     // common part of both ctors
@@ -107,6 +113,7 @@ private:
     friend class wxTCPServer;
     friend class wxTCPClient;
     friend class wxTCPEventHandler;
+    friend class wxIPCMessageManager;
 
     wxDECLARE_NO_COPY_CLASS(wxTCPConnection);
     wxDECLARE_DYNAMIC_CLASS(wxTCPConnection);

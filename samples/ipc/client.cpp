@@ -328,13 +328,28 @@ void MyFrame::OnExecute(wxCommandEvent& WXUNUSED(event))
     {
         wxString s = "Date";
 
-        m_client->GetConnection()->Execute(s);
-        m_client->GetConnection()->Execute((const char *)s.c_str(), s.length() + 1);
         char bytes[3];
         bytes[0] = '1';
         bytes[1] = '2';
         bytes[2] = '3';
-        m_client->GetConnection()->Execute(bytes, WXSIZEOF(bytes));
+
+        if (!m_client->GetConnection()->Execute(s))
+        {
+            wxLogMessage("Failure in Execute 1");
+            return;
+        }
+
+        if (!m_client->GetConnection()->Execute((const char *)s.c_str(), s.length() + 1))
+        {
+            wxLogMessage("Failure in Execute 2");
+            return;
+        }
+
+        if (!m_client->GetConnection()->Execute(bytes, WXSIZEOF(bytes)))
+        {
+            wxLogMessage("Failure in Execute 3");
+            return;
+        }
     }
 }
 
