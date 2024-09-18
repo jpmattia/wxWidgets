@@ -314,12 +314,18 @@ void MyFrame::Disconnect()
 
 void MyFrame::OnStartAdvise(wxCommandEvent& WXUNUSED(event))
 {
-    m_client->GetConnection()->StartAdvise("something");
+    if (m_client->GetConnection()->StartAdvise("something"))
+        wxLogMessage("StartAdvise confirmed");
+    else
+        wxLogMessage("StartAdvise failure");
 }
 
 void MyFrame::OnStopAdvise(wxCommandEvent& WXUNUSED(event))
 {
-    m_client->GetConnection()->StopAdvise("something");
+    if (m_client->GetConnection()->StopAdvise("something"))
+        wxLogMessage("StopAdvise confirmed");
+    else
+        wxLogMessage("StopAdvise failure");
 }
 
 void MyFrame::OnExecute(wxCommandEvent& WXUNUSED(event))
