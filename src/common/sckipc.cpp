@@ -67,7 +67,7 @@ enum IPCCode
     IPC_REQUEST         = 2,
     IPC_POKE            = 3,
     IPC_ADVISE_START    = 4,
-    IPC_ADVISE_REQUEST  = 5,
+    IPC_ADVISE_REQUEST  = 5, // not used
     IPC_ADVISE          = 6,
     IPC_ADVISE_STOP     = 7,
     IPC_REQUEST_REPLY   = 8,
@@ -1334,18 +1334,32 @@ bool wxIPCMessageManager::ExecuteMessage(wxIPCMessageBase* msg)
         return false;
 
     case IPC_FAIL:
-        wxLogDebug("Unexpected IPC_FAIL received");
-        error = true;
-        break;
+    {
+        wxIPCMessageFail* msg_fail =
+            wxDynamicCast(msg, wxIPCMessageFail);
 
-    default:
-        wxLogDebug("Unknown message code %d received.", msg);
-        error = true;
-        break;
+        if ( msg_fail )
+            wxLogDebug("Unexpected IPC_FAIL received: " + msg_fail->GetItem());
+        else
+            wxLogDebug("Unexpected IPC_FAIL, and data read failed.");
+
+        return false;
     }
 
-    if ( error )
-        IPCOutput(streams).Write8(IPC_FAIL);
+    // quiet unused-enum warnings from the compiler. These should never be
+    // received in this method.
+    case IPC_ADVISE_REQUEST:
+    case IPC_REQUEST_REPLY:
+    case IPC_CONNECT:
+    case IPC_MAX:
+        wxLogDebug("Invalid IPC code %d received", msg->GetIPCCode());
+        return false;
+
+    default:
+        wxLogDebug("Unknown message code %d received. IPC data may be misaligned",
+                   msg);
+        return false;
+    }
 
     if ( !errmsg.IsEmpty() )
     {
