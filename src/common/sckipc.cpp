@@ -90,7 +90,7 @@ const wxUint32 IPCCodeHeader=0x439d9600;
     #include <sys/stat.h>
 #endif // __UNIX_LIKE__
 
-const wxIPCMessageBase** wxNO_RETURN_MESSAGE = nullptr;
+#define wxNO_RETURN_MESSAGE nullptr
 
 const long wxIPCTimeout = 5; // socket timeout, in seconds JPDELETE (no delete
                              // just set to 10)
@@ -1082,7 +1082,7 @@ public:
 
     bool ExecuteMessage(wxIPCMessageBase* msg);
     bool FindMessage(IPCCode code,
-                     const wxIPCMessageBase** msgptr);
+                     wxIPCMessageBase** msgptr);
 
     wxIPCMessageBase* ReadMessageFromSocket();
     bool WriteMessageToSocket(wxIPCMessageBase& msg);
@@ -1127,7 +1127,7 @@ void wxIPCMessageManager::ProcessIncomingMessages()
 // message is also returned, and the caller is responsible for deleting the
 // returned message.
 bool wxIPCMessageManager::FindMessage(IPCCode code,
-                                      const wxIPCMessageBase** return_msgptr)
+                                      wxIPCMessageBase** return_msgptr)
 {
     while ( !m_disconnect )
     {
@@ -1298,49 +1298,40 @@ bool wxIPCMessageManager::ExecuteMessage(wxIPCMessageBase* msg)
 
     case IPC_REQUEST:
     {
-        item = streams->ReadString();
+        wxIPCMessageRequest* msg_request =
+            wxDynamicCast(msg, wxIPCMessageRequest);
 
-        wxIPCFormat format = (wxIPCFormat)streams->Read8();
-
-        size_t user_size = wxNO_LEN;
-        const void *user_data = connection->OnRequest(m_topic,
-                                                      item,
-                                                      &user_size,
-                                                      format);
-
-        if ( !user_data )
+        if ( !msg_request )
         {
-            IPCOutput(streams).Write8(IPC_FAIL);
+            errmsg = "No data read for IPC Request";
             break;
         }
 
-        IPCOutput out(streams);
-        out.Write8(IPC_REQUEST_REPLY);
-
-        if ( user_size == wxNO_LEN )
+        size_t user_size = wxNO_LEN;
+        const void *user_data = connection->OnRequest(m_topic,
+                                                      msg->GetItem(),
+                                                      &user_size,
+                                                      msg->GetIPCFormat());
+        if ( !user_data )
         {
-            switch ( format )
-            {
-            case wxIPC_TEXT:
-            case wxIPC_UTF8TEXT:
-                user_size = strlen((const char *)user_data) + 1;  // includes final NUL
-                break;
-            case wxIPC_UNICODETEXT:
-                user_size = (wcslen((const wchar_t *)user_data) + 1) * sizeof(wchar_t);  // includes final NUL
-                break;
-            default:
-                user_size = 0;
-            }
+            SendFailMessage("No reply data for request.");
+            break;
         }
 
-        out.WriteData(user_data, user_size);
+        wxIPCMessageRequestReply msg_reply(m_socket,
+                                           user_data,
+                                           user_size,
+                                           msg->GetItem(),
+                                           msg->GetIPCFormat());
+
+        if ( !WriteMessageToSocket(msg_reply) )
+            errmsg = "Reply failed for IPC Request";
     }
     break;
 
     case IPC_DISCONNECT:
         HandleDisconnect(connection);
         return false;
-        break;
 
     case IPC_FAIL:
         wxLogDebug("Unexpected IPC_FAIL received");
@@ -1783,20 +1774,29 @@ const void *wxTCPConnection::Request(const wxString& item,
                                      size_t *size,
                                      wxIPCFormat format)
 {
-    if ( !m_sock->IsConnected() )
+    if ( !m_msg_manager )
         return nullptr;
 
-    IPCOutput(m_streams).Write(IPC_REQUEST, item, format);
+    // Don't let ProcessIncomingMessages interfere with getting a response
+    wxCRIT_SECT_LOCKER(lock, m_msg_manager->m_critsect);
 
-    const int ret = m_streams->Read8();
-    if ( ret != IPC_REQUEST_REPLY )
+    wxIPCMessageRequest msg(m_sock, item, format);
+    if ( !m_msg_manager->WriteMessageToSocket(msg) )
         return nullptr;
 
-    // ReadData() needs a non-null size pointer but the client code can call us
-    // with null pointer (this makes sense if it knows that it always works
-    // with NUL-terminated strings)
-    size_t sizeFallback;
-    return m_streams->ReadData(this, size ? size : &sizeFallback);
+    wxIPCMessageBase* msg_reply = nullptr;
+
+    if ( !m_msg_manager->FindMessage(IPC_REQUEST_REPLY, &msg_reply) )
+        return nullptr;
+
+    wxIPCMessageBaseLocker lockmsg(msg_reply);
+    if ( !msg_reply || !msg_reply->IsOk() )
+        return nullptr;
+
+    if (size)
+        *size = msg_reply->GetSize();
+
+    return msg_reply->GetReadData();
 }
 
 bool wxTCPConnection::DoPoke(const wxString& item,
