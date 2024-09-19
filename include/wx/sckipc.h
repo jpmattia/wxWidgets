@@ -21,8 +21,6 @@
 
 #include "wx/ipcbase.h"
 #include "wx/socket.h"
-#include "wx/sckstrm.h"
-#include "wx/datstrm.h"
 
 /*
  * Mini-DDE implementation
@@ -51,7 +49,6 @@
 class WXDLLIMPEXP_FWD_NET wxTCPServer;
 class WXDLLIMPEXP_FWD_NET wxTCPClient;
 
-class wxIPCSocketStreams;
 class wxIPCMessageManager;
 
 class WXDLLIMPEXP_NET wxTCPConnection : public wxConnectionBase
@@ -87,24 +84,16 @@ protected:
                           wxIPCFormat format) override;
 
 
-    // notice that all the members below are only initialized once the
-    // connection is made, i.e. in MakeConnection() for the client objects and
-    // after OnAcceptConnection() in the server ones
+    // notice that the members below are only initialized once the connection
+    // is made, i.e. in MakeConnection() for the client objects and after
+    // OnAcceptConnection() in the server ones
 
     // the underlying socket (wxSocketClient for IPC client and wxSocketServer
     // for IPC server)
     wxSocketBase *m_sock;
 
-    // various streams that we use
-    wxIPCSocketStreams *m_streams; // JPDELETE
-
     // Manager for r/w of messages to the socket
     wxIPCMessageManager *m_msg_manager;
-
-    // the topic of this connection
-    wxString m_topic;
-    // wxString m_topic;  // JPDELETE
-
 
 private:
     // common part of both ctors
