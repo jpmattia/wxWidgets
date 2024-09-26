@@ -94,7 +94,12 @@ const wxUint32 IPCCodeHeader=0x439d9600;
 
 const long wxIPCTimeout = 10; // socket timeout, in seconds
 
-#define MAX_MSG_BUFFERS 2048  // Maximum number of char* buffers holding
+
+// For IPC returning a char* buffer. wxWidgets docs say that the user is not
+// supposed to free the memory.  Each buffer pointer is assigned to a list
+// sequentially, and the buffer memory is not freed until MAX_MSG_BUFFERS have
+// been assigned.
+#define MAX_MSG_BUFFERS 2048
 
 
 // ----------------------------------------------------------------------------
@@ -131,7 +136,7 @@ GetAddressFromName(const wxString& serverName,
 }
 
 // --------------------------------------------------------------------------
-// wxTCPEventHandler stuff (private class)
+// wxTCPEventHandler declaration (private class)
 // --------------------------------------------------------------------------
 
 class wxTCPEventHandler : public wxEvtHandler
@@ -190,11 +195,44 @@ enum
 };
 
 // --------------------------------------------------------------------------
+// wxTCPEventHandlerModule (private class)
+// --------------------------------------------------------------------------
+
+class wxTCPEventHandlerModule : public wxModule
+{
+public:
+    wxTCPEventHandlerModule() : wxModule() { }
+
+    // get the global wxTCPEventHandler creating it if necessary
+    static wxTCPEventHandler& GetHandler()
+    {
+        if ( !ms_handler )
+            ms_handler = new wxTCPEventHandler;
+
+        return *ms_handler;
+    }
+
+    // as ms_handler is initialized on demand, don't do anything in OnInit()
+    virtual bool OnInit() override { return true; }
+    virtual void OnExit() override { wxDELETE(ms_handler); }
+
+private:
+    static wxTCPEventHandler *ms_handler;
+
+    wxDECLARE_DYNAMIC_CLASS(wxTCPEventHandlerModule);
+    wxDECLARE_NO_COPY_CLASS(wxTCPEventHandlerModule);
+};
+
+wxIMPLEMENT_DYNAMIC_CLASS(wxTCPEventHandlerModule, wxModule);
+
+wxTCPEventHandler *wxTCPEventHandlerModule::ms_handler = nullptr;
+
+// --------------------------------------------------------------------------
 // wxIPCMessageBase
 // --------------------------------------------------------------------------
 
-// This class manages the socket reading and writing of data from the
-// socket.
+// This class and its derivatives manage the reading and writing of data from
+// the socket.
 class wxIPCMessageBase : public wxObject
 {
 public:
@@ -423,8 +461,6 @@ protected:
     wxDECLARE_CLASS(wxIPCMessageBase);
 };
 
-
-
 // Reads a 32-bit size from the socket, allocates a buffer of that size, then
 // read nbytes worth of data from the socket into m_read_data.
 bool wxIPCMessageBase::ReadSizeAndData()
@@ -471,7 +507,6 @@ bool wxIPCMessageBase::ReadString(wxString& str)
 
     return true;
 }
-
 
 bool wxIPCMessageBase::WriteString(const wxString& str)
 {
@@ -528,7 +563,6 @@ protected:
 
     wxDECLARE_DYNAMIC_CLASS(wxIPCMessageExecute);
 };
-
 
 class wxIPCMessageRequest : public wxIPCMessageBase
 {
@@ -885,39 +919,6 @@ public:
     wxIPCMessageBase* m_msg;
 };
 
-// --------------------------------------------------------------------------
-// wxTCPEventHandlerModule (private class)
-// --------------------------------------------------------------------------
-
-class wxTCPEventHandlerModule : public wxModule
-{
-public:
-    wxTCPEventHandlerModule() : wxModule() { }
-
-    // get the global wxTCPEventHandler creating it if necessary
-    static wxTCPEventHandler& GetHandler()
-    {
-        if ( !ms_handler )
-            ms_handler = new wxTCPEventHandler;
-
-        return *ms_handler;
-    }
-
-    // as ms_handler is initialized on demand, don't do anything in OnInit()
-    virtual bool OnInit() override { return true; }
-    virtual void OnExit() override { wxDELETE(ms_handler); }
-
-private:
-    static wxTCPEventHandler *ms_handler;
-
-    wxDECLARE_DYNAMIC_CLASS(wxTCPEventHandlerModule);
-    wxDECLARE_NO_COPY_CLASS(wxTCPEventHandlerModule);
-};
-
-wxIMPLEMENT_DYNAMIC_CLASS(wxTCPEventHandlerModule, wxModule);
-
-wxTCPEventHandler *wxTCPEventHandlerModule::ms_handler = nullptr;
-
 // ==========================================================================
 // implementation
 // ==========================================================================
@@ -1014,7 +1015,7 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
                 }
             }
         }
-        else if (msg_reply->GetIPCCode() == IPC_FAIL)
+        else if ( msg_reply->GetIPCCode() == IPC_FAIL )
         {
             wxIPCMessageFail* msg_fail =
                 wxDynamicCast(msg_reply, wxIPCMessageFail);
@@ -1288,7 +1289,7 @@ bool wxTCPConnection::DoAdvise(const wxString& item,
 }
 
 // --------------------------------------------------------------------------
-// wxTCPEventHandler (private class)
+// wxTCPEventHandler implementation (private class)
 // --------------------------------------------------------------------------
 
 wxBEGIN_EVENT_TABLE(wxTCPEventHandler, wxEvtHandler)
@@ -1302,7 +1303,7 @@ void wxTCPEventHandler::Client_OnRequest(wxSocketEvent &event)
     wxTCPConnection * connection = GetConnection(sock);
 
     // This socket is being deleted
-    if (!connection)
+    if ( !connection )
         return;
 
     if ( event.GetSocketEvent() == wxSOCKET_LOST )
@@ -1342,7 +1343,7 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
     if (!ipcserv)
         return;
 
-    if (event.GetSocketEvent() != wxSOCKET_CONNECTION)
+    if ( event.GetSocketEvent() != wxSOCKET_CONNECTION )
         return;
 
     // Accept the connection, getting a new socket
@@ -1350,7 +1351,7 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
     if (!sock)
         return;
 
-    if (!sock->IsOk())
+    if ( !sock->IsOk() )
     {
         sock->Destroy();
         return;
@@ -1359,11 +1360,11 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
     wxIPCMessageBase* msg = ReadMessageFromSocket(sock);
     wxIPCMessageBaseLocker lock(msg);
 
-    if (msg->GetIPCCode() == IPC_CONNECT)
+    if ( msg->GetIPCCode() == IPC_CONNECT )
     {
         wxIPCMessageConnect* msg_conn = (wxIPCMessageConnect*) msg;
 
-        if (msg_conn)
+        if ( msg_conn )
         {
             if (wxDynamicCast(msg, wxIPCMessageConnect))
             {
@@ -1372,9 +1373,9 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
                 wxTCPConnection *new_connection =
                     (wxTCPConnection *) ipcserv->OnAcceptConnection(topic);
 
-                if (new_connection)
+                if ( new_connection )
                 {
-                    if (wxDynamicCast(new_connection, wxTCPConnection))
+                    if ( wxDynamicCast(new_connection, wxTCPConnection) )
                     {
                         // Acknowledge success
                         wxIPCMessageConnect msg_reply(sock, topic);
@@ -1572,8 +1573,8 @@ bool wxTCPEventHandler::ExecuteMessage(wxIPCMessageBase* msg, wxSocketBase *sock
         return false;
     }
 
-// quiet unused-enum warnings from the compiler. These should never be
-// received in this method.
+    // Silence unused-enum warnings from the compiler. These should never be
+    // received in this method.
     case IPC_ADVISE_REQUEST:
     case IPC_REQUEST_REPLY:
     case IPC_CONNECT:
@@ -1596,10 +1597,10 @@ bool wxTCPEventHandler::ExecuteMessage(wxIPCMessageBase* msg, wxSocketBase *sock
     return true;
 }
 
-// Find a wxIPCMessage with IPCCode code. Returns true when a valid message
-// with the matching IPCCode is found.  If msgptr is non-null, then the
-// message is also returned, and the caller is responsible for deleting the
-// returned message.
+// Find a message with IPCCode code. Returns true when a valid message with
+// the matching IPCCode is found.  If msgptr is non-null, then the message is
+// also returned and the caller is responsible for deleting the returned
+// message.
 bool wxTCPEventHandler::FindMessage(IPCCode code,
                                     wxSocketBase* socket,
                                     wxIPCMessageBase** return_msgptr)
