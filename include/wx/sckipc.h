@@ -49,7 +49,7 @@
 class WXDLLIMPEXP_FWD_NET wxTCPServer;
 class WXDLLIMPEXP_FWD_NET wxTCPClient;
 
-class wxIPCMessageManager;
+class wxTCPEventHandler;
 
 class WXDLLIMPEXP_NET wxTCPConnection : public wxConnectionBase
 {
@@ -92,8 +92,11 @@ protected:
     // for IPC server)
     wxSocketBase *m_sock;
 
-    // Manager for r/w of messages to the socket
-    wxIPCMessageManager *m_msg_manager;
+    // Handler of events and r/w of messages to the socket
+    wxTCPEventHandler *m_handler;
+
+    // the topic of this connection
+    wxString m_topic;
 
 private:
     // common part of both ctors
@@ -102,7 +105,6 @@ private:
     friend class wxTCPServer;
     friend class wxTCPClient;
     friend class wxTCPEventHandler;
-    friend class wxIPCMessageManager;
 
     wxDECLARE_NO_COPY_CLASS(wxTCPConnection);
     wxDECLARE_DYNAMIC_CLASS(wxTCPConnection);
