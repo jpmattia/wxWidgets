@@ -282,55 +282,51 @@ void *EventThread::Entry()
 TEST_CASE("JP", "[TEST_IPC][.]")
 {
     IPCServerProcess * const process = new IPCServerProcess;
-    wxString cmd = "pwd", out;
+    wxString cmd = "test_sckipc_server", out;
 
     AsyncInEventLoop exec_wrapper;
     long pid = exec_wrapper.DoExecute(cmd, process);
 
-    // long wxExecuteReturnCode = wxExecute(cmd, wxEXEC_ASYNC, process);
+    REQUIRE( pid != 0);
 
-    if ( !pid )
+    wxMilliSleep(50); // let the process start
+
+    gs_client = new IPCTestClient;
+
+    SECTION("Connect")
     {
-        out = wxString::Format("Execution of '%s' failed.");
-        // delete process;
+        // connecting to the wrong port should fail
+        CHECK( !gs_client->Connect("localhost", "2424", IPC_TEST_TOPIC) );
+
+        CHECK( !gs_client->Connect("localhost", IPC_TEST_PORT, "VCP GRFG") );
+
+        // connecting to the right port on the right topic should succeed
+        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
     }
-    else
+
+
+    SECTION("Execute")
     {
-        out = wxString::Format("Process %ld (%s) launched.\n",
-                               pid, cmd);
+        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+        wxConnectionBase& conn = gs_client->GetConn();
+
+        const wxString s("Date");
+        CHECK( conn.Execute(s) );
+        CHECK( conn.Execute(s.mb_str(), s.length() + 1) );
+
+        char bytes[] = { 1, 2, 3 };
+        CHECK( conn.Execute(bytes, WXSIZEOF(bytes)) );
     }
 
-    std::cout << out  << std::flush;
-
-    CHECK( pid != 0 );
-    wxSleep(2);
-
-    if (process->m_finished)
-        std::cout << "Process finished before end of test";
-    else
-        std::cout << "Process did not finish before end of test";
-
+    gs_client->Disconnect();
+    delete gs_client;
 
     CHECK( exec_wrapper.EndProcess() );
 
     std::cout << '\n' << std::flush;
 }
 
-
-TEST_CASE("TEST_IPC_Connect", "[TEST_IPC][Connect][WrongPort]")
-{
-    gs_client = new IPCTestClient;
-
-    // connecting to the wrong port should fail
-    CHECK( !gs_client->Connect("localhost", "2424", IPC_TEST_TOPIC) );
-
-    CHECK( !gs_client->Connect("localhost", IPC_TEST_PORT, "VCP GRFG") );
-
-    // connecting to the right port on the right topic should succeed
-    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-    delete gs_client;
-}
 
 TEST_CASE("TEST_IPC_Execute", "[TEST_IPC][Execute]")
 {
@@ -360,25 +356,6 @@ TEST_CASE("TEST_IPC_Disconnect", "[TEST_IPC][Disconnect]")
         gs_client = nullptr;
     }
 }
-
-
-// JPDELETE
-TEST_CASE("testme", "[TEST_IPC][testme]")
- {
-    std::cout << 'A';
-    SECTION("A") {
-        std::cout << 'A';
-    }
-    SECTION("B") {
-        std::cout << 'B';
-    }
-    SECTION("C") {
-        std::cout << 'C';
-    }
-    std::cout << " JP";
-    std::cout << '\n';
-}
-
 
 #endif // wxUSE_THREADS
 
