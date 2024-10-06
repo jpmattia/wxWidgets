@@ -31,6 +31,7 @@
 #include "wx/ipc.h"
 #include "wx/thread.h"
 #include "wx/process.h"
+#include <wx/timer.h>
 
 // #define wxUSE_SOCKETS_FOR_IPC (!wxUSE_DDE_FOR_IPC)
 
@@ -157,16 +158,72 @@ public:
     virtual void OnTerminate(int pid, int status) override
     {
         wxString output =
-            wxString::Format("Process %u terminated with exit code %d.",
+            wxString::Format("Process %u terminated with exit code %d.\n",
                              pid, status);
-        std::cout << output;
+        std::cout << output << std::flush;
         m_finished = true;
+
+        wxEventLoop::GetActive()->ScheduleExit();
+
     }
 
     bool m_finished;
 };
 
 
+// This class is used as a helper in order to run wxExecute(ASYNC)
+// inside of an event loop.
+
+class AsyncInEventLoop : public wxTimer
+{
+public:
+    AsyncInEventLoop()
+    {
+        m_loop = nullptr;
+        m_pid = 0;
+    }
+
+    ~AsyncInEventLoop()
+    {
+        if (m_loop)
+            wxEventLoop::GetActive()->Exit();
+    }
+
+    long DoExecute(const wxString& command,
+                   wxProcess* callback = nullptr)
+    {
+        m_command = command;
+        m_callback = callback;
+
+        wxEventLoop* m_loop = new wxEventLoop;
+
+        // Trigger the timer to go off inside the event loop
+        // so that we can run wxExecute there.
+        StartOnce(10);
+
+        // Run the event loop.
+        m_loop->Run();
+
+        return m_pid;
+    }
+
+    void Notify() override
+    {
+        // Run wxExecute inside the event loop.
+
+        std::cout << "async::Notify()\n" << std::flush;
+
+        m_pid = wxExecute(m_command, wxEXEC_ASYNC, m_callback);
+
+        std::cout << "async::Notify() done\n" << std::flush;
+    }
+
+private:
+    wxString m_command;
+    wxProcess* m_callback;
+    wxEventLoop* m_loop ;
+    long m_pid;
+};
 
 // ----------------------------------------------------------------------------
 // EventThread implementation
@@ -192,21 +249,25 @@ TEST_CASE("JP", "[TEST_IPC][.]")
     IPCServerProcess * const process = new IPCServerProcess;
     wxString cmd = "echo hi; exit", out;
 
-    long wxExecuteReturnCode = wxExecute(cmd, wxEXEC_ASYNC, process);
+    AsyncInEventLoop wrapper;
+    long pid = wrapper.DoExecute(cmd, process);
 
-    if ( !wxExecuteReturnCode )
+    // long wxExecuteReturnCode = wxExecute(cmd, wxEXEC_ASYNC, process);
+
+    if ( !pid )
     {
         out = wxString::Format("Execution of '%s' failed.");
-        delete process;
+        // delete process;
     }
     else
     {
         out = wxString::Format("Process %ld (%s) launched.\n",
-                               wxExecuteReturnCode, cmd);
+                               pid, cmd);
     }
 
-    std::cout << out;
-    CHECK( wxExecuteReturnCode != 0 );
+    std::cout << out  << std::flush;
+
+    CHECK( pid != 0 );
     wxSleep(2);
 
     if (process->m_finished)
