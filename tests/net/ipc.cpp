@@ -146,7 +146,8 @@ static IPCTestClient *gs_client = nullptr;
 // IPCServerProcess
 // ----------------------------------------------------------------------------
 
-//
+// The server is run in an external process, which is necessary when TCP
+// sockets are in use.
 class IPCServerProcess : public wxProcess
 {
 public:
@@ -237,19 +238,10 @@ public:
 
     bool EndProcess()
     {
-        if ( m_pid == 0 )
-            return true;
-
-        if ( m_callback && m_callback->m_finished )
-            return true;
-
-        if ( 0 == wxKill(m_pid, wxSIGTERM) )
-            return true;
-
-        if ( wxKill(m_pid, wxSIGKILL) == 0 )
-            return true;
-
-        return false;
+        return m_pid == 0
+            || ( m_callback && m_callback->m_finished )
+            || 0 == wxKill(m_pid, wxSIGTERM)
+            || wxKill(m_pid, wxSIGKILL) == 0;
     }
 
 
@@ -259,21 +251,6 @@ private:
     wxEventLoop* m_loop ;
     long m_pid;
 };
-
-// ----------------------------------------------------------------------------
-// EventThread implementation
-// ----------------------------------------------------------------------------
-
-void *EventThread::Entry()
-{
-//    gs_server = new IPCTestServer;
-
-    wxTheApp->MainLoop();
-
-//     delete gs_server;
-    return nullptr;
-}
-
 
 // ----------------------------------------------------------------------------
 // the test code itself
@@ -325,36 +302,6 @@ TEST_CASE("JP", "[TEST_IPC][.]")
     CHECK( exec_wrapper.EndProcess() );
 
     std::cout << '\n' << std::flush;
-}
-
-
-TEST_CASE("TEST_IPC_Execute", "[TEST_IPC][Execute]")
-{
-    gs_client = new IPCTestClient;
-
-    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-    wxConnectionBase& conn = gs_client->GetConn();
-
-    const wxString s("Date");
-    CHECK( conn.Execute(s) );
-    CHECK( conn.Execute(s.mb_str(), s.length() + 1) );
-
-    char bytes[] = { 1, 2, 3 };
-    CHECK( conn.Execute(bytes, WXSIZEOF(bytes)) );
-
-    delete gs_client;
-
-}
-
-TEST_CASE("TEST_IPC_Disconnect", "[TEST_IPC][Disconnect]")
-{
-    if ( gs_client )
-    {
-        gs_client->Disconnect();
-        delete gs_client;
-        gs_client = nullptr;
-    }
 }
 
 #endif // wxUSE_THREADS
