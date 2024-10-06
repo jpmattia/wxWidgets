@@ -10,11 +10,12 @@
 // and "wx/cppunit.h"
 #include "testprec.h"
 
+#include <iostream>  // JPDELETE  for testlogging
 
 // FIXME: this tests currently sometimes hangs in Connect() for unknown reason
 //        and this prevents buildbot builds from working so disabling it, but
 //        the real problem needs to be fixed, of course
-#if 0
+#if 1
 
 // this test needs threads as it runs the test server in a secondary thread
 #if wxUSE_THREADS
@@ -24,10 +25,16 @@
     #include "wx/app.h"
 #endif
 
+#define wxUSE_SOCKETS_FOR_IPC 1
+#define wxUSE_DDE_FOR_IPC     0
+
 #include "wx/ipc.h"
 #include "wx/thread.h"
+#include "wx/process.h"
 
-#define wxUSE_SOCKETS_FOR_IPC (!wxUSE_DDE_FOR_IPC)
+// #define wxUSE_SOCKETS_FOR_IPC (!wxUSE_DDE_FOR_IPC)
+
+
 
 namespace
 {
@@ -68,74 +75,20 @@ public:
     EventThread()
         : wxThread(wxTHREAD_JOINABLE)
     {
-        Create();
-        Run();
-    }
-
-protected:
-    virtual void *Entry()
-    {
-        wxTheApp->MainLoop();
-
-        return nullptr;
-    }
-
-    wxDECLARE_NO_COPY_CLASS(EventThread);
-};
-
-// ----------------------------------------------------------------------------
-// test server class
-// ----------------------------------------------------------------------------
-
-class IPCTestServer : public wxServer
-{
-public:
-    IPCTestServer()
-    {
-        m_conn = nullptr;
-
 #if wxUSE_SOCKETS_FOR_IPC
         // we must call this from the main thread
         wxSocketBase::Initialize();
 #endif // wxUSE_SOCKETS_FOR_IPC
 
-        // we need event dispatching to work for IPC server to work
-        m_thread = new EventThread;
-
-        Create(IPC_TEST_PORT);
+        Create();
+        Run();
     }
 
-    virtual ~IPCTestServer()
-    {
-        wxTheApp->ExitMainLoop();
+protected:
+    virtual void *Entry();
 
-        m_thread->Wait();
-        delete m_thread;
-
-        delete m_conn;
-
-#if wxUSE_SOCKETS_FOR_IPC
-        wxSocketBase::Shutdown();
-#endif // wxUSE_SOCKETS_FOR_IPC
-    }
-
-    virtual wxConnectionBase *OnAcceptConnection(const wxString& topic)
-    {
-        if ( topic != IPC_TEST_TOPIC )
-            return nullptr;
-
-        m_conn = new IPCTestConnection;
-        return m_conn;
-    }
-
-private:
-    EventThread *m_thread;
-    IPCTestConnection *m_conn;
-
-    wxDECLARE_NO_COPY_CLASS(IPCTestServer);
+    wxDECLARE_NO_COPY_CLASS(EventThread);
 };
-
-static IPCTestServer *gs_server = nullptr;
 
 // ----------------------------------------------------------------------------
 // test client class
@@ -173,7 +126,7 @@ public:
 
     wxConnectionBase& GetConn() const
     {
-        CPPUNIT_ASSERT( m_conn );
+        CHECK( m_conn );
 
         return *m_conn;
     }
@@ -186,61 +139,121 @@ private:
 
 static IPCTestClient *gs_client = nullptr;
 
+
+// ----------------------------------------------------------------------------
+// IPCServerProcess
+// ----------------------------------------------------------------------------
+
+//
+class IPCServerProcess : public wxProcess
+{
+public:
+    IPCServerProcess()
+        {
+            Redirect();
+            m_finished = false;
+        }
+
+    virtual void OnTerminate(int pid, int status) override
+    {
+        wxString output =
+            wxString::Format("Process %u terminated with exit code %d.",
+                             pid, status);
+        std::cout << output;
+        m_finished = true;
+    }
+
+    bool m_finished;
+};
+
+
+
+// ----------------------------------------------------------------------------
+// EventThread implementation
+// ----------------------------------------------------------------------------
+
+void *EventThread::Entry()
+{
+//    gs_server = new IPCTestServer;
+
+    wxTheApp->MainLoop();
+
+//     delete gs_server;
+    return nullptr;
+}
+
+
 // ----------------------------------------------------------------------------
 // the test code itself
 // ----------------------------------------------------------------------------
 
-class IPCTestCase : public CppUnit::TestCase
+TEST_CASE("JP", "[TEST_IPC][.]")
 {
-public:
-    IPCTestCase() { }
+    IPCServerProcess * const process = new IPCServerProcess;
+    wxString cmd = "echo hi; exit", out;
 
-private:
-    CPPUNIT_TEST_SUITE( IPCTestCase );
-        CPPUNIT_TEST( Connect );
-        CPPUNIT_TEST( Execute );
-        CPPUNIT_TEST( Disconnect );
-    CPPUNIT_TEST_SUITE_END();
+    long wxExecuteReturnCode = wxExecute(cmd, wxEXEC_ASYNC, process);
 
-    void Connect();
-    void Execute();
-    void Disconnect();
+    if ( !wxExecuteReturnCode )
+    {
+        out = wxString::Format("Execution of '%s' failed.");
+        delete process;
+    }
+    else
+    {
+        out = wxString::Format("Process %ld (%s) launched.\n",
+                               wxExecuteReturnCode, cmd);
+    }
 
-    wxDECLARE_NO_COPY_CLASS(IPCTestCase);
-};
+    std::cout << out;
+    CHECK( wxExecuteReturnCode != 0 );
+    wxSleep(2);
 
-CPPUNIT_TEST_SUITE_REGISTRATION( IPCTestCase );
-CPPUNIT_TEST_SUITE_NAMED_REGISTRATION( IPCTestCase, "IPCTestCase" );
+    if (process->m_finished)
+        std::cout << "Process finished before end of test";
+    else
+        std::cout << "Process did not finish before end of test";
 
-void IPCTestCase::Connect()
+
+    std::cout << '\n';
+}
+
+
+TEST_CASE("TEST_IPC_Connect", "[TEST_IPC][Connect][WrongPort]")
 {
-    gs_server = new IPCTestServer;
     gs_client = new IPCTestClient;
 
     // connecting to the wrong port should fail
-    CPPUNIT_ASSERT( !gs_client->Connect("localhost", "2424", IPC_TEST_TOPIC) );
+    CHECK( !gs_client->Connect("localhost", "2424", IPC_TEST_TOPIC) );
 
-    // connecting using an unsupported topic should fail (unless the server
-    // expects a ROT-13'd topic name...)
-    CPPUNIT_ASSERT( !gs_client->Connect("localhost", IPC_TEST_PORT, "VCP GRFG") );
+    CHECK( !gs_client->Connect("localhost", IPC_TEST_PORT, "VCP GRFG") );
 
     // connecting to the right port on the right topic should succeed
-    CPPUNIT_ASSERT( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+    delete gs_client;
 }
 
-void IPCTestCase::Execute()
+TEST_CASE("TEST_IPC_Execute", "[TEST_IPC][Execute]")
 {
+    gs_client = new IPCTestClient;
+
+    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
     wxConnectionBase& conn = gs_client->GetConn();
 
     const wxString s("Date");
-    CPPUNIT_ASSERT( conn.Execute(s) );
-    CPPUNIT_ASSERT( conn.Execute(s.mb_str(), s.length() + 1) );
+    CHECK( conn.Execute(s) );
+    CHECK( conn.Execute(s.mb_str(), s.length() + 1) );
 
     char bytes[] = { 1, 2, 3 };
-    CPPUNIT_ASSERT( conn.Execute(bytes, WXSIZEOF(bytes)) );
+    CHECK( conn.Execute(bytes, WXSIZEOF(bytes)) );
+
+    delete gs_client;
+
 }
 
-void IPCTestCase::Disconnect()
+TEST_CASE("TEST_IPC_Disconnect", "[TEST_IPC][Disconnect]")
 {
     if ( gs_client )
     {
@@ -248,13 +261,26 @@ void IPCTestCase::Disconnect()
         delete gs_client;
         gs_client = nullptr;
     }
-
-    if ( gs_server )
-    {
-        delete gs_server;
-        gs_server = nullptr;
-    }
 }
+
+
+// JPDELETE
+TEST_CASE("testme", "[TEST_IPC][testme]")
+ {
+    std::cout << 'A';
+    SECTION("A") {
+        std::cout << 'A';
+    }
+    SECTION("B") {
+        std::cout << 'B';
+    }
+    SECTION("C") {
+        std::cout << 'C';
+    }
+    std::cout << " JP";
+    std::cout << '\n';
+}
+
 
 #endif // wxUSE_THREADS
 

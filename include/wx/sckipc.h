@@ -137,6 +137,7 @@ class WXDLLIMPEXP_NET wxTCPClient : public wxClientBase
 {
 public:
     wxTCPClient();
+    virtual ~wxTCPClient() {}
 
     virtual bool ValidHost(const wxString& host) override;
 
