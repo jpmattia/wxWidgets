@@ -32,6 +32,7 @@
 #include "wx/thread.h"
 #include "wx/process.h"
 #include <wx/timer.h>
+#include <wx/txtstrm.h>
 
 // #define wxUSE_SOCKETS_FOR_IPC (!wxUSE_DDE_FOR_IPC)
 
@@ -165,6 +166,22 @@ public:
 
         wxEventLoop::GetActive()->ScheduleExit();
 
+
+        wxString textout="stdout:\n", texterr="stderr:\n";
+
+        wxTextInputStream strm_stdout( *GetInputStream() );
+        while (!strm_stdout.GetInputStream().Eof())
+        {
+            textout += strm_stdout.ReadLine() + "\n";
+        }
+
+        wxTextInputStream strm_stderr( *GetErrorStream() );
+        while (!strm_stderr.GetInputStream().Eof())
+        {
+            texterr += strm_stderr.ReadLine() + "\n";
+        }
+
+        std::cout << '\n' << textout << '\n' << texterr << '\n' << std::flush;
     }
 
     bool m_finished;
@@ -190,7 +207,7 @@ public:
     }
 
     long DoExecute(const wxString& command,
-                   wxProcess* callback = nullptr)
+                   IPCServerProcess* callback = nullptr)
     {
         m_command = command;
         m_callback = callback;
@@ -218,9 +235,27 @@ public:
         std::cout << "async::Notify() done\n" << std::flush;
     }
 
+    bool EndProcess()
+    {
+        if ( m_pid == 0 )
+            return true;
+
+        if ( m_callback && m_callback->m_finished )
+            return true;
+
+        if ( 0 == wxKill(m_pid, wxSIGTERM) )
+            return true;
+
+        if ( wxKill(m_pid, wxSIGKILL) == 0 )
+            return true;
+
+        return false;
+    }
+
+
 private:
     wxString m_command;
-    wxProcess* m_callback;
+    IPCServerProcess* m_callback;
     wxEventLoop* m_loop ;
     long m_pid;
 };
@@ -247,10 +282,10 @@ void *EventThread::Entry()
 TEST_CASE("JP", "[TEST_IPC][.]")
 {
     IPCServerProcess * const process = new IPCServerProcess;
-    wxString cmd = "echo hi; exit", out;
+    wxString cmd = "pwd", out;
 
-    AsyncInEventLoop wrapper;
-    long pid = wrapper.DoExecute(cmd, process);
+    AsyncInEventLoop exec_wrapper;
+    long pid = exec_wrapper.DoExecute(cmd, process);
 
     // long wxExecuteReturnCode = wxExecute(cmd, wxEXEC_ASYNC, process);
 
@@ -276,7 +311,9 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         std::cout << "Process did not finish before end of test";
 
 
-    std::cout << '\n';
+    CHECK( exec_wrapper.EndProcess() );
+
+    std::cout << '\n' << std::flush;
 }
 
 
