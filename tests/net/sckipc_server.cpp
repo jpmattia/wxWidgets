@@ -26,7 +26,7 @@
 #include <wx/ipc.h>
 #include <wx/thread.h>
 
-// #define wxUSE_SOCKETS_FOR_IPC (!wxUSE_DDE_FOR_IPC)
+#define MAX_MSG_BUFFERS 2048
 
 namespace
 {
@@ -43,7 +43,20 @@ const char *IPC_TEST_TOPIC = "IPC TEST";
 class IPCTestConnection : public wxConnection
 {
 public:
-    IPCTestConnection() { }
+    IPCTestConnection()
+    {
+        for (int i = 0; i < MAX_MSG_BUFFERS; i++)
+            m_bufferList[i] = nullptr;
+
+        m_nextAvailable = 0;
+    }
+
+    ~IPCTestConnection()
+    {
+        for (int i = 0; i < MAX_MSG_BUFFERS; i++)
+            if (m_bufferList[i])
+                delete[] m_bufferList[i];
+    }
 
     virtual bool OnExec(const wxString& topic, const wxString& data)
     {
@@ -53,18 +66,67 @@ public:
         return data == "Date";
     }
 
-    virtual bool OnRequest(const wxString& topic, const wxString& data)
-    {
-        if ( topic != IPC_TEST_TOPIC )
-            return false;
+    virtual const void* OnRequest(const wxString& topic,
+                                  const wxString& item,
+                                  size_t* size,
+                                  wxIPCFormat format);
+private:
 
-        return data == "Date";
+    char* GetBufPtr(size_t size)
+    {
+        wxCRIT_SECT_LOCKER(lock, m_cs_assign_buffer);
+
+        if (m_bufferList[m_nextAvailable] != nullptr)
+        {
+            // Free the memory from the last use
+            delete[] m_bufferList[m_nextAvailable];
+        }
+
+        char* ptr = new char[size];
+
+        m_bufferList[m_nextAvailable] = ptr;
+        m_nextAvailable = (m_nextAvailable + 1) % MAX_MSG_BUFFERS;
+
+        return ptr;
     }
 
+    wxCRIT_SECT_DECLARE_MEMBER(m_cs_assign_buffer);
 
-private:
+    char* m_bufferList[MAX_MSG_BUFFERS];
+    int m_nextAvailable;
+
+
     wxDECLARE_NO_COPY_CLASS(IPCTestConnection);
 };
+
+const void* IPCTestConnection::OnRequest(const wxString& topic,
+                                         const wxString& item,
+                                         size_t* size,
+                                         wxIPCFormat format)
+{
+    *size = 0;
+
+    if ( topic != IPC_TEST_TOPIC )
+        return nullptr;
+
+    wxString s;
+
+    if (item == "ping")
+    {
+        if (format != wxIPC_PRIVATE)
+            return nullptr;
+
+        s = "pong";
+    }
+
+    *size = strlen(s.mb_str()) + 1;
+    char* ret = GetBufPtr(*size);
+    strncpy(ret, s.mb_str(), *size);
+    // wxLogError(s);
+    return ret;
+}
+
+
 
 // ----------------------------------------------------------------------------
 // test server class
@@ -80,8 +142,8 @@ public:
 
     virtual ~IPCTestServer()
     {
-        wxTheApp->ExitMainLoop();
-        delete m_conn;
+        if (m_conn)
+            delete m_conn;
     }
 
     virtual wxConnectionBase *OnAcceptConnection(const wxString& topic)
@@ -133,7 +195,12 @@ bool MyApp::OnInit()
         wxSocketBase::Initialize();
 #endif // wxUSE_SOCKETS_FOR_IPC
 
-    return m_server.Create(IPC_TEST_PORT);
+    if ( !m_server.Create(IPC_TEST_PORT) )
+    {
+        std::cout << "Failed to create server. Make sure nothing is running on port " << IPC_TEST_PORT << std::flush;
+        return false;
+    }
+    return true;
 }
 
 int MyApp::OnExit()
