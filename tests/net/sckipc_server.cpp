@@ -23,8 +23,8 @@
 #define wxUSE_SOCKETS_FOR_IPC 1
 #define wxUSE_DDE_FOR_IPC     0
 
-#include "wx/ipc.h"
-#include "wx/thread.h"
+#include <wx/ipc.h>
+#include <wx/thread.h>
 
 // #define wxUSE_SOCKETS_FOR_IPC (!wxUSE_DDE_FOR_IPC)
 
@@ -52,6 +52,15 @@ public:
 
         return data == "Date";
     }
+
+    virtual bool OnRequest(const wxString& topic, const wxString& data)
+    {
+        if ( topic != IPC_TEST_TOPIC )
+            return false;
+
+        return data == "Date";
+    }
+
 
 private:
     wxDECLARE_NO_COPY_CLASS(IPCTestConnection);
