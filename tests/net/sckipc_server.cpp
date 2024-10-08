@@ -49,6 +49,8 @@ public:
             m_bufferList[i] = nullptr;
 
         m_nextAvailable = 0;
+
+        ResetThreadTrackers();
     }
 
     ~IPCTestConnection()
@@ -76,6 +78,9 @@ public:
                                   wxIPCFormat format);
 private:
 
+    wxString HandleThreadRequestCounting(const wxString& item);
+    void ResetThreadTrackers();
+
     char* GetBufPtr(size_t size)
     {
         wxCRIT_SECT_LOCKER(lock, m_cs_assign_buffer);
@@ -101,6 +106,13 @@ private:
 
     wxString m_lastExecute;
 
+    int m_thread1_request_lastval, m_thread2_request_lastval,
+        m_thread3_request_lastval;
+
+    bool m_thread1_request_error, m_thread2_request_error,
+        m_thread3_request_error;
+
+    wxString m_general_error;
 
     wxDECLARE_NO_COPY_CLASS(IPCTestConnection);
 };
@@ -115,18 +127,50 @@ const void* IPCTestConnection::OnRequest(const wxString& topic,
     if ( topic != IPC_TEST_TOPIC )
         return nullptr;
 
-    wxString s = "Unrecognized request";
+    wxString s;
 
-    if (item == "ping")
+    if ( item == "ping" )
     {
         if (format != wxIPC_PRIVATE)
             return nullptr;
 
         s = "pong";
     }
-    else if (item == "last_execute")
+
+    else if ( item == "last_execute" )
     {
         s = m_lastExecute;
+    }
+
+    else if ( item.StartsWith("MultiRequest thread") )
+    {
+        s = HandleThreadRequestCounting(item);
+    }
+
+    else if ( item == "get_thread1_request_counter")
+    {
+        s = wxString::Format("%d", m_thread1_request_lastval);
+    }
+
+    else if ( item == "get_thread2_request_counter")
+    {
+        s = wxString::Format("%d", m_thread1_request_lastval);
+    }
+
+    else if ( item == "get_thread3_request_counter")
+    {
+        s = wxString::Format("%d", m_thread1_request_lastval);
+    }
+
+    else if ( item == "get_error_string")
+    {
+        s = m_general_error;
+    }
+
+    else
+    {
+        s = "Error: Unknown request - " + item;
+        m_general_error += s;
     }
 
     *size = strlen(s.mb_str()) + 1;
@@ -135,6 +179,88 @@ const void* IPCTestConnection::OnRequest(const wxString& topic,
     return ret;
 }
 
+
+// Helper for the multirequest thread test. This test will send repeated
+// requests of the form "MultiRequest thread <thread_number>
+// <serial_number>". Track the serial number in the appropriate
+// m_threadN_request_lastval vars.
+//
+// The param "info" contains the string after "MultiRequest thread".
+//
+// The return string is prefaced with "Error:" when a problem arises, along
+// with a human readable message describing the error, and "OK:" when the
+// request went as expected.
+
+wxString IPCTestConnection::HandleThreadRequestCounting(const wxString& item)
+{
+    wxString info;
+    item.StartsWith("MultiRequest thread", &info);
+
+    int thread_number = wxAtoi(info.Left(2));
+    int counter_value = wxAtoi(info.Mid(3));
+    int lastval = -2;
+
+    bool err = false;
+    wxString s, err_string;
+
+    switch (thread_number)
+    {
+    case 0:
+        err_string =
+            "Error: MultiRequest thread number could not be converted.\n";
+        err = true;
+        break;
+
+    case 1:
+        lastval = m_thread1_request_lastval;
+        m_thread1_request_lastval = counter_value;
+        break;
+
+    case 2:
+        lastval = m_thread2_request_lastval;
+        m_thread2_request_lastval = counter_value;
+        break;
+
+    case 3:
+        lastval = m_thread3_request_lastval;
+        m_thread3_request_lastval = counter_value;
+        break;
+
+    default:
+        err_string =
+            "Error: MultiRequest thread number must be 1, 2, or3.\n";
+        err = true;
+    }
+
+    if (lastval !=  counter_value -1)
+    {
+        // Concatenate to any other error:
+        err_string +=
+            "Error: Misordered count in thread " +
+            wxString::Format("%d - expected %d, received %d\n",
+                             thread_number, lastval + 1, counter_value);
+        err = true;
+    }
+
+    if (err)
+    {
+        m_general_error += err_string;
+        return err_string;
+    }
+
+    return "OK: " + item;
+}
+
+void IPCTestConnection::ResetThreadTrackers()
+{
+    m_general_error = "";
+
+    m_thread1_request_lastval = m_thread2_request_lastval =
+        m_thread3_request_lastval = 0;
+
+    m_thread1_request_error = m_thread2_request_error =
+        m_thread3_request_error = false;
+}
 
 
 // ----------------------------------------------------------------------------

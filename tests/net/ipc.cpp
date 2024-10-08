@@ -6,30 +6,7 @@
 // Licence:     wxWindows licence
 ///////////////////////////////////////////////////////////////////////////////
 
-// Turn the following into 100 Requests
-
-
-class MultiRequestThread : public wxThread
-{
-public:
-    EventThread()
-        : wxThread(wxTHREAD_JOINABLE)
-    {
-        Create();
-        Run();
-    }
-
-protected:
-    virtual void *Entry()
-    {
-        wxTheApp->MainLoop();
-
-        return nullptr;
-    }
-
-    wxDECLARE_NO_COPY_CLASS(EventThread);
-};
-
+// single Poke
 // single Advise
 // 100 Advise
 
@@ -59,6 +36,8 @@ protected:
 #include <wx/sstream.h>
 
 #define MAX_MSG_BUFFERS 2048
+#define MESSAGE_ITERATIONS 100
+#define MESSAGE_ITERATIONS_STRING  wxString::Format("%d",MESSAGE_ITERATIONS)
 
 namespace
 {
@@ -181,7 +160,8 @@ public:
 };
 
 // ----------------------------------------------------------------------------
-// event dispatching thread class
+// ExecAsyncWrapper starts a process with wxExecute, which must be done in the
+// main thread.
 // ----------------------------------------------------------------------------
 
 class ExecAsyncWrapper : public wxTimer
@@ -234,8 +214,6 @@ public:
     wxDECLARE_NO_COPY_CLASS(ExecAsyncWrapper);
 };
 
-
-
 // ----------------------------------------------------------------------------
 // test client class
 // ----------------------------------------------------------------------------
@@ -286,6 +264,49 @@ private:
 
 static IPCTestClient *gs_client = nullptr;
 
+// ----------------------------------------------------------------------------
+// MultiRequestThread
+// ----------------------------------------------------------------------------
+
+// Send repeated Request()'s, each with a serial number to verify that
+// multiple repeated messages are sent and received correctly and in order.
+
+class MultiRequestThread : public wxThread
+{
+public:
+
+    // label: A header to be put on the string sent to the server.
+    // It should be of the form "MultiRequest thread N", where N
+    // is "1", "2", or "3".
+    MultiRequestThread(const wxString& label )
+        : wxThread(wxTHREAD_JOINABLE)
+    {
+        m_label = label;
+
+        Create();
+    }
+
+protected:
+    virtual void *Entry()
+    {
+        wxConnectionBase& conn = gs_client->GetConn();
+
+        for (size_t n=1; n < MESSAGE_ITERATIONS + 1; n++)
+        {
+            wxString s = m_label + wxString::Format(" %zu", n);
+            size_t size=0;
+            const char* data = (char*) conn.Request(s, &size, wxIPC_PRIVATE);
+
+            CHECK( wxString(data) == "OK: " + s );
+        }
+
+        return nullptr;
+    }
+
+    wxString m_label;
+
+    wxDECLARE_NO_COPY_CLASS(MultiRequestThread);
+};
 
 // ----------------------------------------------------------------------------
 // the test code itself
@@ -324,8 +345,6 @@ TEST_CASE("JP", "[TEST_IPC][.]")
     }
 
 
-    // Make sure that Request() works, because we use it to probe the state of
-    // the server for the remaining tests.
     SECTION("SimpleRequest")
     {
         CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
@@ -336,6 +355,8 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         size_t size=0;
         const char* data = (char*) conn.Request(s, &size, wxIPC_PRIVATE);
 
+        // Make sure that Request() works, because we use it to probe the
+        // state of the server for the remaining tests.
         REQUIRE( wxString(data) == "pong"  );
     }
 
@@ -362,6 +383,32 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         data = (char*) conn.Request(last_execute_query, &size, wxIPC_PRIVATE);
         CHECK( wxString(data) == s );
     }
+
+    SECTION("MultiRequestThread")
+    {
+        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+        MultiRequestThread thread1("MultiRequest thread 1");
+        thread1.Run();
+        thread1.Wait();
+
+        // Make sure the server got all the requests in the correct order.
+        wxConnectionBase& conn = gs_client->GetConn();
+
+        size_t size=0;
+        wxString query("get_thread1_request_counter");
+
+        char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+        size=0;
+        query = "get_error_string";
+        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+
+        INFO( wxString(data) );
+        CHECK( wxString(data).IsEmpty() );
+    }
+
 
 
     wxConnectionBase& conn = gs_client->GetConn();
