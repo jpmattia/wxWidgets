@@ -118,6 +118,10 @@ const void* IPCTestConnection::OnRequest(const wxString& topic,
 
         s = "pong";
     }
+    else if (item == "exit")
+    {
+        wxTheApp->ExitMainLoop();
+    }
 
     *size = strlen(s.mb_str()) + 1;
     char* ret = GetBufPtr(*size);

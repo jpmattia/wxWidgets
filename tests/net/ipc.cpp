@@ -196,10 +196,14 @@ public:
 
     bool EndProcess()
     {
-        return m_pid == 0
-            || m_process.m_finished
-            || 0 == wxKill(m_pid, wxSIGTERM)
-            || wxKill(m_pid, wxSIGKILL) == 0;
+        // return m_pid == 0
+        //     || m_process.m_finished
+        //     || 0 == wxKill(m_pid, wxSIGTERM)
+        //     || wxKill(m_pid, wxSIGKILL) == 0;
+
+         return m_pid == 0
+             || 0 == wxKill(m_pid, wxSIGTERM)
+             || wxKill(m_pid, wxSIGKILL) == 0;
     }
 
     long m_pid;
@@ -277,7 +281,7 @@ TEST_CASE("JP", "[TEST_IPC][.]")
     long pid = event_thread.DoExecute();
 
     // Allow time for the server to bind the port
-    wxMilliSleep(100);
+    wxMilliSleep(300);
 
     REQUIRE( pid != 0);
 
@@ -294,7 +298,6 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
         gs_client->Disconnect();
-
     }
 
 
@@ -324,6 +327,15 @@ TEST_CASE("JP", "[TEST_IPC][.]")
 
         CHECK( wxString(data) == "pong"  );
     }
+
+    // ensure we are connected, and then send the shutdown signal to the sckipc server.
+    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+    wxConnectionBase& conn = gs_client->GetConn();
+    const wxString s("shutdown");
+    CHECK( conn.Execute(s) );
+
+
 
     // event_thread.m_process.PrintStreams();
 
