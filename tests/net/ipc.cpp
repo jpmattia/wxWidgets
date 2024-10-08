@@ -6,6 +6,34 @@
 // Licence:     wxWindows licence
 ///////////////////////////////////////////////////////////////////////////////
 
+// Turn the following into 100 Requests
+
+
+class MultiRequestThread : public wxThread
+{
+public:
+    EventThread()
+        : wxThread(wxTHREAD_JOINABLE)
+    {
+        Create();
+        Run();
+    }
+
+protected:
+    virtual void *Entry()
+    {
+        wxTheApp->MainLoop();
+
+        return nullptr;
+    }
+
+    wxDECLARE_NO_COPY_CLASS(EventThread);
+};
+
+// single Advise
+// 100 Advise
+
+
 // For compilers that support precompilation, includes "wx/wx.h".
 // and "wx/cppunit.h"
 #include "testprec.h"
@@ -156,12 +184,12 @@ public:
 // event dispatching thread class
 // ----------------------------------------------------------------------------
 
-class EventThread : public wxTimer
+class ExecAsyncWrapper : public wxTimer
 {
 public:
-    EventThread() {}
+    ExecAsyncWrapper() {}
 
-    ~EventThread() {}
+    ~ExecAsyncWrapper() {}
 
     long DoExecute()
     {
@@ -178,8 +206,6 @@ public:
 
     void Notify() override
     {
-        std::cout << "async::Notify() start\n" << std::flush;
-
         wxString command = "test_sckipc_server";
 
         // Run wxExecute inside the event loop.
@@ -187,11 +213,7 @@ public:
 
         REQUIRE( m_pid != 0);
 
-        std::cout << "async::Notify() ending loop...\n" << std::flush;
-
         wxEventLoop::GetActive()->Exit();
-
-        std::cout << "async::Notify() done\n" << std::flush;
     }
 
     bool EndProcess()
@@ -209,7 +231,7 @@ public:
     long m_pid;
     IPCServerProcess m_process;
 
-    wxDECLARE_NO_COPY_CLASS(EventThread);
+    wxDECLARE_NO_COPY_CLASS(ExecAsyncWrapper);
 };
 
 
@@ -243,6 +265,7 @@ public:
     {
         if ( m_conn )
         {
+            m_conn->Disconnect();
             delete m_conn;
             m_conn = nullptr;
         }
@@ -276,9 +299,9 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         wxSocketBase::Initialize();
 #endif // wxUSE_SOCKETS_FOR_IPC
 
-    EventThread event_thread;
+    ExecAsyncWrapper exec_wrapper;
 
-    long pid = event_thread.DoExecute();
+    long pid = exec_wrapper.DoExecute();
 
     // Allow time for the server to bind the port
     wxMilliSleep(300);
@@ -287,6 +310,7 @@ TEST_CASE("JP", "[TEST_IPC][.]")
 
     gs_client = new IPCTestClient;
 
+
     SECTION("Connect")
     {
         // connecting to the wrong port should fail
@@ -294,27 +318,14 @@ TEST_CASE("JP", "[TEST_IPC][.]")
 
         CHECK( !gs_client->Connect("localhost", IPC_TEST_PORT, "VCP GRFG") );
 
-        // connecting to the right port on the right topic should succeed
-        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-        gs_client->Disconnect();
+        // Connecting to the right port on the right topic should succeed.
+        // If Connect() doesn't work, then nothing below works
+        REQUIRE( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
     }
 
 
-    SECTION("Execute")
-    {
-        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-        wxConnectionBase& conn = gs_client->GetConn();
-
-        const wxString s("Date");
-        CHECK( conn.Execute(s) );
-        CHECK( conn.Execute(s.mb_str(), s.length() + 1) );
-
-        char bytes[] = { 1, 2, 3 };
-        CHECK( conn.Execute(bytes, WXSIZEOF(bytes)) );
-    }
-
+    // Make sure that Request() works, because we use it to probe the state of
+    // the server for the remaining tests.
     SECTION("SimpleRequest")
     {
         CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
@@ -325,25 +336,43 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         size_t size=0;
         const char* data = (char*) conn.Request(s, &size, wxIPC_PRIVATE);
 
-        CHECK( wxString(data) == "pong"  );
+        REQUIRE( wxString(data) == "pong"  );
     }
 
-    // ensure we are connected, and then send the shutdown signal to the sckipc server.
-    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    SECTION("Execute")
+    {
+        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+        wxConnectionBase& conn = gs_client->GetConn();
+
+        wxString s("Date");
+        CHECK( conn.Execute(s) );
+
+        // Get the last execute from the server side.
+        size_t size=0;
+        const wxString last_execute_query("last_execute");
+
+        char* data = (char*) conn.Request(last_execute_query, &size, wxIPC_PRIVATE);
+        CHECK( wxString(data) == s );
+
+
+        s = "another execution command!";
+        CHECK( conn.Execute(s.mb_str(), s.length() + 1) );
+
+        data = (char*) conn.Request(last_execute_query, &size, wxIPC_PRIVATE);
+        CHECK( wxString(data) == s );
+    }
+
 
     wxConnectionBase& conn = gs_client->GetConn();
     const wxString s("shutdown");
     CHECK( conn.Execute(s) );
 
-
-
-    // event_thread.m_process.PrintStreams();
-
     // Make sure the server process exits.
-    CHECK( event_thread.EndProcess() );
+    CHECK( exec_wrapper.EndProcess() );
 
     // Allow time for the server to unbind the port
-    wxMilliSleep(50);
+    wxMilliSleep(100);
 
     gs_client->Disconnect();
     delete gs_client;
