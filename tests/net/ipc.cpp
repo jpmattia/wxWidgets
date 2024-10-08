@@ -384,7 +384,7 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         CHECK( wxString(data) == s );
     }
 
-    SECTION("MultiRequestThread")
+    SECTION("SingleThreadOfRequests")
     {
         CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
@@ -399,6 +399,51 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         wxString query("get_thread1_request_counter");
 
         char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+        size=0;
+        query = "get_error_string";
+        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+
+        INFO( wxString(data) );
+        CHECK( wxString(data).IsEmpty() );
+    }
+
+    SECTION("MultipleThreadsOfRequests")
+    {
+        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+        MultiRequestThread thread1("MultiRequest thread 1");
+        MultiRequestThread thread2("MultiRequest thread 2");
+        MultiRequestThread thread3("MultiRequest thread 3");
+
+        thread1.Run();
+        thread2.Run();
+        thread3.Run();
+
+        thread1.Wait();
+        thread2.Wait();
+        thread3.Wait();
+
+        // Make sure the server got all the requests in the correct order.
+        wxConnectionBase& conn = gs_client->GetConn();
+
+        size_t size=0;
+        wxString query = "get_thread1_request_counter";
+
+        char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+        size=0;
+        query = "get_thread2_request_counter";
+
+        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+        size=0;
+        query = "get_thread3_request_counter";
+
+        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
         CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
 
         size=0;
