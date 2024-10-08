@@ -63,7 +63,11 @@ public:
         if ( topic != IPC_TEST_TOPIC )
             return false;
 
-        return data == "Date";
+        if (data == "shutdown")
+            wxTheApp->ExitMainLoop();
+
+        m_lastExecute = data;
+        return true;
     }
 
     virtual const void* OnRequest(const wxString& topic,
@@ -95,6 +99,8 @@ private:
     char* m_bufferList[MAX_MSG_BUFFERS];
     int m_nextAvailable;
 
+    wxString m_lastExecute;
+
 
     wxDECLARE_NO_COPY_CLASS(IPCTestConnection);
 };
@@ -109,7 +115,7 @@ const void* IPCTestConnection::OnRequest(const wxString& topic,
     if ( topic != IPC_TEST_TOPIC )
         return nullptr;
 
-    wxString s;
+    wxString s = "Unrecognized request";
 
     if (item == "ping")
     {
@@ -118,15 +124,14 @@ const void* IPCTestConnection::OnRequest(const wxString& topic,
 
         s = "pong";
     }
-    else if (item == "exit")
+    else if (item == "last_execute")
     {
-        wxTheApp->ExitMainLoop();
+        s = m_lastExecute;
     }
 
     *size = strlen(s.mb_str()) + 1;
     char* ret = GetBufPtr(*size);
     strncpy(ret, s.mb_str(), *size);
-    // wxLogError(s);
     return ret;
 }
 
@@ -157,6 +162,12 @@ public:
 
         m_conn = new IPCTestConnection;
         return m_conn;
+    }
+
+    void Shutdown()
+    {
+        if (m_conn)
+            m_conn->Disconnect();
     }
 
 private:
@@ -195,8 +206,8 @@ bool MyApp::OnInit()
         return false;
 
 #if wxUSE_SOCKETS_FOR_IPC
-        // we must call this from the main thread
-        wxSocketBase::Initialize();
+    // we must call this from the main thread
+    wxSocketBase::Initialize();
 #endif // wxUSE_SOCKETS_FOR_IPC
 
     if ( !m_server.Create(IPC_TEST_PORT) )
@@ -209,6 +220,7 @@ bool MyApp::OnInit()
 
 int MyApp::OnExit()
 {
+    m_server.Shutdown();
 
 #if wxUSE_SOCKETS_FOR_IPC
     wxSocketBase::Shutdown();
