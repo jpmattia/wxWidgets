@@ -60,6 +60,8 @@ public:
             m_bufferList[i] = nullptr;
 
         m_nextAvailable = 0;
+
+        m_simple_advise_complete = false;
     }
 
     ~IPCTestConnection()
@@ -77,6 +79,31 @@ public:
 
         return data == "Date";
     }
+
+    virtual bool OnAdvise(const wxString& topic,
+                          const wxString& WXUNUSED(item),
+                          const void* data,
+                          size_t size,
+                          wxIPCFormat format)
+    {
+        std::cout << "start onadvise" << std::flush;
+
+        if ( topic != IPC_TEST_TOPIC )
+            return false;
+
+        REQUIRE( format == wxIPC_TEXT );
+
+        wxString s(static_cast<const char*>(data), size);
+
+        CHECK( s == "OK SimpleAdvise" );
+        m_simple_advise_complete = true;
+
+        std::cout << "end onadvise" << std::flush;
+        std::cout.flush();
+
+        return true;
+    }
+
 
 private:
     char* GetBufPtr(size_t size)
@@ -102,6 +129,9 @@ private:
     char* m_bufferList[MAX_MSG_BUFFERS];
     int m_nextAvailable;
 
+public:
+    bool  m_simple_advise_complete;
+
     wxDECLARE_NO_COPY_CLASS(IPCTestConnection);
 };
 
@@ -115,10 +145,10 @@ class IPCServerProcess : public wxProcess
 {
 public:
     IPCServerProcess()
-        {
+    {
             Redirect();
             m_finished = false;
-        }
+    }
 
     virtual void OnTerminate(int pid, int status) override
     {
@@ -154,6 +184,7 @@ public:
         }
 
         std::cout << '\n' << textout << '\n' << texterr << '\n' << std::flush;
+        std::cout.flush();
     }
 
     bool m_finished;
@@ -234,7 +265,7 @@ public:
     bool
     Connect(const wxString& host, const wxString& service, const wxString& topic)
     {
-        m_conn = MakeConnection(host, service, topic);
+        m_conn = (IPCTestConnection*) MakeConnection(host, service, topic);
 
         return m_conn != nullptr;
     }
@@ -249,7 +280,12 @@ public:
         }
     }
 
-    wxConnectionBase& GetConn() const
+    wxConnectionBase* OnMakeConnection()
+    {
+        return new IPCTestConnection;
+    }
+
+    IPCTestConnection& GetConn() const
     {
         REQUIRE( m_conn );
 
@@ -257,7 +293,7 @@ public:
     }
 
 private:
-    wxConnectionBase *m_conn;
+    IPCTestConnection *m_conn;
 
     wxDECLARE_NO_COPY_CLASS(IPCTestClient);
 };
@@ -289,7 +325,7 @@ public:
 protected:
     virtual void *Entry()
     {
-        wxConnectionBase& conn = gs_client->GetConn();
+        IPCTestConnection& conn = gs_client->GetConn();
 
         for (size_t n=1; n < MESSAGE_ITERATIONS + 1; n++)
         {
@@ -316,19 +352,24 @@ TEST_CASE("JP", "[TEST_IPC][.]")
 {
 
 #if wxUSE_SOCKETS_FOR_IPC
-        // we must call this from the main thread
-        wxSocketBase::Initialize();
+    // we must call this from the main thread
+    wxSocketBase::Initialize();
 #endif // wxUSE_SOCKETS_FOR_IPC
 
     ExecAsyncWrapper exec_wrapper;
 
-    long pid = exec_wrapper.DoExecute();
+    bool bDoExternalServer = true;
 
-    // Allow time for the server to bind the port
-    wxMilliSleep(300);
+    if (bDoExternalServer)
+    {
 
-    REQUIRE( pid != 0);
+        long pid = exec_wrapper.DoExecute();
 
+        // Allow time for the server to bind the port
+        wxMilliSleep(300);
+
+        REQUIRE( pid != 0);
+    }
     gs_client = new IPCTestClient;
 
 
@@ -345,11 +386,12 @@ TEST_CASE("JP", "[TEST_IPC][.]")
     }
 
 
+
     SECTION("SimpleRequest")
     {
         CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
-        wxConnectionBase& conn = gs_client->GetConn();
+        IPCTestConnection& conn = gs_client->GetConn();
 
         const wxString s("ping");
         size_t size=0;
@@ -364,7 +406,7 @@ TEST_CASE("JP", "[TEST_IPC][.]")
     {
         CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
-        wxConnectionBase& conn = gs_client->GetConn();
+        IPCTestConnection& conn = gs_client->GetConn();
 
         wxString s("Date");
         CHECK( conn.Execute(s) );
@@ -384,6 +426,11 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         CHECK( wxString(data) == s );
     }
 
+
+
+
+
+
     SECTION("SingleThreadOfRequests")
     {
         CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
@@ -393,7 +440,7 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         thread1.Wait();
 
         // Make sure the server got all the requests in the correct order.
-        wxConnectionBase& conn = gs_client->GetConn();
+        IPCTestConnection& conn = gs_client->GetConn();
 
         size_t size=0;
         wxString query("get_thread1_request_counter");
@@ -408,6 +455,8 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         INFO( wxString(data) );
         CHECK( wxString(data).IsEmpty() );
     }
+
+
 
     SECTION("MultipleThreadsOfRequests")
     {
@@ -426,7 +475,7 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         thread3.Wait();
 
         // Make sure the server got all the requests in the correct order.
-        wxConnectionBase& conn = gs_client->GetConn();
+        IPCTestConnection& conn = gs_client->GetConn();
 
         size_t size=0;
         wxString query = "get_thread1_request_counter";
@@ -456,16 +505,59 @@ TEST_CASE("JP", "[TEST_IPC][.]")
 
 
 
-    wxConnectionBase& conn = gs_client->GetConn();
-    const wxString s("shutdown");
-    CHECK( conn.Execute(s) );
+    SECTION("SimpleAdvise")
+    {
+        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
-    // Make sure the server process exits.
-    CHECK( exec_wrapper.EndProcess() );
+        IPCTestConnection& conn = gs_client->GetConn();
+        wxString item = "SimpleAdvise test";
 
-    // Allow time for the server to unbind the port
-    wxMilliSleep(100);
+        CHECK( conn.StartAdvise(item) );
 
+        if (!conn.m_simple_advise_complete)
+            std::cout << "simple_advise_complete false\n" << std::flush;
+
+
+        // wait a maximum of 2 seconds for completion.
+        std::cout << "Wait for OnAdvise()\n" << std::flush;
+        int cnt = 0;
+        while ( cnt++ < 200 && !conn.m_simple_advise_complete )
+        {
+            wxMilliSleep(10);
+        }
+
+        CHECK( conn.StopAdvise(item) );
+        CHECK( conn.m_simple_advise_complete );
+
+        if (conn.m_simple_advise_complete)
+            std::cout << "simple_advise_complete true\n" << std::flush;
+
+
+        // Make sure the server didn't record an error
+        wxString query = "get_error_string";
+        size_t size=0;
+
+        char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+
+        INFO( wxString(data) );
+        CHECK( wxString(data).IsEmpty() );
+    }
+
+
+    if (bDoExternalServer)
+    {
+        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+        IPCTestConnection& conn = gs_client->GetConn();
+        const wxString s("shutdown");
+        CHECK( conn.Execute(s) );
+
+// Make sure the server process exits.
+        CHECK( exec_wrapper.EndProcess() );
+
+// Allow time for the server to release the port
+        wxMilliSleep(100);
+    }
     gs_client->Disconnect();
     delete gs_client;
 
@@ -473,7 +565,7 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         wxSocketBase::Shutdown();
 #endif // wxUSE_SOCKETS_FOR_IPC
 
-    std::cout << '\n' << std::flush;
+    std::cout << "end section \n" << std::flush;
 }
 
 #endif // wxUSE_THREADS

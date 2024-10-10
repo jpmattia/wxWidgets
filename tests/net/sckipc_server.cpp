@@ -9,7 +9,7 @@
 
 // For compilers that support precompilation, includes "wx/wx.h".
 // and "wx/cppunit.h"
-#include "testprec.h"
+#include <wx/wx.h>
 
 #include <iostream>  // JPDELETE  for testlogging
 
@@ -76,6 +76,13 @@ public:
                                   const wxString& item,
                                   size_t* size,
                                   wxIPCFormat format);
+
+    virtual bool OnStartAdvise(const wxString& topic,
+                               const wxString& item);
+
+    virtual bool OnStopAdvise(const wxString& topic,
+                              const wxString& item);
+
 private:
 
     wxString HandleThreadRequestCounting(const wxString& item);
@@ -112,10 +119,42 @@ private:
     bool m_thread1_request_error, m_thread2_request_error,
         m_thread3_request_error;
 
+public:
+    bool m_advise_active;
     wxString m_general_error;
 
-    wxDECLARE_NO_COPY_CLASS(IPCTestConnection);
+
+   wxDECLARE_NO_COPY_CLASS(IPCTestConnection);
 };
+
+// ----------------------------------------------------------------------------
+// SingleAdviseThread, a thread that sends a single Advise() message
+// ----------------------------------------------------------------------------
+
+class SingleAdviseThread : public wxThread
+{
+public:
+
+    SingleAdviseThread(const wxString& item)
+    {
+        m_item = item;
+
+        Create();
+    }
+
+protected:
+    virtual void *Entry();
+
+    wxString m_item;
+
+    wxDECLARE_NO_COPY_CLASS(SingleAdviseThread);
+};
+
+
+// ----------------------------------------------------------------------------
+// IPCTestConnection implementation
+// ----------------------------------------------------------------------------
+
 
 const void* IPCTestConnection::OnRequest(const wxString& topic,
                                          const wxString& item,
@@ -260,8 +299,41 @@ void IPCTestConnection::ResetThreadTrackers()
 
     m_thread1_request_error = m_thread2_request_error =
         m_thread3_request_error = false;
+
+    m_advise_active = false;
 }
 
+bool IPCTestConnection::OnStartAdvise(const wxString& topic,
+                                      const wxString& item)
+{
+    if ( topic != IPC_TEST_TOPIC )
+        return false;
+
+    m_advise_active = true;
+
+    if (item == "SimpleAdvise test")
+    {
+        SingleAdviseThread* thread = new SingleAdviseThread(item);
+        thread->Run();
+    }
+    else if (item == "MultiAdvise test")
+    {
+
+    }
+
+    return true;
+}
+
+bool IPCTestConnection::OnStopAdvise(const wxString& topic,
+                                     const wxString& WXUNUSED(item))
+{
+    if ( topic != IPC_TEST_TOPIC )
+        return false;
+
+    m_advise_active = false;
+
+    return true;
+}
 
 // ----------------------------------------------------------------------------
 // test server class
@@ -281,7 +353,7 @@ public:
             delete m_conn;
     }
 
-    virtual wxConnectionBase *OnAcceptConnection(const wxString& topic)
+    virtual IPCTestConnection *OnAcceptConnection(const wxString& topic)
     {
         if ( topic != IPC_TEST_TOPIC )
             return nullptr;
@@ -294,6 +366,18 @@ public:
     {
         if (m_conn)
             m_conn->Disconnect();
+    }
+
+    IPCTestConnection& GetConn()
+    {
+        if (!m_conn)
+        {
+            // create a bogus connection rather than crash.
+            m_conn = new IPCTestConnection;
+            m_conn->m_general_error = "Invalid connection in GetConn()";
+        }
+
+        return *m_conn;
     }
 
 private:
@@ -310,7 +394,6 @@ public:
     virtual bool OnInit() override;
     virtual int OnExit() override;
 
-protected:
     IPCTestServer m_server;
 };
 
@@ -321,6 +404,27 @@ wxDECLARE_APP(MyApp);
 // ============================================================================
 
 wxIMPLEMENT_APP_CONSOLE(MyApp);
+
+void* SingleAdviseThread::Entry()
+{
+    wxMilliSleep(100); // wait for StartAdvise acknowledgement
+
+    IPCTestConnection& conn = wxGetApp().m_server.GetConn();
+    if ( !conn.m_advise_active )
+        conn.m_general_error = "Advise() call without StartAdvise()\n";
+
+    wxString s = "OK SimpleAdvise";
+    size_t size = strlen(s.mb_str());
+
+//    std::cout << "start advise" << std::flush;
+
+    if ( !conn.Advise(m_item, s.mb_str(), size, wxIPC_TEXT) )
+        conn.m_general_error = "Advise() call returned false";
+
+//    std::cout << "end advise, err = " << conn.m_general_error << std::flush;
+
+    return nullptr;
+}
 
 // ----------------------------------------------------------------------------
 // MyApp
@@ -341,6 +445,7 @@ bool MyApp::OnInit()
         std::cout << "Failed to create server. Make sure nothing is running on port " << IPC_TEST_PORT << std::flush;
         return false;
     }
+
     return true;
 }
 
