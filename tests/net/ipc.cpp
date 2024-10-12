@@ -36,7 +36,7 @@
 #include <wx/sstream.h>
 
 #define MAX_MSG_BUFFERS 2048
-#define MESSAGE_ITERATIONS 100
+#define MESSAGE_ITERATIONS 20
 #define MESSAGE_ITERATIONS_STRING  wxString::Format("%d",MESSAGE_ITERATIONS)
 
 namespace
@@ -61,7 +61,7 @@ public:
 
         m_nextAvailable = 0;
 
-        m_simple_advise_complete = false;
+        ResetThreadTrackers();
     }
 
     ~IPCTestConnection()
@@ -81,13 +81,11 @@ public:
     }
 
     virtual bool OnAdvise(const wxString& topic,
-                          const wxString& WXUNUSED(item),
+                          const wxString& item,
                           const void* data,
                           size_t size,
                           wxIPCFormat format)
     {
-        std::cout << "start onadvise" << std::flush;
-
         if ( topic != IPC_TEST_TOPIC )
             return false;
 
@@ -95,11 +93,31 @@ public:
 
         wxString s(static_cast<const char*>(data), size);
 
-        CHECK( s == "OK SimpleAdvise" );
-        m_simple_advise_complete = true;
+        if (item == "SimpleAdvise test")
+        {
 
-        std::cout << "end onadvise" << std::flush;
-        std::cout.flush();
+            CHECK( s == "OK SimpleAdvise" );
+            m_advise_complete = true;
+        }
+
+        else if (item == "MultiAdvise test" ||
+                 item == "MultiAdvise MultiThread test" ||
+                 item == "MultiAdvise MultiThread test with simultaneous Requests")
+        {
+            HandleThreadAdviseCounting(s);
+
+            if (m_thread1_advise_lastval == MESSAGE_ITERATIONS &&
+                m_thread2_advise_lastval == MESSAGE_ITERATIONS &&
+                m_thread3_advise_lastval == MESSAGE_ITERATIONS)
+            {
+                m_advise_complete = true;
+            }
+        }
+
+        else
+        {
+            m_general_error << "Unknown Advise item: " << item << wxString('\n');
+        }
 
         return true;
     }
@@ -124,16 +142,100 @@ private:
         return ptr;
     }
 
+    void ResetThreadTrackers()
+    {
+        m_general_error = "";
+
+        m_advise_complete = false;
+
+        m_thread1_advise_lastval = m_thread2_advise_lastval =
+            m_thread3_advise_lastval = 0;
+    }
+
+    void HandleThreadAdviseCounting(const wxString& advise_string);
+
     wxCRIT_SECT_DECLARE_MEMBER(m_cs_assign_buffer);
 
     char* m_bufferList[MAX_MSG_BUFFERS];
     int m_nextAvailable;
 
 public:
-    bool  m_simple_advise_complete;
+    bool  m_advise_complete;
+
+    int m_thread1_advise_lastval;
+    int m_thread2_advise_lastval;
+    int m_thread3_advise_lastval;
+
+    wxString m_general_error;
 
     wxDECLARE_NO_COPY_CLASS(IPCTestConnection);
 };
+
+// Helper for the MultiAdvise thread tests. Repeated Advise's of the form
+// "MultiAdvise thread <thread_number> <serial_number>" are received during
+// the test. Track the serial number in the appropriate
+// m_threadN_advise_lastval vars.
+
+void IPCTestConnection::HandleThreadAdviseCounting(const wxString& advise_string)
+{
+    wxString info;
+    advise_string.StartsWith("MultiAdvise thread", &info);
+
+    int thread_number = wxAtoi(info.Left(2));
+    int counter_value = wxAtoi(info.Mid(3));
+    int lastval = INT_MIN; // default to causing an error below
+
+    bool err = false;
+    wxString s, err_string;
+
+    std::cout << advise_string << '\n' << std::flush;
+
+
+    switch (thread_number)
+    {
+    case 0:
+        err_string =
+            "Error: MultiAdvise thread number could not be converted.\n";
+        err = true;
+        break;
+
+    case 1:
+        lastval = m_thread1_advise_lastval;
+        m_thread1_advise_lastval = counter_value;
+        break;
+
+    case 2:
+        lastval = m_thread2_advise_lastval;
+        m_thread2_advise_lastval = counter_value;
+        break;
+
+    case 3:
+        lastval = m_thread3_advise_lastval;
+        m_thread3_advise_lastval = counter_value;
+        break;
+
+    default:
+        err_string =
+            "Error: MultiAdvise thread number must be 1, 2, or3.\n";
+        err = true;
+    }
+
+    if (lastval !=  counter_value -1)
+    {
+        // Concatenate to any other error:
+        err_string +=
+            "Error: Misordered count in thread " +
+            wxString::Format("%d - expected %d, received %d\n",
+                             thread_number, lastval + 1, counter_value);
+        err = true;
+    }
+
+    if (err)
+    {
+        m_general_error += err_string;
+    }
+}
+
 
 // ----------------------------------------------------------------------------
 // IPCServerProcess
@@ -333,6 +435,8 @@ protected:
             size_t size=0;
             const char* data = (char*) conn.Request(s, &size, wxIPC_PRIVATE);
 
+            std::cout << wxString(data) << '\n' << std::flush;
+
             CHECK( wxString(data) == "OK: " + s );
         }
 
@@ -358,20 +462,19 @@ TEST_CASE("JP", "[TEST_IPC][.]")
 
     ExecAsyncWrapper exec_wrapper;
 
-    bool bDoExternalServer = true;
+    bool bStartExternalServer = false;
 
-    if (bDoExternalServer)
+    if (bStartExternalServer)
     {
 
         long pid = exec_wrapper.DoExecute();
 
         // Allow time for the server to bind the port
-        wxMilliSleep(300);
+        wxMilliSleep(50);
 
         REQUIRE( pid != 0);
     }
     gs_client = new IPCTestClient;
-
 
     SECTION("Connect")
     {
@@ -427,10 +530,6 @@ TEST_CASE("JP", "[TEST_IPC][.]")
     }
 
 
-
-
-
-
     SECTION("SingleThreadOfRequests")
     {
         CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
@@ -455,6 +554,7 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         INFO( wxString(data) );
         CHECK( wxString(data).IsEmpty() );
     }
+
 
 
 
@@ -503,8 +603,6 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         CHECK( wxString(data).IsEmpty() );
     }
 
-
-
     SECTION("SimpleAdvise")
     {
         CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
@@ -514,24 +612,15 @@ TEST_CASE("JP", "[TEST_IPC][.]")
 
         CHECK( conn.StartAdvise(item) );
 
-        if (!conn.m_simple_advise_complete)
-            std::cout << "simple_advise_complete false\n" << std::flush;
-
-
         // wait a maximum of 2 seconds for completion.
-        std::cout << "Wait for OnAdvise()\n" << std::flush;
         int cnt = 0;
-        while ( cnt++ < 200 && !conn.m_simple_advise_complete )
+        while ( cnt++ < 200 && !conn.m_advise_complete )
         {
             wxMilliSleep(10);
         }
 
         CHECK( conn.StopAdvise(item) );
-        CHECK( conn.m_simple_advise_complete );
-
-        if (conn.m_simple_advise_complete)
-            std::cout << "simple_advise_complete true\n" << std::flush;
-
+        CHECK( conn.m_advise_complete );
 
         // Make sure the server didn't record an error
         wxString query = "get_error_string";
@@ -543,8 +632,163 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         CHECK( wxString(data).IsEmpty() );
     }
 
+    SECTION("ThreadOfMultiAdvise")
+    {
+        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
-    if (bDoExternalServer)
+        IPCTestConnection& conn = gs_client->GetConn();
+        wxString item = "MultiAdvise test";
+
+        CHECK( conn.StartAdvise(item) );
+
+        // wait a maximum of 2 seconds for completion.
+        int cnt = 0;
+        while ( cnt++ < 500 &&
+                conn.m_thread1_advise_lastval != MESSAGE_ITERATIONS )
+        {
+            wxMilliSleep(10);
+        }
+
+        CHECK( conn.StopAdvise(item) );
+
+        CHECK( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS );
+
+        INFO( conn.m_general_error );
+        CHECK( conn.m_general_error.IsEmpty() );
+
+        // Make sure the server didn't record an error
+        wxString query = "get_error_string";
+        size_t size=0;
+
+        char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+
+        INFO( wxString(data) );
+        CHECK( wxString(data).IsEmpty() );
+    }
+
+    SECTION("MultipleThreadsOfMultiAdvise")
+    {
+        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+        IPCTestConnection& conn = gs_client->GetConn();
+        wxString item = "MultiAdvise MultiThread test";
+
+        CHECK( conn.StartAdvise(item) );
+
+        // wait a maximum of 2 seconds for completion.
+        int cnt = 0;
+        while ( cnt++ < 1000 )
+        {
+            wxMilliSleep(10);
+
+            if ( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS &&
+                 conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS &&
+                 conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS)
+            {
+                break;
+            }
+        }
+
+        CHECK( conn.StopAdvise(item) );
+
+        CHECK( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS );
+        CHECK( conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS );
+        CHECK( conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS );
+
+        INFO( conn.m_general_error );
+        CHECK( conn.m_general_error.IsEmpty() );
+
+        // Make sure the server didn't record an error
+        wxString query = "get_error_string";
+        size_t size=0;
+
+        char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+
+        INFO( wxString(data) );
+        CHECK( wxString(data).IsEmpty() );
+    }
+
+    SECTION("MultiAdvise MultiThreads test with simultaneous MultiRequests MultiThreads");
+    {
+        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+        IPCTestConnection& conn = gs_client->GetConn();
+
+        MultiRequestThread thread1("MultiRequest thread 1");
+        MultiRequestThread thread2("MultiRequest thread 2");
+        MultiRequestThread thread3("MultiRequest thread 3");
+
+        // start local and remote threads as close to simultaneous as possible
+        wxString item = "MultiAdvise MultiThread test with simultaneous Requests";
+
+        CHECK( conn.StartAdvise(item) ); // starts 3 advise threads
+
+        thread1.Run();
+        thread2.Run();
+        thread3.Run();
+
+
+        // Wait for local threads to finish ...
+        thread1.Wait();
+        thread2.Wait();
+        thread3.Wait();
+
+        // ... and the remote threads too.
+        int cnt = 0;
+        while ( cnt++ < 2000 ) // max of 2 seconds
+        {
+            wxMilliSleep(10);
+
+            if ( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS &&
+                 conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS &&
+                 conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS)
+            {
+                break;
+            }
+        }
+
+        CHECK( conn.StopAdvise(item) );
+
+        // Everything is done, check that all the advise messages were
+        // correctly received.
+
+        CHECK( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS );
+        CHECK( conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS );
+        CHECK( conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS );
+
+        INFO( conn.m_general_error );
+        CHECK( conn.m_general_error.IsEmpty() );
+
+
+        // Also make sure all the request messages were correctly received on
+        // the server side. The client side was already validated in the
+        // MultiRequestThread.
+        size_t size=0;
+        wxString query = "get_thread1_request_counter";
+
+        char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+        size=0;
+        query = "get_thread2_request_counter";
+
+        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+        size=0;
+        query = "get_thread3_request_counter";
+
+        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+        size=0;
+        query = "get_error_string";
+        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+
+        INFO( wxString(data) );
+        CHECK( wxString(data).IsEmpty() );
+    }
+
+    if (bStartExternalServer)
     {
         CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 

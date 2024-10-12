@@ -11,6 +11,7 @@
 // and "wx/cppunit.h"
 #include <wx/wx.h>
 
+
 #include <iostream>  // JPDELETE  for testlogging
 
 #if wxUSE_THREADS
@@ -27,6 +28,7 @@
 #include <wx/thread.h>
 
 #define MAX_MSG_BUFFERS 2048
+#define MESSAGE_ITERATIONS 20
 
 namespace
 {
@@ -35,6 +37,13 @@ const char *IPC_TEST_PORT = "4242";
 const char *IPC_TEST_TOPIC = "IPC TEST";
 
 } // anonymous namespace
+
+
+void dout(wxString s)
+{
+    std::cout << s << '\n' << std::flush;
+
+}
 
 // ----------------------------------------------------------------------------
 // test connection class used by IPCTestServer
@@ -116,13 +125,12 @@ private:
     int m_thread1_request_lastval, m_thread2_request_lastval,
         m_thread3_request_lastval;
 
-    bool m_thread1_request_error, m_thread2_request_error,
-        m_thread3_request_error;
-
 public:
     bool m_advise_active;
     wxString m_general_error;
 
+    bool m_wait_for_first_request;
+    bool m_first_request_received;
 
    wxDECLARE_NO_COPY_CLASS(IPCTestConnection);
 };
@@ -150,6 +158,29 @@ protected:
     wxDECLARE_NO_COPY_CLASS(SingleAdviseThread);
 };
 
+// ----------------------------------------------------------------------------
+// MultiAdviseThread, a thread that sends repeated Advise() messages
+// ----------------------------------------------------------------------------
+
+class MultiAdviseThread : public wxThread
+{
+public:
+    MultiAdviseThread(const wxString& item, const wxString& label)
+    {
+        m_item = item;
+        m_label = label;
+
+        Create();
+    }
+
+protected:
+    virtual void *Entry();
+
+    wxString m_item, m_label;
+
+    wxDECLARE_NO_COPY_CLASS(MultiAdviseThread);
+};
+
 
 // ----------------------------------------------------------------------------
 // IPCTestConnection implementation
@@ -165,6 +196,12 @@ const void* IPCTestConnection::OnRequest(const wxString& topic,
 
     if ( topic != IPC_TEST_TOPIC )
         return nullptr;
+
+    // When running simultaneous MultiAdvise (server) and MultiRequest
+    // (client) threads, notify MultiAdvise when the first request has been
+    // received helps to synchronize the two processes, which tests
+    // possible race conditions between Advise() and Request() calls.
+    m_first_request_received = true;
 
     wxString s;
 
@@ -223,8 +260,6 @@ const void* IPCTestConnection::OnRequest(const wxString& topic,
 // requests of the form "MultiRequest thread <thread_number>
 // <serial_number>". Track the serial number in the appropriate
 // m_threadN_request_lastval vars.
-//
-// The param "info" contains the string after "MultiRequest thread".
 //
 // The return string is prefaced with "Error:" when a problem arises, along
 // with a human readable message describing the error, and "OK:" when the
@@ -297,10 +332,10 @@ void IPCTestConnection::ResetThreadTrackers()
     m_thread1_request_lastval = m_thread2_request_lastval =
         m_thread3_request_lastval = 0;
 
-    m_thread1_request_error = m_thread2_request_error =
-        m_thread3_request_error = false;
-
     m_advise_active = false;
+
+    m_wait_for_first_request = false;
+    m_first_request_received = false;
 }
 
 bool IPCTestConnection::OnStartAdvise(const wxString& topic,
@@ -316,12 +351,51 @@ bool IPCTestConnection::OnStartAdvise(const wxString& topic,
         SingleAdviseThread* thread = new SingleAdviseThread(item);
         thread->Run();
     }
-    else if (item == "MultiAdvise test")
+    else if (item.StartsWith("MultiAdvise test"))
     {
-
+        MultiAdviseThread* thread1 =
+            new MultiAdviseThread(item, "MultiAdvise thread 1");
+        thread1->Run();
     }
 
-    return true;
+    else if (item.StartsWith("MultiAdvise MultiThread test"))
+    {
+        MultiAdviseThread* thread1 =
+            new MultiAdviseThread(item, "MultiAdvise thread 1");
+        MultiAdviseThread* thread2 =
+            new MultiAdviseThread(item, "MultiAdvise thread 2");
+        MultiAdviseThread* thread3 =
+            new MultiAdviseThread(item, "MultiAdvise thread 3");
+
+        thread1->Run();
+        thread2->Run();
+        thread3->Run();
+    }
+
+    else if (item.StartsWith("MultiAdvise MultiThread test with simultaneous Requests"))
+    {
+        // Tell the advise threads to wait for the requests to start.
+        m_wait_for_first_request = true;
+
+        MultiAdviseThread* thread1 =
+            new MultiAdviseThread(item, "MultiAdvise thread 1");
+        MultiAdviseThread* thread2 =
+            new MultiAdviseThread(item, "MultiAdvise thread 2");
+        MultiAdviseThread* thread3 =
+            new MultiAdviseThread(item, "MultiAdvise thread 3");
+
+        thread1->Run();
+        thread2->Run();
+        thread3->Run();
+    }
+
+    else
+    {
+        m_general_error += "Unknown StartAdvise item\n";
+        m_advise_active = false;
+    }
+
+    return m_advise_active;
 }
 
 bool IPCTestConnection::OnStopAdvise(const wxString& topic,
@@ -407,7 +481,7 @@ wxIMPLEMENT_APP_CONSOLE(MyApp);
 
 void* SingleAdviseThread::Entry()
 {
-    wxMilliSleep(100); // wait for StartAdvise acknowledgement
+    wxMilliSleep(50); // wait for StartAdvise acknowledgement
 
     IPCTestConnection& conn = wxGetApp().m_server.GetConn();
     if ( !conn.m_advise_active )
@@ -416,12 +490,42 @@ void* SingleAdviseThread::Entry()
     wxString s = "OK SimpleAdvise";
     size_t size = strlen(s.mb_str());
 
-//    std::cout << "start advise" << std::flush;
-
     if ( !conn.Advise(m_item, s.mb_str(), size, wxIPC_TEXT) )
         conn.m_general_error = "Advise() call returned false";
 
-//    std::cout << "end advise, err = " << conn.m_general_error << std::flush;
+    return nullptr;
+}
+
+void* MultiAdviseThread::Entry()
+{
+    IPCTestConnection& conn = wxGetApp().m_server.GetConn();
+
+    if ( !conn.m_advise_active )
+        conn.m_general_error = "Advise() call without StartAdvise()\n";
+
+    // The MultiAdviseThread threads in the server start dispatching their
+    // calls quickly compared to the MultiRequestThread in the client, so
+    // wait until we start seeing Request()'s arrive.
+
+    if ( conn.m_wait_for_first_request )
+        while ( !conn.m_first_request_received )
+            wxMilliSleep(50);
+
+    for (size_t n=1; n < MESSAGE_ITERATIONS + 1; n++)
+    {
+        if ( !conn.m_advise_active )
+            break;
+
+        wxMilliSleep(200); // interleave with request
+
+        wxString s = m_label + wxString::Format(" %zu", n);
+        size_t size = strlen(s.mb_str());
+
+        if ( !conn.Advise(m_item, s.mb_str(), size, wxIPC_TEXT) )
+            conn.m_general_error
+                += wxString::Format(m_label +
+                                    "Advise() call returned false: %zu",n);
+    }
 
     return nullptr;
 }
@@ -443,6 +547,11 @@ bool MyApp::OnInit()
     if ( !m_server.Create(IPC_TEST_PORT) )
     {
         std::cout << "Failed to create server. Make sure nothing is running on port " << IPC_TEST_PORT << std::flush;
+
+#if wxUSE_SOCKETS_FOR_IPC
+        wxSocketBase::Shutdown();
+#endif // wxUSE_SOCKETS_FOR_IPC
+
         return false;
     }
 

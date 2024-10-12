@@ -34,6 +34,10 @@ public:
     {
         m_fds[0] =
         m_fds[1] = -1;
+
+        m_input_socket_callback_installed = false;
+        m_output_socket_callback_installed = false;
+
     }
 
     virtual void ReenableEvents(wxSocketEventFlags flags) override
@@ -105,6 +109,8 @@ private:
     // error
     int CheckForInput();
 
+    bool m_input_socket_callback_installed;
+    bool m_output_socket_callback_installed;
 
     // give it access to our m_fds
     friend class wxSocketFDBasedManager;

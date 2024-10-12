@@ -26,6 +26,10 @@
 #   include <sys/select.h>
 #endif
 
+#include <iostream>
+wxCRIT_SECT_DECLARE_MEMBER(gs_critical_enable_events);
+
+
 #ifndef WX_SOCKLEN_T
 
 #ifdef VMS
@@ -88,6 +92,8 @@ wxSocketError wxSocketImplUnix::GetLastError() const
 
 void wxSocketImplUnix::DoEnableEvents(int flags, bool enable)
 {
+    wxCRIT_SECT_LOCKER(lock, gs_critical_enable_events);
+
     wxSocketManager * const manager = wxSocketManager::Get();
     if (!manager)
         return;
@@ -100,17 +106,36 @@ void wxSocketImplUnix::DoEnableEvents(int flags, bool enable)
         wxASSERT_MSG( !(GetSocketFlags() & wxSOCKET_BLOCK),
                       "enabling events for a blocking socket?" );
 
-        if ( flags & wxSOCKET_INPUT_FLAG )
+        if ( (flags & wxSOCKET_INPUT_FLAG) && !m_input_socket_callback_installed )
+        {
+            m_input_socket_callback_installed = true;
+            std::cout << "install wxSOCKET_INPUT_FLAG\n" << std::flush;
             manager->Install_Callback(this, wxSOCKET_INPUT);
-        if ( flags & wxSOCKET_OUTPUT_FLAG )
+        }
+
+        if ( (flags & wxSOCKET_OUTPUT_FLAG) && !m_output_socket_callback_installed )
+        {
+            m_output_socket_callback_installed = true;
+            std::cout << "install wxSOCKET_OUTPUT_FLAG\n" << std::flush;
             manager->Install_Callback(this, wxSOCKET_OUTPUT);
+        }
     }
+
     else // off
     {
-        if ( flags & wxSOCKET_INPUT_FLAG )
+        if ( (flags & wxSOCKET_INPUT_FLAG) && m_input_socket_callback_installed )
+        {
+            m_input_socket_callback_installed = false;
+            std::cout << "Uninstall wxSOCKET_INPUT_FLAG\n" << std::flush;
             manager->Uninstall_Callback(this, wxSOCKET_INPUT);
-        if ( flags & wxSOCKET_OUTPUT_FLAG )
+        }
+
+        if ( (flags & wxSOCKET_OUTPUT_FLAG) && m_output_socket_callback_installed )
+        {
+            m_output_socket_callback_installed = false;
+            std::cout << "Uninstall wxSOCKET_OUTPUT_FLAG\n" << std::flush;
             manager->Uninstall_Callback(this, wxSOCKET_OUTPUT);
+        }
     }
 }
 
@@ -128,6 +153,9 @@ int wxSocketImplUnix::CheckForInput()
 
 void wxSocketImplUnix::OnStateChange(wxSocketNotify event)
 {
+
+    std::cout << "wxSocketImplUnix::OnStateChange\n" << std::flush;
+
     NotifyOnStateChange(event);
 
     if ( event == wxSOCKET_LOST )

@@ -49,6 +49,8 @@
     #include <errno.h>
 #endif
 
+#include <iostream>
+
 // we use MSG_NOSIGNAL to avoid getting SIGPIPE when sending data to a remote
 // host which closed the connection if it is available, otherwise we rely on
 // SO_NOSIGPIPE existency
@@ -235,15 +237,22 @@ public:
         wxASSERT_MSG( !m_socket->m_writing, "write reentrancy?" );
 
         m_socket->m_writing = true;
+
+        std::cout << "~wxSocketWriteGuard reenablewxSOCKET_OUTPUT_FLAG\n" << std::flush;
+        wxSocketImpl * const impl = m_socket->m_impl;
+        if ( impl && impl->m_fd != INVALID_SOCKET )
+            impl->ReenableEvents(wxSOCKET_OUTPUT_FLAG);
+
     }
 
     ~wxSocketWriteGuard()
     {
         m_socket->m_writing = false;
 
-        wxSocketImpl * const impl = m_socket->m_impl;
-        if ( impl && impl->m_fd != INVALID_SOCKET )
-            impl->ReenableEvents(wxSOCKET_OUTPUT_FLAG);
+        // std::cout << "~wxSocketWriteGuard reenablewxSOCKET_OUTPUT_FLAG\n" << std::flush;
+        // wxSocketImpl * const impl = m_socket->m_impl;
+        // if ( impl && impl->m_fd != INVALID_SOCKET )
+        //     impl->ReenableEvents(wxSOCKET_OUTPUT_FLAG);
     }
 
 private:
