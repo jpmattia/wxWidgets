@@ -15,8 +15,6 @@
 // and "wx/cppunit.h"
 #include "testprec.h"
 
-#include <iostream>  // JPDELETE  for testlogging
-
 // this test needs threads as it runs the test server in a secondary thread
 #if wxUSE_THREADS
 
@@ -38,6 +36,21 @@
 #define MAX_MSG_BUFFERS 2048
 #define MESSAGE_ITERATIONS 20
 #define MESSAGE_ITERATIONS_STRING  wxString::Format("%d",MESSAGE_ITERATIONS)
+
+
+// Automated test spawns a process with an external server.  When running this
+// test manually, set g_use_external_server to false and then start the
+// test_sckipc_server via a command line. Then the TEST_CASE below can run.
+bool g_use_external_server = true;
+
+// When g_show_message_timing is set to true, Advise() and RequestReply()
+// messages will be printed when they arrive. This shows how the IPC messages
+// arrive and whether they interleave,
+bool g_show_message_timing = false;
+
+// Output for g_show_message_timing uses std::cout, so we can get a sense of the
+// raw arrival times.
+#include <iostream>
 
 namespace
 {
@@ -188,7 +201,8 @@ void IPCTestConnection::HandleThreadAdviseCounting(const wxString& advise_string
     bool err = false;
     wxString s, err_string;
 
-    std::cout << advise_string << '\n' << std::flush;
+    if ( g_show_message_timing )
+        std::cout << advise_string << '\n' << std::flush;
 
 
     switch (thread_number)
@@ -254,39 +268,15 @@ public:
 
     virtual void OnTerminate(int pid, int status) override
     {
-        wxString output =
-            wxString::Format("Process %u terminated with exit code %d.\n",
-                             pid, status);
-        std::cout << output << std::flush;
         m_finished = true;
-    }
 
-    void PrintStreams()
-    {
-        wxString textout="stdout:\n", texterr="stderr:\n";
-
-        if ( !GetInputStream() )
+        if ( g_show_message_timing )
         {
-            textout += "closed.";
+            std::cout
+                << wxString::Format("Process %u terminated, exit code %d.\n",
+                                    pid, status)
+                << std::flush;
         }
-        else
-        {
-            wxStringOutputStream procOutput;
-            GetInputStream()->Read(procOutput);
-            textout += procOutput.GetString();
-        }
-
-        if ( !GetErrorStream() )
-            texterr += "closed.";
-        else
-        {
-            wxStringOutputStream procError;
-            GetErrorStream()->Read(procError);
-            textout += procError.GetString();
-        }
-
-        std::cout << '\n' << textout << '\n' << texterr << '\n' << std::flush;
-        std::cout.flush();
     }
 
     bool m_finished;
@@ -435,9 +425,10 @@ protected:
             size_t size=0;
             const char* data = (char*) conn.Request(s, &size, wxIPC_PRIVATE);
 
-            std::cout << wxString(data) << '\n' << std::flush;
-
             CHECK( wxString(data) == "OK: " + s );
+
+            if ( g_show_message_timing )
+                std::cout << wxString(data) << '\n' << std::flush;
         }
 
         return nullptr;
@@ -461,12 +452,8 @@ TEST_CASE("JP", "[TEST_IPC][.]")
 #endif // wxUSE_SOCKETS_FOR_IPC
 
     ExecAsyncWrapper exec_wrapper;
-
-    bool bStartExternalServer = false;
-
-    if (bStartExternalServer)
+    if ( g_use_external_server)
     {
-
         long pid = exec_wrapper.DoExecute();
 
         // Allow time for the server to bind the port
@@ -474,6 +461,7 @@ TEST_CASE("JP", "[TEST_IPC][.]")
 
         REQUIRE( pid != 0);
     }
+
     gs_client = new IPCTestClient;
 
     SECTION("Connect")
@@ -788,7 +776,7 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         CHECK( wxString(data).IsEmpty() );
     }
 
-    if (bStartExternalServer)
+    if ( g_use_external_server )
     {
         CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
@@ -796,20 +784,22 @@ TEST_CASE("JP", "[TEST_IPC][.]")
         const wxString s("shutdown");
         CHECK( conn.Execute(s) );
 
-// Make sure the server process exits.
+        // Make sure the server process exits.
         CHECK( exec_wrapper.EndProcess() );
 
-// Allow time for the server to release the port
+        // Allow time for the server to release the port
         wxMilliSleep(100);
     }
+
     gs_client->Disconnect();
     delete gs_client;
 
 #if wxUSE_SOCKETS_FOR_IPC
-        wxSocketBase::Shutdown();
+    wxSocketBase::Shutdown();
 #endif // wxUSE_SOCKETS_FOR_IPC
 
-    std::cout << "end section \n" << std::flush;
+    if ( g_show_message_timing )
+        std::cout << "end section \n" << std::flush;
 }
 
 #endif // wxUSE_THREADS

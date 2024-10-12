@@ -238,21 +238,18 @@ public:
 
         m_socket->m_writing = true;
 
-        std::cout << "~wxSocketWriteGuard reenablewxSOCKET_OUTPUT_FLAG\n" << std::flush;
+        // If notification of write-ready events was turned off, turn it back
+        // on before writing.  For some reason, reenabling in the
+        // wxSocketWriteGuard destructor can cause a temporary hang, on unix
+        // builds, as exposed by the ipc.cpp test.
         wxSocketImpl * const impl = m_socket->m_impl;
         if ( impl && impl->m_fd != INVALID_SOCKET )
             impl->ReenableEvents(wxSOCKET_OUTPUT_FLAG);
-
     }
 
     ~wxSocketWriteGuard()
     {
         m_socket->m_writing = false;
-
-        // std::cout << "~wxSocketWriteGuard reenablewxSOCKET_OUTPUT_FLAG\n" << std::flush;
-        // wxSocketImpl * const impl = m_socket->m_impl;
-        // if ( impl && impl->m_fd != INVALID_SOCKET )
-        //     impl->ReenableEvents(wxSOCKET_OUTPUT_FLAG);
     }
 
 private:
