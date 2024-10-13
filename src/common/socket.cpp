@@ -238,10 +238,8 @@ public:
 
         m_socket->m_writing = true;
 
-        // If notification of write-ready events was turned off, turn it back
-        // on before writing.  For some reason, reenabling in the
-        // wxSocketWriteGuard destructor can cause a temporary hang, on unix
-        // builds, as exposed by the ipc.cpp test.
+        // If notification of write events was turned off, turn it back on
+        // before writing.
         wxSocketImpl * const impl = m_socket->m_impl;
         if ( impl && impl->m_fd != INVALID_SOCKET )
             impl->ReenableEvents(wxSOCKET_OUTPUT_FLAG);

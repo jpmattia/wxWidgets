@@ -516,7 +516,7 @@ void* MultiAdviseThread::Entry()
         if ( !conn.m_advise_active )
             break;
 
-        wxMilliSleep(200); // interleave with request
+        wxMilliSleep(100); // interleave with request
 
         wxString s = m_label + wxString::Format(" %zu", n);
         size_t size = strlen(s.mb_str());
