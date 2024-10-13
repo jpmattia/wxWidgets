@@ -469,7 +469,7 @@ COND_MONOLITHIC_1___WXLIB_MONO_p = \
 
 ### Targets: ###
 
-all: test$(EXEEXT) $(__test_drawing___depname) $(__test_drawingplugin___depname) $(__test_gui___depname) $(__test_gui_bundle___depname) $(__test_allheaders___depname) $(__test_allheaders_bundle___depname) data data-image-sample data-images en_GB fr ja xart-dothraki
+all: test$(EXEEXT) test_sckipc_server$(EXEEXT) $(__test_drawing___depname) $(__test_drawingplugin___depname) $(__test_gui___depname) $(__test_gui_bundle___depname) $(__test_allheaders___depname) $(__test_allheaders_bundle___depname) data data-image-sample data-images en_GB fr ja xart-dothraki
 
 install:
 
