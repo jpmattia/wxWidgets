@@ -32,6 +32,7 @@
 #include <wx/timer.h>
 #include <wx/txtstrm.h>
 #include <wx/sstream.h>
+#include <wx/utils.h>
 
 #define MAX_MSG_BUFFERS 2048
 #define MESSAGE_ITERATIONS 20
@@ -60,6 +61,9 @@ const char *IPC_TEST_TOPIC = "IPC TEST";
 
 } // anonymous namespace
 
+// forward decl
+class IPCTestClient;
+
 // ----------------------------------------------------------------------------
 // test connection class used by IPCTestServer
 // ----------------------------------------------------------------------------
@@ -67,23 +71,13 @@ const char *IPC_TEST_TOPIC = "IPC TEST";
 class IPCTestConnection : public wxConnection
 {
 public:
-    IPCTestConnection()
+    IPCTestConnection(IPCTestClient* client)
     {
-        for (int i = 0; i < MAX_MSG_BUFFERS; i++)
-            m_bufferList[i] = nullptr;
-
-        m_nextAvailable = 0;
-
+        m_client = client;
         ResetThreadTrackers();
     }
 
-    ~IPCTestConnection()
-    {
-        for (int i = 0; i < MAX_MSG_BUFFERS; i++)
-            if (m_bufferList[i])
-                delete[] m_bufferList[i];
-    }
-
+    virtual ~IPCTestConnection() {}
 
     virtual bool OnExec(const wxString& topic, const wxString& data)
     {
@@ -136,24 +130,9 @@ public:
     }
 
 
+    virtual bool OnDisconnect();
+
 private:
-    char* GetBufPtr(size_t size)
-    {
-        wxCRIT_SECT_LOCKER(lock, m_cs_assign_buffer);
-
-        if (m_bufferList[m_nextAvailable] != nullptr)
-        {
-            // Free the memory from the last use
-            delete[] m_bufferList[m_nextAvailable];
-        }
-
-        char* ptr = new char[size];
-
-        m_bufferList[m_nextAvailable] = ptr;
-        m_nextAvailable = (m_nextAvailable + 1) % MAX_MSG_BUFFERS;
-
-        return ptr;
-    }
 
     void ResetThreadTrackers()
     {
@@ -169,8 +148,7 @@ private:
 
     wxCRIT_SECT_DECLARE_MEMBER(m_cs_assign_buffer);
 
-    char* m_bufferList[MAX_MSG_BUFFERS];
-    int m_nextAvailable;
+    IPCTestClient* m_client;
 
 public:
     bool  m_advise_complete;
@@ -255,31 +233,37 @@ void IPCTestConnection::HandleThreadAdviseCounting(const wxString& advise_string
 // IPCServerProcess
 // ----------------------------------------------------------------------------
 
+class ExecAsyncWrapper;
+
 // The server is run in an external process, which is necessary when TCP
 // sockets are in use.
 class IPCServerProcess : public wxProcess
 {
 public:
-    IPCServerProcess()
+    IPCServerProcess(ExecAsyncWrapper* parent)
     {
-            Redirect();
-            m_finished = false;
+        m_parent = parent;
     }
 
-    virtual void OnTerminate(int pid, int status) override
+    virtual void OnTerminate(int pid, int status);
+
+    ExecAsyncWrapper* m_parent;
+};
+
+
+// Utility for wxKILL
+wxString wxKILL_ResultToString(wxKillError result)
+{
+    switch (result)
     {
-        m_finished = true;
-
-        if ( g_show_message_timing )
-        {
-            std::cout
-                << wxString::Format("Process %u terminated, exit code %d.\n",
-                                    pid, status)
-                << std::flush;
-        }
-    }
-
-    bool m_finished;
+    case wxKILL_OK:            return "wxKILL_OK";
+    case wxKILL_BAD_SIGNAL:    return "wxKILL_BAD_SIGNAL";
+    case wxKILL_ACCESS_DENIED: return "wxKILL_ACCESS_DENIED";
+    case wxKILL_NO_PROCESS:    return "wxKILL_NO_PROCESS";
+    case wxKILL_ERROR:         return "wxKILL_ERROR";
+    default:
+        return "Unknown result from wxKILL";
+    };
 };
 
 // ----------------------------------------------------------------------------
@@ -290,9 +274,11 @@ public:
 class ExecAsyncWrapper : public wxTimer
 {
 public:
-    ExecAsyncWrapper() {}
-
-    ~ExecAsyncWrapper() {}
+    ExecAsyncWrapper()
+    {
+        m_process = new IPCServerProcess(this);
+        m_process_finished = false;
+    }
 
     long DoExecute()
     {
@@ -312,46 +298,109 @@ public:
         wxString command = "test_sckipc_server";
 
         // Run wxExecute inside the event loop.
-        m_pid = wxExecute(command, wxEXEC_ASYNC, &m_process);
+        m_pid = wxExecute(command, wxEXEC_ASYNC, m_process);
 
         REQUIRE( m_pid != 0);
 
         wxEventLoop::GetActive()->Exit();
     }
 
-    bool EndProcess()
+    bool SendSIGTERM()
     {
-        // neeed rewrite: wxKill circumvents wxProcess::OnTerminate
-        //  - EndProcess w/ terminate, check that m_process.m_finished == true
-        //  - Then wxKill, just set m_process.m_finished == true if wxKill return is correct.
-
-
-        // Is process already finished?
-        if ( m_pid == 0 || m_process.m_finished )
+        if (IsFinished())
             return true;
 
-        if ( 0 == wxKill(m_pid, wxSIGTERM)
-             || 0 == wxKill(m_pid, wxSIGKILL) )
+        // For some reason on wxMSW, the process sometimes needs more than one
+        //  iteration, even with wxKILL_OK as the return value from wxKill.
+        for ( int i=0; i < 3 && StillRunning(); i++ )
         {
-            m_process.m_finished = true;
-
-            if ( g_show_message_timing )
-                std::cout << "server process killed\n" << std::flush;
-            else
-                std::cout << "wxSIGTERM and wxSIGKILL unsucessful\n" << std::flush;
+            wxKill(m_pid, wxSIGTERM);
+            wxMilliSleep(50);
         }
 
-        // wait a max of 2 seconds for the process to die
-        for (int count = 0; count < 200 && !m_process.m_finished; count++) {}
-
-        return m_process.m_finished;
+        return IsFinished();
     }
 
+    bool SendSIGKILL()
+    {
+        if (IsFinished())
+            return true;
+
+        wxKillError result;
+
+        wxKill(m_pid, wxSIGKILL, &result);
+
+        bool process_killed = result == wxKILL_OK || result == wxKILL_NO_PROCESS;
+
+        // SIGKILL will bypass wxProcess::OnTerminate, so set the following
+        // manually.
+        if ( process_killed )
+            m_process_finished = true;
+
+        if ( g_show_message_timing )
+        {
+            if ( process_killed )
+                std::cout << "server process killed\n" << std::flush;
+            else
+                std::cout << "wxSIGKILL unsucessful: "
+                          << wxKILL_ResultToString(result)
+                          << "\n" << std::flush;
+        }
+
+        return process_killed;
+    }
+
+    bool IsFinished() const { return m_process_finished; }
+    bool StillRunning() const { return !m_process_finished; }
+
     long m_pid;
-    IPCServerProcess m_process;
+    IPCServerProcess* m_process;
+    bool m_process_finished;
 
     wxDECLARE_NO_COPY_CLASS(ExecAsyncWrapper);
-  };
+};
+
+void IPCServerProcess::OnTerminate(int pid, int status)
+{
+    m_parent->m_process_finished = true;
+
+    if ( g_show_message_timing )
+    {
+        std::cout
+            << wxString::Format("Process %u terminated, exit code %d.\n",
+                                pid, status)
+            << std::flush;
+    }
+}
+
+// ----------------------------------------------------------------------------
+// SleepProcess
+// ----------------------------------------------------------------------------
+
+// SleepProcess starts a loop, for methods that need a main loop to be running,
+// eg wxProcess::OnTerminate
+class SleepProcess : public wxTimer
+{
+public:
+    SleepProcess() {};
+
+    void DoWait()
+    {
+        // Trigger the timer to go off inside the event loop.
+        // While the loop is running, wxProcess::OnTerminate gets called
+        // if the IPC server terminated.
+        StartOnce(50);
+
+        // Run the event loop.
+        wxEventLoop loop;
+        loop.Run();
+    }
+
+    void Notify() override
+    {
+        wxEventLoop::GetActive()->Exit();
+    }
+};
 
 // ----------------------------------------------------------------------------
 // test client class
@@ -383,14 +432,13 @@ public:
         if ( m_conn )
         {
             m_conn->Disconnect();
-            delete m_conn;
             m_conn = nullptr;
         }
     }
 
     wxConnectionBase* OnMakeConnection()
     {
-        return new IPCTestConnection;
+        return new IPCTestConnection(this);
     }
 
     IPCTestConnection& GetConn() const
@@ -400,13 +448,18 @@ public:
         return *m_conn;
     }
 
-private:
     IPCTestConnection *m_conn;
 
     wxDECLARE_NO_COPY_CLASS(IPCTestClient);
 };
 
 static IPCTestClient *gs_client = nullptr;
+
+bool IPCTestConnection::OnDisconnect()
+{
+    m_client->m_conn = nullptr;
+    return wxConnection::OnDisconnect();
+}
 
 // ----------------------------------------------------------------------------
 // MultiRequestThread
@@ -453,7 +506,9 @@ protected:
             if ( g_show_message_timing )
                 std::cout << wxString(data) << '\n' << std::flush;
 
-            wxMilliSleep(100); //
+            // Space out the requests, to test any race conditions with
+            // incoming messages, like Advise()
+            wxMilliSleep(100);
         }
 
         return nullptr;
@@ -465,6 +520,74 @@ public:
 
     wxDECLARE_NO_COPY_CLASS(MultiRequestThread);
 };
+
+class IPCFixture
+{
+public:
+    IPCFixture()
+    {
+#if wxUSE_SOCKETS_FOR_IPC
+        // We will be using sockets from worker threads, so we need to
+        // initialize.
+        wxSocketBase::Initialize();
+#endif // wxUSE_SOCKETS_FOR_IPC
+
+        gs_client = new IPCTestClient;
+
+        if ( g_use_external_server)
+        {
+            long pid = m_exec.DoExecute();
+
+            // Allow a moment for the server to bind the port
+            wxMilliSleep(50);
+
+            REQUIRE( pid != 0);
+        };
+
+    };
+
+    ~IPCFixture()
+    {
+        if ( g_use_external_server )
+        {
+            // Make sure there is a connection
+            IPCTestConnection& conn = gs_client->GetConn();
+
+            // Executing a shutdown on the server should cause the server to
+            // self-terminate.
+            const wxString s("shutdown");
+            CHECK( conn.Execute(s) );
+
+            // Give the server a moment to self-exit
+            for ( int i=0; i < 3 && m_exec.StillRunning(); i++ )
+            {
+                SleepProcess proc;
+                proc.DoWait();
+            }
+
+            // Self-exit failed, send a SIGTERM.
+            if ( !m_exec.SendSIGTERM() )
+            {
+                // SIGTERM did not work, try SIGKILL
+                m_exec.SendSIGKILL();
+            }
+
+            CHECK( m_exec.IsFinished() );
+        };
+
+        delete gs_client;
+
+#if wxUSE_SOCKETS_FOR_IPC
+        wxSocketBase::Shutdown();
+#endif // wxUSE_SOCKETS_FOR_IPC
+
+        if ( g_show_message_timing )
+            std::cout << "teardown complete\n" << std::flush;
+    }
+
+    ExecAsyncWrapper m_exec;
+};
+
 
 // ----------------------------------------------------------------------------
 // the test code itself
@@ -478,396 +601,361 @@ public:
 // void Setup() should be the contructor
 // and Teardown () should be the destructor
 
-TEST_CASE("JP", "[TEST_IPC][.]")
+TEST_CASE_METHOD(IPCFixture,
+                 "IPC::Connect", "[net][ipc][single_command]")
 {
+    if ( g_show_message_timing )
+        std::cout << "Running test Connect\n" << std::flush;
 
-#if wxUSE_SOCKETS_FOR_IPC
-    wxSocketBase::Initialize();
-#endif // wxUSE_SOCKETS_FOR_IPC
+    // connecting to the wrong port should fail
+    CHECK( !gs_client->Connect("localhost", "2424", IPC_TEST_TOPIC) );
 
-    ExecAsyncWrapper exec_wrapper;
-    if ( g_use_external_server)
+    // connecting with the wrong topic should fail
+    CHECK( !gs_client->Connect("localhost", IPC_TEST_PORT, "VCP GRFG") );
+
+    // Connecting to the right port on the right topic should succeed.
+    REQUIRE( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+}
+
+TEST_CASE_METHOD(IPCFixture,
+                 "IPC::SingleRequest", "[net][ipc][single_command]")
+{
+    if ( g_show_message_timing )
+        std::cout << "Running test SingleRequest\n" << std::flush;
+
+    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+    IPCTestConnection& conn = gs_client->GetConn();
+
+    const wxString s("ping");
+    size_t size=0;
+    const char* data = (char*) conn.Request(s, &size, wxIPC_PRIVATE);
+
+    // Make sure that Request() works, because we use it to probe the
+    // state of the server for the remaining tests.
+    REQUIRE( wxString(data) == "pong"  );
+}
+
+TEST_CASE_METHOD(IPCFixture,
+                 "IPC::SingleExecute", "[net][ipc][single_command]")
+{
+    if ( g_show_message_timing )
+        std::cout << "Running test Execute\n" << std::flush;
+
+    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+    IPCTestConnection& conn = gs_client->GetConn();
+
+    wxString s("Date");
+    CHECK( conn.Execute(s) );
+
+    // Get the last execute from the server side.
+    size_t size=0;
+    const wxString last_execute_query("last_execute");
+
+    char* data = (char*) conn.Request(last_execute_query, &size, wxIPC_PRIVATE);
+    CHECK( wxString(data) == s );
+
+
+    s = "another execution command!";
+    CHECK( conn.Execute(s.mb_str(), s.length() + 1) );
+
+    data = (char*) conn.Request(last_execute_query, &size, wxIPC_PRIVATE);
+    CHECK( wxString(data) == s );
+}
+
+TEST_CASE_METHOD(IPCFixture,
+                 "IPC::RequestThread", "[net][ipc][multi_command]")
+{
+    if ( g_show_message_timing )
+        std::cout << "Running test Single Thread Of Requests\n" << std::flush;
+
+    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+    MultiRequestThread thread1("MultiRequest thread 1");
+    thread1.Run();
+    thread1.Wait();
+
+    INFO( thread1.m_error );
+    CHECK( thread1.m_error.IsEmpty() );
+
+    // Make sure the server got all the requests in the correct order.
+    IPCTestConnection& conn = gs_client->GetConn();
+
+    size_t size=0;
+    wxString query("get_thread1_request_counter");
+
+    char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+    CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+    size=0;
+    query = "get_error_string";
+    data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+
+    INFO( wxString(data) );
+    CHECK( wxString(data).IsEmpty() );
+}
+
+TEST_CASE_METHOD(IPCFixture,
+                 "IPC::RequestMultiThread", "[net][ipc][multi_thread]")
+{
+    if ( g_show_message_timing )
+        std::cout << "Running test Requests with Multiple Threads\n"
+                  << std::flush;
+
+    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+    MultiRequestThread thread1("MultiRequest thread 1");
+    MultiRequestThread thread2("MultiRequest thread 2");
+    MultiRequestThread thread3("MultiRequest thread 3");
+
+    thread1.Run();
+    thread2.Run();
+    thread3.Run();
+
+    thread1.Wait();
+    thread2.Wait();
+    thread3.Wait();
+
+    INFO( thread1.m_error );
+    CHECK( thread1.m_error.IsEmpty() );
+
+    INFO( thread2.m_error );
+    CHECK( thread2.m_error.IsEmpty() );
+
+    INFO( thread2.m_error );
+    CHECK( thread2.m_error.IsEmpty() );
+
+    // Make sure the server got all the requests in the correct order.
+    IPCTestConnection& conn = gs_client->GetConn();
+
+    size_t size=0;
+    wxString query = "get_thread1_request_counter";
+
+    char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+    CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+    size=0;
+    query = "get_thread2_request_counter";
+
+    data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+    CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+    size=0;
+    query = "get_thread3_request_counter";
+
+    data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+    CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+    size=0;
+    query = "get_error_string";
+    data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+
+    INFO( wxString(data) );
+    CHECK( wxString(data).IsEmpty() );
+}
+
+TEST_CASE_METHOD(IPCFixture,
+                 "IPC::SingleAdvise", "[net][ipc][single_command]")
+{
+    if ( g_show_message_timing )
+        std::cout << "Running test Advise as single command\n" << std::flush;
+
+    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+    IPCTestConnection& conn = gs_client->GetConn();
+    wxString item = "SimpleAdvise test";
+
+    CHECK( conn.StartAdvise(item) );
+
+    // wait a maximum of 2 seconds for completion.
+    int cnt = 0;
+    while ( cnt++ < 200 && !conn.m_advise_complete )
     {
-        long pid = exec_wrapper.DoExecute();
-
-        // Allow time for the server to bind the port
-        wxMilliSleep(50);
-
-        REQUIRE( pid != 0);
-    };
-
-    gs_client = new IPCTestClient;
-
-    SECTION("Connect")
-    {
-        if ( g_show_message_timing )
-            std::cout << "Running test Connect\n" << std::flush;
-
-        // connecting to the wrong port should fail
-        CHECK( !gs_client->Connect("localhost", "2424", IPC_TEST_TOPIC) );
-
-        CHECK( !gs_client->Connect("localhost", IPC_TEST_PORT, "VCP GRFG") );
-
-        // Connecting to the right port on the right topic should succeed.
-        // If Connect() doesn't work, then nothing below works
-        REQUIRE( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-    };
-
-    SECTION("SimpleRequest")
-    {
-        if ( g_show_message_timing )
-            std::cout << "Running test SimpleRequest\n" << std::flush;
-
-        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-        IPCTestConnection& conn = gs_client->GetConn();
-
-        const wxString s("ping");
-        size_t size=0;
-        const char* data = (char*) conn.Request(s, &size, wxIPC_PRIVATE);
-
-        // Make sure that Request() works, because we use it to probe the
-        // state of the server for the remaining tests.
-        REQUIRE( wxString(data) == "pong"  );
-    };
-
-    SECTION("Execute")
-    {
-        if ( g_show_message_timing )
-            std::cout << "Running test Execute\n" << std::flush;
-
-        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-        IPCTestConnection& conn = gs_client->GetConn();
-
-        wxString s("Date");
-        CHECK( conn.Execute(s) );
-
-        // Get the last execute from the server side.
-        size_t size=0;
-        const wxString last_execute_query("last_execute");
-
-        char* data = (char*) conn.Request(last_execute_query, &size, wxIPC_PRIVATE);
-        CHECK( wxString(data) == s );
-
-
-        s = "another execution command!";
-        CHECK( conn.Execute(s.mb_str(), s.length() + 1) );
-
-        data = (char*) conn.Request(last_execute_query, &size, wxIPC_PRIVATE);
-        CHECK( wxString(data) == s );
-    };
-
-    SECTION("SingleThreadOfRequests")
-    {
-        if ( g_show_message_timing )
-            std::cout << "Running test SingleThreadOfRequests\n" << std::flush;
-
-        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-        MultiRequestThread thread1("MultiRequest thread 1");
-        thread1.Run();
-        thread1.Wait();
-
-        INFO( thread1.m_error );
-        CHECK( thread1.m_error.IsEmpty() );
-
-        // Make sure the server got all the requests in the correct order.
-        IPCTestConnection& conn = gs_client->GetConn();
-
-        size_t size=0;
-        wxString query("get_thread1_request_counter");
-
-        char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
-
-        size=0;
-        query = "get_error_string";
-        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-
-        INFO( wxString(data) );
-        CHECK( wxString(data).IsEmpty() );
-    };
-
-    SECTION("MultipleThreadsOfRequests")
-    {
-        if ( g_show_message_timing )
-            std::cout << "Running test MultipleThreadsOfRequests\n" << std::flush;
-
-        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-        MultiRequestThread thread1("MultiRequest thread 1");
-        MultiRequestThread thread2("MultiRequest thread 2");
-        MultiRequestThread thread3("MultiRequest thread 3");
-
-        thread1.Run();
-        thread2.Run();
-        thread3.Run();
-
-        thread1.Wait();
-        thread2.Wait();
-        thread3.Wait();
-
-        INFO( thread1.m_error );
-        CHECK( thread1.m_error.IsEmpty() );
-
-        INFO( thread2.m_error );
-        CHECK( thread2.m_error.IsEmpty() );
-
-        INFO( thread2.m_error );
-        CHECK( thread2.m_error.IsEmpty() );
-
-        // Make sure the server got all the requests in the correct order.
-        IPCTestConnection& conn = gs_client->GetConn();
-
-        size_t size=0;
-        wxString query = "get_thread1_request_counter";
-
-        char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
-
-        size=0;
-        query = "get_thread2_request_counter";
-
-        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
-
-        size=0;
-        query = "get_thread3_request_counter";
-
-        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
-
-        size=0;
-        query = "get_error_string";
-        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-
-        INFO( wxString(data) );
-        CHECK( wxString(data).IsEmpty() );
-    };
-
-    SECTION("SimpleAdvise")
-    {
-        if ( g_show_message_timing )
-            std::cout << "Running test SimpleAdvise\n" << std::flush;
-
-        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-        IPCTestConnection& conn = gs_client->GetConn();
-        wxString item = "SimpleAdvise test";
-
-        CHECK( conn.StartAdvise(item) );
-
-        // wait a maximum of 2 seconds for completion.
-        int cnt = 0;
-        while ( cnt++ < 200 && !conn.m_advise_complete )
-        {
-            wxMilliSleep(10);
-        }
-
-        CHECK( conn.StopAdvise(item) );
-        CHECK( conn.m_advise_complete );
-
-        // Make sure the server didn't record an error
-        wxString query = "get_error_string";
-        size_t size=0;
-
-        char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-
-        INFO( wxString(data) );
-        CHECK( wxString(data).IsEmpty() );
-    };
-
-    SECTION("ThreadOfMultiAdvise")
-    {
-        if ( g_show_message_timing )
-            std::cout << "Running test ThreadOfMultiAdvise\n" << std::flush;
-
-        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-        IPCTestConnection& conn = gs_client->GetConn();
-        wxString item = "MultiAdvise test";
-
-        CHECK( conn.StartAdvise(item) );
-
-        // wait a maximum of 2 seconds for completion.
-        int cnt = 0;
-        while ( cnt++ < 500 &&
-                conn.m_thread1_advise_lastval != MESSAGE_ITERATIONS )
-        {
-            wxMilliSleep(10);
-        }
-
-        CHECK( conn.StopAdvise(item) );
-
-        CHECK( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS );
-
-        INFO( conn.m_general_error );
-        CHECK( conn.m_general_error.IsEmpty() );
-
-        // Make sure the server didn't record an error
-        wxString query = "get_error_string";
-        size_t size=0;
-
-        char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-
-        INFO( wxString(data) );
-        CHECK( wxString(data).IsEmpty() );
-    };
-
-    SECTION("MultipleThreadsOfMultiAdvise")
-    {
-        if ( g_show_message_timing )
-            std::cout << "Running test MultipleThreadsOfMultiAdvise\n" << std::flush;
-
-        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-        IPCTestConnection& conn = gs_client->GetConn();
-        wxString item = "MultiAdvise MultiThread test";
-
-        CHECK( conn.StartAdvise(item) );
-
-        // wait a maximum of 2 seconds for completion.
-        int cnt = 0;
-        while ( cnt++ < 1000 )
-        {
-            wxMilliSleep(10);
-
-            if ( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS &&
-                 conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS &&
-                 conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS)
-            {
-                break;
-            }
-        }
-
-        CHECK( conn.StopAdvise(item) );
-
-        CHECK( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS );
-        CHECK( conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS );
-        CHECK( conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS );
-
-        INFO( conn.m_general_error );
-        CHECK( conn.m_general_error.IsEmpty() );
-
-        // Make sure the server didn't record an error
-        wxString query = "get_error_string";
-        size_t size=0;
-
-        char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-
-        INFO( wxString(data) );
-        CHECK( wxString(data).IsEmpty() );
-    };
-
-    SECTION("AdviseMultiThreadsSimultaneousMultiThreadRequests");
-    {
-        if ( g_show_message_timing )
-            std::cout << "Running test MultiAdvise MultiThreads test with simultaneous MultiRequests MultiThreads\n" << std::flush;
-
-        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-        IPCTestConnection& conn = gs_client->GetConn();
-
-        MultiRequestThread thread1("MultiRequest thread 1");
-        MultiRequestThread thread2("MultiRequest thread 2");
-        MultiRequestThread thread3("MultiRequest thread 3");
-
-        // start local and remote threads as close to simultaneous as possible
-        wxString item = "MultiAdvise MultiThread test with simultaneous Requests";
-
-        CHECK( conn.StartAdvise(item) ); // starts 3 advise threads
-
-        thread1.Run();
-        thread2.Run();
-        thread3.Run();
-
-
-        // Wait for local threads to finish ...
-        thread1.Wait();
-        thread2.Wait();
-        thread3.Wait();
-
-        // ... and the remote threads too.
-        int cnt = 0;
-        while ( cnt++ < 2000 ) // max of 2 seconds
-        {
-            wxMilliSleep(10);
-
-            if ( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS &&
-                 conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS &&
-                 conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS)
-            {
-                break;
-            }
-        }
-
-        CHECK( conn.StopAdvise(item) );
-
-        // Everything is done, check that all the advise messages were
-        // correctly received.
-
-        CHECK( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS );
-        CHECK( conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS );
-        CHECK( conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS );
-
-        INFO( conn.m_general_error );
-        CHECK( conn.m_general_error.IsEmpty() );
-
-
-        // Also make sure all the request messages were correctly received on
-        // the server side. The client side was already validated in the
-        // MultiRequestThread.
-        size_t size=0;
-        wxString query = "get_thread1_request_counter";
-
-        char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
-
-        size=0;
-        query = "get_thread2_request_counter";
-
-        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
-
-        size=0;
-        query = "get_thread3_request_counter";
-
-        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-        CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
-
-        size=0;
-        query = "get_error_string";
-        data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
-
-        INFO( wxString(data) );
-        CHECK( wxString(data).IsEmpty() );
-    };
-
-    if ( g_use_external_server )
-    {
-        CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-        IPCTestConnection& conn = gs_client->GetConn();
-        const wxString s("shutdown");
-        CHECK( conn.Execute(s) );
-
-        // Make sure the server process exits. For some reason on wxMSW, the
-        //  process sometimes needs more than one iteration
-        for (int i=0; i < 3 && !exec_wrapper.m_process.m_finished; i++)
-            exec_wrapper.EndProcess();
-
-        CHECK( exec_wrapper.m_process.m_finished );
+        wxMilliSleep(10);
     }
 
-    gs_client->Disconnect();
-    delete gs_client;
+    CHECK( conn.StopAdvise(item) );
+    CHECK( conn.m_advise_complete );
 
-#if wxUSE_SOCKETS_FOR_IPC
-    wxSocketBase::Shutdown();
-#endif // wxUSE_SOCKETS_FOR_IPC
+    // Make sure the server didn't record an error
+    wxString query = "get_error_string";
+    size_t size=0;
 
+    char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+
+    INFO( wxString(data) );
+    CHECK( wxString(data).IsEmpty() );
+}
+
+TEST_CASE_METHOD(IPCFixture,
+                 "IPC::AdviseThread", "[net][ipc][multi_command]")
+{
     if ( g_show_message_timing )
-        std::cout << "end section \n" << std::flush;
+        std::cout << "Running test Single Thread Of Advise()'s\n" << std::flush;
+
+    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+    IPCTestConnection& conn = gs_client->GetConn();
+    wxString item = "MultiAdvise test";
+
+    CHECK( conn.StartAdvise(item) );
+
+    // wait a maximum of 5 seconds for completion.
+    int cnt = 0;
+    while ( cnt++ < 500 &&
+            conn.m_thread1_advise_lastval != MESSAGE_ITERATIONS )
+    {
+        wxMilliSleep(10);
+    }
+
+    CHECK( conn.StopAdvise(item) );
+
+    // Verify the results of the test.
+    CHECK( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS );
+
+    INFO( conn.m_general_error );
+    CHECK( conn.m_general_error.IsEmpty() );
+
+    // Make sure the server didn't record an error
+    wxString query = "get_error_string";
+    size_t size=0;
+
+    char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+
+    INFO( wxString(data) );
+    CHECK( wxString(data).IsEmpty() );
+}
+
+TEST_CASE_METHOD(IPCFixture,
+                 "IPC::AdviseMultiThread", "[net][ipc][multi_thread]")
+{
+    if ( g_show_message_timing )
+        std::cout << "Running test MultipleThreadsOfMultiAdvise\n" << std::flush;
+
+    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+    IPCTestConnection& conn = gs_client->GetConn();
+    wxString item = "MultiAdvise MultiThread test";
+
+    CHECK( conn.StartAdvise(item) );
+
+    // wait a maximum of 2 seconds for completion.
+    int cnt = 0;
+    while ( cnt++ < 1000 )
+    {
+        wxMilliSleep(10);
+
+        if ( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS &&
+             conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS &&
+             conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS)
+        {
+            break;
+        }
+    }
+
+    CHECK( conn.StopAdvise(item) );
+
+    CHECK( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS );
+    CHECK( conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS );
+    CHECK( conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS );
+
+    INFO( conn.m_general_error );
+    CHECK( conn.m_general_error.IsEmpty() );
+
+    // Make sure the server didn't record an error
+    wxString query = "get_error_string";
+    size_t size=0;
+
+    char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+
+    INFO( wxString(data) );
+    CHECK( wxString(data).IsEmpty() );
+}
+
+TEST_CASE_METHOD(IPCFixture,
+                 "IPC::AdviseAndRequestMultiThread", "[net][ipc][multi_thread]")
+{
+    if ( g_show_message_timing )
+        std::cout << "Running test MultiAdvise MultiThreads test with simultaneous MultiRequests MultiThreads\n" << std::flush;
+
+    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    IPCTestConnection& conn = gs_client->GetConn();
+
+    MultiRequestThread thread1("MultiRequest thread 1");
+    MultiRequestThread thread2("MultiRequest thread 2");
+    MultiRequestThread thread3("MultiRequest thread 3");
+
+    // start local and remote threads as close to simultaneous as possible
+    wxString item = "MultiAdvise MultiThread test with simultaneous Requests";
+
+    CHECK( conn.StartAdvise(item) ); // starts 3 advise threads
+
+    thread1.Run();
+    thread2.Run();
+    thread3.Run();
+
+
+    // Wait for local threads to finish ...
+    thread1.Wait();
+    thread2.Wait();
+    thread3.Wait();
+
+    // ... and the remote threads too.
+    int cnt = 0;
+    while ( cnt++ < 200 ) // max of 2 seconds
+    {
+        SleepProcess proc;
+        proc.DoWait();
+
+        if ( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS &&
+             conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS &&
+             conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS)
+        {
+            break;
+        }
+    }
+
+    CHECK( conn.StopAdvise(item) );
+
+    // Everything is done, check that all the advise messages were
+    // correctly received.
+
+    CHECK( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS );
+    CHECK( conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS );
+    CHECK( conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS );
+
+    INFO( conn.m_general_error );
+    CHECK( conn.m_general_error.IsEmpty() );
+
+
+    // Also make sure all the request messages were correctly received on
+    // the server side. The client side was already validated in the
+    // MultiRequestThread.
+    size_t size=0;
+    wxString query = "get_thread1_request_counter";
+
+    char* data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+    CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+    size=0;
+    query = "get_thread2_request_counter";
+
+    data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+    CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+    size=0;
+    query = "get_thread3_request_counter";
+
+    data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+    CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+    size=0;
+    query = "get_error_string";
+    data = (char*) conn.Request(query, &size, wxIPC_PRIVATE);
+
+    INFO( wxString(data) );
+    CHECK( wxString(data).IsEmpty() );
 }
 
 #endif // wxUSE_THREADS

@@ -39,11 +39,8 @@ const char *IPC_TEST_TOPIC = "IPC TEST";
 } // anonymous namespace
 
 
-void dout(wxString s)
-{
-    std::cout << s << '\n' << std::flush;
-
-}
+// forward decl
+class IPCTestServer;
 
 // ----------------------------------------------------------------------------
 // test connection class used by IPCTestServer
@@ -52,8 +49,10 @@ void dout(wxString s)
 class IPCTestConnection : public wxConnection
 {
 public:
-    IPCTestConnection()
+    IPCTestConnection(IPCTestServer* server)
     {
+        m_server = server;
+
         for (int i = 0; i < MAX_MSG_BUFFERS; i++)
             m_bufferList[i] = nullptr;
 
@@ -80,6 +79,8 @@ public:
         m_lastExecute = data;
         return true;
     }
+
+    virtual bool OnDisconnect();
 
     virtual const void* OnRequest(const wxString& topic,
                                   const wxString& item,
@@ -116,6 +117,8 @@ private:
     }
 
     wxCRIT_SECT_DECLARE_MEMBER(m_cs_assign_buffer);
+
+    IPCTestServer* m_server;
 
     char* m_bufferList[MAX_MSG_BUFFERS];
     int m_nextAvailable;
@@ -432,7 +435,7 @@ public:
         if ( topic != IPC_TEST_TOPIC )
             return nullptr;
 
-        m_conn = new IPCTestConnection;
+        m_conn = new IPCTestConnection(this);
         return m_conn;
     }
 
@@ -447,14 +450,13 @@ public:
         if (!m_conn)
         {
             // create a bogus connection rather than crash.
-            m_conn = new IPCTestConnection;
+            m_conn = new IPCTestConnection(this);
             m_conn->m_general_error = "Invalid connection in GetConn()";
         }
 
         return *m_conn;
     }
 
-private:
     IPCTestConnection *m_conn;
 
     wxDECLARE_NO_COPY_CLASS(IPCTestServer);
@@ -478,6 +480,12 @@ wxDECLARE_APP(MyApp);
 // ============================================================================
 
 wxIMPLEMENT_APP_CONSOLE(MyApp);
+
+bool IPCTestConnection::OnDisconnect()
+{
+    m_server->m_conn = nullptr;
+    return wxConnection::OnDisconnect();
+}
 
 void* SingleAdviseThread::Entry()
 {
