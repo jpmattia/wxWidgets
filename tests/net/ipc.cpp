@@ -508,7 +508,7 @@ protected:
 
             // Space out the requests, to test any race conditions with
             // incoming messages, like Advise()
-            wxMilliSleep(100);
+            wxMilliSleep(50);
         }
 
         return nullptr;
