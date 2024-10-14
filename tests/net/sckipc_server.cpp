@@ -11,54 +11,37 @@
 // and "wx/cppunit.h"
 #include <wx/wx.h>
 
-
-#include <iostream>  // JPDELETE  for testlogging
+#include <iostream>
 
 #if wxUSE_THREADS
 
-// for all others, include the necessary headers
 #ifndef WX_PRECOMP
     #include "wx/app.h"
 #endif
 
-#define wxUSE_SOCKETS_FOR_IPC 1
-#define wxUSE_DDE_FOR_IPC     0
+#include "ipc_setup_test.h"
 
 #include <wx/ipc.h>
 #include <wx/thread.h>
 
 #define MAX_MSG_BUFFERS 2048
-#define MESSAGE_ITERATIONS 20
-
-namespace
-{
-
-const char *IPC_TEST_PORT = "4242";
-const char *IPC_TEST_TOPIC = "IPC TEST";
-
-} // anonymous namespace
-
 
 // forward decl
 class IPCTestServer;
 
-// ----------------------------------------------------------------------------
 // test connection class used by IPCTestServer
-// ----------------------------------------------------------------------------
-
 class IPCTestConnection : public wxConnection
 {
 public:
     IPCTestConnection(IPCTestServer* server)
     {
         m_server = server;
+        ResetThreadTrackers();
 
         for (int i = 0; i < MAX_MSG_BUFFERS; i++)
             m_bufferList[i] = nullptr;
 
         m_nextAvailable = 0;
-
-        ResetThreadTrackers();
     }
 
     ~IPCTestConnection()
@@ -98,6 +81,8 @@ private:
     wxString HandleThreadRequestCounting(const wxString& item);
     void ResetThreadTrackers();
 
+    // memory that must persist past the return of some wxConnection methods
+    // is stored in an array of buffers and alloted with GetBufPtr().
     char* GetBufPtr(size_t size)
     {
         wxCRIT_SECT_LOCKER(lock, m_cs_assign_buffer);
@@ -138,10 +123,8 @@ public:
    wxDECLARE_NO_COPY_CLASS(IPCTestConnection);
 };
 
-// ----------------------------------------------------------------------------
-// SingleAdviseThread, a thread that sends a single Advise() message
-// ----------------------------------------------------------------------------
 
+// SingleAdviseThread sends a single Advise() message
 class SingleAdviseThread : public wxThread
 {
 public:
@@ -161,10 +144,8 @@ protected:
     wxDECLARE_NO_COPY_CLASS(SingleAdviseThread);
 };
 
-// ----------------------------------------------------------------------------
-// MultiAdviseThread, a thread that sends repeated Advise() messages
-// ----------------------------------------------------------------------------
 
+// MultiAdviseThread sends repeated Advise() messages
 class MultiAdviseThread : public wxThread
 {
 public:
@@ -185,11 +166,8 @@ protected:
 };
 
 
-// ----------------------------------------------------------------------------
+
 // IPCTestConnection implementation
-// ----------------------------------------------------------------------------
-
-
 const void* IPCTestConnection::OnRequest(const wxString& topic,
                                          const wxString& item,
                                          size_t* size,
@@ -267,7 +245,6 @@ const void* IPCTestConnection::OnRequest(const wxString& topic,
 // The return string is prefaced with "Error:" when a problem arises, along
 // with a human readable message describing the error, and "OK:" when the
 // request went as expected.
-
 wxString IPCTestConnection::HandleThreadRequestCounting(const wxString& item)
 {
     wxString info;
@@ -412,10 +389,8 @@ bool IPCTestConnection::OnStopAdvise(const wxString& topic,
     return true;
 }
 
-// ----------------------------------------------------------------------------
-// test server class
-// ----------------------------------------------------------------------------
 
+// test server class
 class IPCTestServer : public wxServer
 {
 public:

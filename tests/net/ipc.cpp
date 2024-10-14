@@ -6,25 +6,16 @@
 // Licence:     wxWindows licence
 ///////////////////////////////////////////////////////////////////////////////
 
-// single Poke
-// single Advise
-// 100 Advise
-
-
-// For compilers that support precompilation, includes "wx/wx.h".
-// and "wx/cppunit.h"
 #include "testprec.h"
 
 // this test needs threads as it runs the test server in a secondary thread
 #if wxUSE_THREADS
 
-// for all others, include the necessary headers
 #ifndef WX_PRECOMP
     #include "wx/app.h"
-#endif
+#endif // WX_PRECOMP
 
-#define wxUSE_SOCKETS_FOR_IPC 1
-#define wxUSE_DDE_FOR_IPC     0
+#include "ipc_setup_test.h"
 
 #include <wx/ipc.h>
 #include <wx/thread.h>
@@ -34,9 +25,18 @@
 #include <wx/sstream.h>
 #include <wx/utils.h>
 
-#define MAX_MSG_BUFFERS 2048
-#define MESSAGE_ITERATIONS 20
-#define MESSAGE_ITERATIONS_STRING  wxString::Format("%d",MESSAGE_ITERATIONS)
+// forward decl
+class IPCTestClient;
+class ExecAsyncWrapper;
+
+// The test for IPC needs to run the client and socket in separate
+// processes. Since catch2 does not have a facility for another process, we
+// create one using wxExecute. The client is run below, and the wxExecute runs
+// the server.
+//
+// Note that catch2 cannot run checks in the external server process, so
+// instead the client queries the server for the desired information and then
+// runs the checks in this file.
 
 
 // Automated test spawns a process with an external server.  When running this
@@ -53,21 +53,8 @@ bool g_show_message_timing = true;
 // raw arrival times.
 #include <iostream>
 
-namespace
-{
 
-const char *IPC_TEST_PORT = "4242";
-const char *IPC_TEST_TOPIC = "IPC TEST";
-
-} // anonymous namespace
-
-// forward decl
-class IPCTestClient;
-
-// ----------------------------------------------------------------------------
-// test connection class used by IPCTestServer
-// ----------------------------------------------------------------------------
-
+// Test connection class used by the client.
 class IPCTestConnection : public wxConnection
 {
 public:
@@ -163,10 +150,10 @@ public:
 };
 
 // Helper for the MultiAdvise thread tests. Repeated Advise's of the form
-// "MultiAdvise thread <thread_number> <serial_number>" are received during
+// "MultiAdvise thread <thread_number N> <serial_number>" are received during
 // the test. Track the serial number in the appropriate
-// m_threadN_advise_lastval vars.
-
+// m_threadN_advise_lastval member variables for CHECKing at the end of the
+// test.
 void IPCTestConnection::HandleThreadAdviseCounting(const wxString& advise_string)
 {
     wxString info;
@@ -228,15 +215,8 @@ void IPCTestConnection::HandleThreadAdviseCounting(const wxString& advise_string
     }
 }
 
-
-// ----------------------------------------------------------------------------
-// IPCServerProcess
-// ----------------------------------------------------------------------------
-
-class ExecAsyncWrapper;
-
-// The server is run in an external process, which is necessary when TCP
-// sockets are in use.
+// After the server finishes running in its process, IPCServerProcess gets
+// notified of the termination.
 class IPCServerProcess : public wxProcess
 {
 public:
@@ -250,27 +230,14 @@ public:
     ExecAsyncWrapper* m_parent;
 };
 
-
-// Utility for wxKILL
-wxString wxKILL_ResultToString(wxKillError result)
-{
-    switch (result)
-    {
-    case wxKILL_OK:            return "wxKILL_OK";
-    case wxKILL_BAD_SIGNAL:    return "wxKILL_BAD_SIGNAL";
-    case wxKILL_ACCESS_DENIED: return "wxKILL_ACCESS_DENIED";
-    case wxKILL_NO_PROCESS:    return "wxKILL_NO_PROCESS";
-    case wxKILL_ERROR:         return "wxKILL_ERROR";
-    default:
-        return "Unknown result from wxKILL";
-    };
-};
-
-// ----------------------------------------------------------------------------
-// ExecAsyncWrapper starts a process with wxExecute, which must be done in the
-// main thread.
-// ----------------------------------------------------------------------------
-
+// The server is started in an external process using wxExecute. Since
+// wxExecute needs an event loop to run, we set up a wrapper to start a loop
+// and use wxTimer as a callback to run the wxExecute command.
+//
+// There are a number of utilities included here, so that we can make sure the
+// server process terminates when we want it to. If the server were not to
+// terminate, then the IPC port would remain bound and all further tests would
+// potentially run into trouble if the server had hung.
 class ExecAsyncWrapper : public wxTimer
 {
 public:
@@ -350,6 +317,21 @@ public:
         return process_killed;
     }
 
+    // Utility for wxKILL
+    wxString wxKILL_ResultToString(wxKillError result)
+    {
+        switch (result)
+        {
+        case wxKILL_OK:            return "wxKILL_OK";
+        case wxKILL_BAD_SIGNAL:    return "wxKILL_BAD_SIGNAL";
+        case wxKILL_ACCESS_DENIED: return "wxKILL_ACCESS_DENIED";
+        case wxKILL_NO_PROCESS:    return "wxKILL_NO_PROCESS";
+        case wxKILL_ERROR:         return "wxKILL_ERROR";
+        default:
+            return "Unknown result from wxKILL";
+        };
+    };
+
     bool IsFinished() const { return m_process_finished; }
     bool StillRunning() const { return !m_process_finished; }
 
@@ -372,10 +354,6 @@ void IPCServerProcess::OnTerminate(int pid, int status)
             << std::flush;
     }
 }
-
-// ----------------------------------------------------------------------------
-// SleepProcess
-// ----------------------------------------------------------------------------
 
 // SleepProcess starts a loop, for methods that need a main loop to be running,
 // eg wxProcess::OnTerminate
@@ -402,10 +380,8 @@ public:
     }
 };
 
-// ----------------------------------------------------------------------------
-// test client class
-// ----------------------------------------------------------------------------
-
+// The actual client is pretty thin, most of the work is done in the
+// connection class.
 class IPCTestClient : public wxClient
 {
 public:
@@ -461,13 +437,9 @@ bool IPCTestConnection::OnDisconnect()
     return wxConnection::OnDisconnect();
 }
 
-// ----------------------------------------------------------------------------
-// MultiRequestThread
-// ----------------------------------------------------------------------------
-
-// Send repeated Request()'s, each with a serial number to verify that
-// multiple repeated messages are sent and received correctly and in order.
-
+// MultiRequestThread sends repeated Request()'s, each with a serial number,
+// so that we can verify the repeated messages are sent and received correctly
+// and in order.
 class MultiRequestThread : public wxThread
 {
 public:
@@ -521,6 +493,8 @@ public:
     wxDECLARE_NO_COPY_CLASS(MultiRequestThread);
 };
 
+// IPCFixture is responsible for setting up and tearing down the external
+// server process for the test cases.
 class IPCFixture
 {
 public:
@@ -534,7 +508,7 @@ public:
 
         gs_client = new IPCTestClient;
 
-        if ( g_use_external_server)
+        if ( g_use_external_server )
         {
             long pid = m_exec.DoExecute();
 
@@ -588,19 +562,7 @@ public:
     ExecAsyncWrapper m_exec;
 };
 
-
-// ----------------------------------------------------------------------------
-// the test code itself
-// ----------------------------------------------------------------------------
-
-// rewrite with format of
-// c:/workspaces/wxWidgets/tests/net/webrequest.cpp
-// TEST_CASE_METHOD
-//
-// See https://github.com/catchorg/Catch2/issues/1620
-// void Setup() should be the contructor
-// and Teardown () should be the destructor
-
+// Test the basics of Connect()
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::Connect", "[net][ipc][single_command]")
 {
@@ -617,6 +579,8 @@ TEST_CASE_METHOD(IPCFixture,
     REQUIRE( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 }
 
+// Test the basics of Request(): A Request() goes out and it should result in
+// a reply from the server.
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::SingleRequest", "[net][ipc][single_command]")
 {
@@ -636,6 +600,10 @@ TEST_CASE_METHOD(IPCFixture,
     REQUIRE( wxString(data) == "pong"  );
 }
 
+// Test the basics of Execute(). The Execute() goes out: Note that a return
+// value of "true" means simply that the message was transmitted. We follow
+// the Execute with a Request() to verify that the server received the Execute
+// correctly.
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::SingleExecute", "[net][ipc][single_command]")
 {
@@ -664,6 +632,10 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( wxString(data) == s );
 }
 
+// Send multiple requests to the server. Each request has a serial number, and
+// this test verifies that the replies have the correct serial in the reply
+// message. After the serial requests are done, the client queries the server
+// and verifies the server received the requests error-free.
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::RequestThread", "[net][ipc][multi_command]")
 {
@@ -696,6 +668,11 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( wxString(data).IsEmpty() );
 }
 
+// Send multiple requests to the server via three concurrent threads. Each
+// reply is verified to make sure that the request corresponds to the correct
+// thread and has the correctly ordered serial number. After the request
+// threads are finished, the client queries the server and verifies the server
+// received the requests error-free.
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::RequestMultiThread", "[net][ipc][multi_thread]")
 {
@@ -755,6 +732,9 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( wxString(data).IsEmpty() );
 }
 
+// Test the basics of Advise(). First, send a StartAdvise(), then wait for the
+// server to send a single Advise(). When that is received, StopAdvise() is
+// sent.
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::SingleAdvise", "[net][ipc][single_command]")
 {
@@ -788,6 +768,10 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( wxString(data).IsEmpty() );
 }
 
+// Instruct the server to send a series of Advise() items to the client. Each
+// Advise() is verified to make sure that the Advise() arrives in order by
+// checking its serial number. Also verifies that the server encountered no
+// errors during the Advise() calls.
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::AdviseThread", "[net][ipc][multi_command]")
 {
@@ -801,9 +785,9 @@ TEST_CASE_METHOD(IPCFixture,
 
     CHECK( conn.StartAdvise(item) );
 
-    // wait a maximum of 5 seconds for completion.
+    // wait a maximum of 20 seconds for completion.
     int cnt = 0;
-    while ( cnt++ < 500 &&
+    while ( cnt++ < 2000 &&
             conn.m_thread1_advise_lastval != MESSAGE_ITERATIONS )
     {
         wxMilliSleep(10);
@@ -827,6 +811,10 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( wxString(data).IsEmpty() );
 }
 
+// Instruct the server to send a series of Advise() items to the client via
+// three concurrent threads. Each Advise() is verified to make sure that the
+// Advise() arrives in order within its thread number. Also verifies that
+// the server encountered no errors during the Advise() calls.
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::AdviseMultiThread", "[net][ipc][multi_thread]")
 {
@@ -840,9 +828,9 @@ TEST_CASE_METHOD(IPCFixture,
 
     CHECK( conn.StartAdvise(item) );
 
-    // wait a maximum of 2 seconds for completion.
+    // wait a maximum of 20 seconds for completion.
     int cnt = 0;
-    while ( cnt++ < 1000 )
+    while ( cnt++ < 2000 )
     {
         wxMilliSleep(10);
 
@@ -873,6 +861,17 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( wxString(data).IsEmpty() );
 }
 
+// Run three concurrent threads in the client sending Requests() to the
+// server, and simultaneously run three concurrent threads in the server
+// sending Advise() information to the client. Verify that all messages are
+// serial and correspond to the correct thread. Lastly, verify that the server
+// encountered no errors during this test.
+//
+// By setting g_show_message_timing to "true", the ordering of the Requests
+// and Advise's can be seen. Different systems may need to change the delay
+// wxMilliSleep in the client and server threads to make the interleave happen
+// properly, which is a strigent test of race conditions that might be present
+// in wxIPC.
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::AdviseAndRequestMultiThread", "[net][ipc][multi_thread]")
 {
@@ -886,10 +885,10 @@ TEST_CASE_METHOD(IPCFixture,
     MultiRequestThread thread2("MultiRequest thread 2");
     MultiRequestThread thread3("MultiRequest thread 3");
 
-    // start local and remote threads as close to simultaneous as possible
+    // start local and remote threads as close to simultaneously as possible
     wxString item = "MultiAdvise MultiThread test with simultaneous Requests";
 
-    CHECK( conn.StartAdvise(item) ); // starts 3 advise threads
+    CHECK( conn.StartAdvise(item) ); // starts 3 advise threads on the server
 
     thread1.Run();
     thread2.Run();
