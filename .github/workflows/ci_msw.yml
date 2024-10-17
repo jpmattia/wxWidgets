@@ -119,7 +119,7 @@ jobs:
         if: ${{ !contains(matrix.platform, 'arm64') }}
         working-directory: tests
         run: |
-            .\vc*msw*\test.exe
+            .\vc*msw*\test.exe >> $GITHUB_OUTPUT
 
       - name: Build GUI tests
         run: |
