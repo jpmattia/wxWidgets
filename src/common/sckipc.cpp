@@ -42,6 +42,8 @@
 #include <stdio.h>
 #include <errno.h>
 
+#include <iostream>
+
 #include "wx/socket.h"
 
 class wxIPCMessageBase;
@@ -962,24 +964,30 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
                                               const wxString& serverName,
                                               const wxString& topic)
 {
+    std::cout << "wxTCPClient::MakeConnection start\n" << std::flush;
+
     wxSockAddress *addr = GetAddressFromName(serverName, host);
     if ( !addr )
         return nullptr;
 
     wxSocketClient * const client = new wxSocketClient(wxSOCKET_WAITALL);
 
+    std::cout << "wxTCPClient::MakeConnection 1\n" << std::flush;
+
     bool ok = client->Connect(*addr);
     delete addr;
 
-
     if ( ok )
     {
+        std::cout << "wxTCPClient::MakeConnection 2\n" << std::flush;
+
         wxTCPEventHandler* handler = &wxTCPEventHandlerModule::GetHandler();
 
         // Send topic name, and enquire whether this has succeeded
         wxIPCMessageConnect msg(client, topic);
         if ( !handler->WriteMessageToSocket(msg) )
         {
+            std::cout << "wxTCPClient::MakeConnection 2a problem\n" << std::flush;
             client->Destroy();
             return nullptr;
         }
@@ -987,14 +995,17 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
         wxIPCMessageBase* msg_reply = handler->ReadMessageFromSocket(client);
         wxIPCMessageBaseLocker lock(msg_reply);
 
+        std::cout << "wxTCPClient::MakeConnection 3\n" << std::flush;
         // OK! Confirmation.
         if ( msg_reply->GetIPCCode() == IPC_CONNECT )
         {
+            std::cout << "wxTCPClient::MakeConnection 4\n" << std::flush;
             wxTCPConnection *
                 connection = (wxTCPConnection *)OnMakeConnection ();
 
             if ( connection )
             {
+                std::cout << "wxTCPClient::MakeConnection 5\n" << std::flush;
                 if (wxDynamicCast(connection, wxTCPConnection))
                 {
                     connection->m_sock = client;
@@ -1017,6 +1028,7 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
         }
         else if ( msg_reply->GetIPCCode() == IPC_FAIL )
         {
+            std::cout << "wxTCPClient::MakeConnection 6 prob!\n" << std::flush;
             wxIPCMessageFail* msg_fail =
                 wxDynamicCast(msg_reply, wxIPCMessageFail);
 
@@ -1347,15 +1359,19 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
         return;
 
     // Accept the connection, getting a new socket
+    std::cout << "pre server->Accept()\n" << std::flush;
     wxSocketBase *sock = server->Accept();
     if (!sock)
         return;
+
+    std::cout << "post server->Accept()\n" << std::flush;
 
     if ( !sock->IsOk() )
     {
         sock->Destroy();
         return;
     }
+    std::cout << "post server->IsOK()\n" << std::flush;
 
     wxIPCMessageBase* msg = ReadMessageFromSocket(sock);
     wxIPCMessageBaseLocker lock(msg);

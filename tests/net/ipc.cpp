@@ -267,6 +267,11 @@ public:
         fn_executable.Assign(testPath, SERVER_COMMAND);
 
         m_command = fn_executable.GetFullPath();
+
+        std::cout << "\n------------------------------------------------------------";
+        std::cout << "\ncommand: " << m_command;
+        std::cout << "\n------------------------------------------------------------\n";
+        std::cout << std::flush;
     }
 
     long DoExecute()
@@ -420,6 +425,11 @@ public:
     Connect(const wxString& host, const wxString& service, const wxString& topic)
     {
         m_conn = (IPCTestConnection*) MakeConnection(host, service, topic);
+
+        if (m_conn)
+            std::cout << "IPCTestClient()::Connect() - m_conn success\n" << std::flush;
+        else
+            std::cout << "IPCTestClient()::Connect() - m_conn fail\n" << std::flush;
 
         return m_conn != nullptr;
     }
