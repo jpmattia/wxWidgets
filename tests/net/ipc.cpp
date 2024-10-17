@@ -242,8 +242,10 @@ public:
 class ExecAsyncWrapper : public wxTimer
 {
 public:
-    ExecAsyncWrapper()
+    ExecAsyncWrapper(const wxString& command)
     {
+        m_command = command;
+
         m_process = new IPCServerProcess(this);
         m_process_finished = false;
     }
@@ -263,10 +265,8 @@ public:
 
     void Notify() override
     {
-        wxString command = "test_sckipc_server";
-
         // Run wxExecute inside the event loop.
-        m_pid = wxExecute(command, wxEXEC_ASYNC, m_process);
+        m_pid = wxExecute(m_command, wxEXEC_ASYNC, m_process);
 
         REQUIRE( m_pid != 0);
 
@@ -336,6 +336,7 @@ public:
     bool IsFinished() const { return m_process_finished; }
     bool StillRunning() const { return !m_process_finished; }
 
+    wxString m_command;
     long m_pid;
     IPCServerProcess* m_process;
     bool m_process_finished;
@@ -560,8 +561,32 @@ public:
             std::cout << "teardown complete\n" << std::flush;
     }
 
-    ExecAsyncWrapper m_exec;
+#ifdef __UNIX__
+    #define SERVER_COMMAND "./test_sckipc_server.exe"
+#elif defined(__WINDOWS__)
+    #define SERVER_COMMAND ".\vc*msw*\test_sckipc_server.exe"
+#else
+    #error "no command to exec"
+#endif // OS
+
+    ExecAsyncWrapper m_exec(SERVER_COMMAND);
 };
+
+
+
+TEST_CASE("IPC::Debug", "[IPC][IPCdebug]")
+{
+
+#ifdef __UNIX__
+    #define PWD_COMMAND "pwd"
+#elif defined(__WINDOWS__)
+    #define PWD_COMMAND "cd"
+#else
+    #error "no command to exec"
+#endif // OS
+
+    ExecAsyncWrapper m_exec(PWD_command);
+}
 
 // Test the basics of Connect()
 TEST_CASE_METHOD(IPCFixture,
@@ -578,6 +603,10 @@ TEST_CASE_METHOD(IPCFixture,
 
     // Connecting to the right port on the right topic should succeed.
     REQUIRE( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+
+    m_exec.DoExecute();
+
+    CHECK(false);
 }
 
 // Test the basics of Request(): A Request() goes out and it should result in
