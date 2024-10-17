@@ -26,6 +26,9 @@
 #include <wx/sstream.h>
 #include <wx/utils.h>
 
+#include <wx/filename.h> // JPDELETE
+#include <wx/stdpaths.h> // JPDELETE
+
 // forward decl
 class IPCTestClient;
 class ExecAsyncWrapper;
@@ -54,6 +57,14 @@ bool g_show_message_timing = false;
 // raw arrival times.
 #include <iostream>
 
+// The command to run the external server.
+#ifdef __UNIX__
+    #define SERVER_COMMAND "test_sckipc_server"
+#elif defined(__WINDOWS__)
+    #define SERVER_COMMAND "test_sckipc_server.exe"
+#else
+    #error "no command to exec"
+#endif // OS
 
 // Test connection class used by the client.
 class IPCTestConnection : public wxConnection
@@ -242,12 +253,20 @@ public:
 class ExecAsyncWrapper : public wxTimer
 {
 public:
-    ExecAsyncWrapper(const wxString& command)
+    ExecAsyncWrapper()
     {
-        m_command = command;
-
         m_process = new IPCServerProcess(this);
         m_process_finished = false;
+
+        // Get the path that test is running in, and compose the full path to
+        // the executable for the server command.
+        wxFileName fn_testpath(wxStandardPaths::Get().GetExecutablePath());
+        wxString testPath(fn_testpath.GetPath());
+
+        wxFileName fn_executable;
+        fn_executable.Assign(testPath, SERVER_COMMAND);
+
+        m_command = fn_executable.GetFullPath();
     }
 
     long DoExecute()
@@ -561,32 +580,8 @@ public:
             std::cout << "teardown complete\n" << std::flush;
     }
 
-#ifdef __UNIX__
-    #define SERVER_COMMAND "./test_sckipc_server.exe"
-#elif defined(__WINDOWS__)
-    #define SERVER_COMMAND ".\vc*msw*\test_sckipc_server.exe"
-#else
-    #error "no command to exec"
-#endif // OS
-
-    ExecAsyncWrapper m_exec(SERVER_COMMAND);
+    ExecAsyncWrapper m_exec;
 };
-
-
-
-TEST_CASE("IPC::Debug", "[IPC][IPCdebug]")
-{
-
-#ifdef __UNIX__
-    #define PWD_COMMAND "pwd"
-#elif defined(__WINDOWS__)
-    #define PWD_COMMAND "cd"
-#else
-    #error "no command to exec"
-#endif // OS
-
-    ExecAsyncWrapper m_exec(PWD_command);
-}
 
 // Test the basics of Connect()
 TEST_CASE_METHOD(IPCFixture,
@@ -603,10 +598,6 @@ TEST_CASE_METHOD(IPCFixture,
 
     // Connecting to the right port on the right topic should succeed.
     REQUIRE( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
-
-    m_exec.DoExecute();
-
-    CHECK(false);
 }
 
 // Test the basics of Request(): A Request() goes out and it should result in
