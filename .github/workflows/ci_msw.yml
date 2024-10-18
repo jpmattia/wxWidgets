@@ -116,6 +116,7 @@ jobs:
             msbuild /noLogo /m '/p:Configuration=${{ matrix.configuration }}' /p:Platform=${{ matrix.platform }} tests\test_vc16.sln
 
       - name: RunTests
+        id: runtestJP
         if: ${{ !contains(matrix.platform, 'arm64') }}
         working-directory: tests
         stdout: true
@@ -124,7 +125,7 @@ jobs:
 
       - name: output RunTestsResult
         if:   always()
-        run: echo ${{steps.RunTests.outputs.stdout}}
+        run: echo ${{steps.runtestJP.outputs.stdout}}
 
       - name: Build GUI tests
         run: |
