@@ -601,13 +601,13 @@ TEST_CASE_METHOD(IPCFixture,
         std::cout << "Running test Connect\n" << std::flush;
 
     // connecting to the wrong port should fail
-    CHECK( !gs_client->Connect("localhost", "2424", IPC_TEST_TOPIC) );
+    CHECK( !gs_client->Connect("127.0.0.1", "2424", IPC_TEST_TOPIC) );
 
     // connecting with the wrong topic should fail
-    CHECK( !gs_client->Connect("localhost", IPC_TEST_PORT, "VCP GRFG") );
+    CHECK( !gs_client->Connect("127.0.0.1", IPC_TEST_PORT, "VCP GRFG") );
 
     // Connecting to the right port on the right topic should succeed.
-    REQUIRE( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    REQUIRE( gs_client->Connect("127.0.0.1", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 }
 
 // Test the basics of Request(): A Request() goes out and it should result in
