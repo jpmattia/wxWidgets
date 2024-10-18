@@ -115,11 +115,14 @@ jobs:
         run: |
             msbuild /noLogo /m '/p:Configuration=${{ matrix.configuration }}' /p:Platform=${{ matrix.platform }} tests\test_vc16.sln
 
-      - name: Run tests
+      - name: RunTests
         if: ${{ !contains(matrix.platform, 'arm64') }}
         working-directory: tests
         run: |
-            .\vc*msw*\test.exe >> $GITHUB_OUTPUT
+            .\vc*msw*\test.exe
+
+      - name: output RunTestsResult
+        run: echo ${{steps.RunTests.outputs.stdout}}
 
       - name: Build GUI tests
         run: |
