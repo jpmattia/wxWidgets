@@ -118,6 +118,7 @@ jobs:
       - name: RunTests
         if: ${{ !contains(matrix.platform, 'arm64') }}
         working-directory: tests
+        stdout: true
         run: |
             .\vc*msw*\test.exe
 
