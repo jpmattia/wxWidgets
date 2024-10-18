@@ -1359,19 +1359,19 @@ void wxTCPEventHandler::Server_OnRequest(wxSocketEvent &event)
         return;
 
     // Accept the connection, getting a new socket
-    std::cout << "pre server->Accept()\n" << std::flush;
+    // std::cout << "pre server->Accept()\n" << std::flush;
     wxSocketBase *sock = server->Accept();
     if (!sock)
         return;
 
-    std::cout << "post server->Accept()\n" << std::flush;
+    // std::cout << "post server->Accept()\n" << std::flush;
 
     if ( !sock->IsOk() )
     {
         sock->Destroy();
         return;
     }
-    std::cout << "post server->IsOK()\n" << std::flush;
+    // std::cout << "post server->IsOK()\n" << std::flush;
 
     wxIPCMessageBase* msg = ReadMessageFromSocket(sock);
     wxIPCMessageBaseLocker lock(msg);
