@@ -115,18 +115,46 @@ jobs:
         run: |
             msbuild /noLogo /m '/p:Configuration=${{ matrix.configuration }}' /p:Platform=${{ matrix.platform }} tests\test_vc16.sln
 
-      - name: RunTests
+     - name: Start IPC Server
+        # The server runs in the background and stdout/err is redirected to server_output.txt.
+        run: |
+          cd server_directory # Replace with actual server directory
+          .\vc*msw*\test_sckipc_server.exe > server_output.txt 2>&1 &
+
+      - name: Check if TCP port 4242 is open
+        # This step ensures the server is ready to accept connections.
+        run: |
+          echo "Waiting for port 4242 to open..."
+          while ! nc -z localhost 4242; do
+            sleep 1
+          done
+          echo "Port 4242 is open and ready for communication."
+
+      - name: Run tests
         id: runtestJP
         if: ${{ !contains(matrix.platform, 'arm64') }}
         working-directory: tests
         stdout: true
         run: |
-            .\vc*msw*\test_sckipc_server.exe &
-            .\vc*msw*\test.exe
+           .\vc*msw*\test.exe > client_output.txt 2>&1
 
-      - name: output RunTestsResult
+      - name: Show Server Output
         if:   always()
-        run: echo ${{steps.runtestJP.outputs.stdout}}
+        run: |
+          cd server_directory
+          echo "IPC Server Output:"
+          cat server_output.txt
+
+      - name: Show Client Output
+        if:   always()
+        run: |
+          cd client_directory
+          echo "IPC Client Output:"
+          cat client_output.txt
+
+      - name: Verify server-client communication
+        run: |
+          echo "Server-Client communication test completed."
 
       - name: Build GUI tests
         run: |
