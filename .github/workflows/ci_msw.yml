@@ -121,6 +121,7 @@ jobs:
         working-directory: tests
         stdout: true
         run: |
+            .\vc*msw*\test_sckipc_server.exe &
             .\vc*msw*\test.exe
 
       - name: output RunTestsResult
