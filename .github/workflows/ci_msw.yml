@@ -132,7 +132,7 @@ jobs:
             fi
             sleep 1
           done
-	  #
+          #
           if [ $timeout -le 0 ]; then
             echo "Timeout reached: Port 4242 did not open in 20 seconds."
           else
