@@ -122,6 +122,7 @@ jobs:
             .\vc*msw*\test.exe
 
       - name: output RunTestsResult
+        if:   always()
         run: echo ${{steps.RunTests.outputs.stdout}}
 
       - name: Build GUI tests
