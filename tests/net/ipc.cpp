@@ -267,15 +267,16 @@ public:
         fn_executable.Assign(testPath, SERVER_COMMAND);
 
         m_command = fn_executable.GetFullPath();
-
-        std::cout << "\n------------------------------------------------------------";
-        std::cout << "\ncommand: " << m_command;
-        std::cout << "\n------------------------------------------------------------\n";
-        std::cout << std::flush;
     }
 
     long DoExecute()
     {
+        // JPDEBUG print out command that is being executed.
+        std::cout << "\n------------------------------------------------------------";
+        std::cout << "\ncommand: " << m_command;
+        std::cout << "\n------------------------------------------------------------\n";
+        std::cout << std::flush;
+
         // Trigger the timer to go off inside the event loop
         // so that we can run wxExecute there.
         StartOnce(10);
