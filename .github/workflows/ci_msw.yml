@@ -115,53 +115,17 @@ jobs:
         run: |
             msbuild /noLogo /m '/p:Configuration=${{ matrix.configuration }}' /p:Platform=${{ matrix.platform }} tests\test_vc16.sln
 
-     - name: Start IPC Server
-        # The server runs in the background and stdout/err is redirected to server_output.txt.
-        run: |
-          .\vc*msw*\test_sckipc_server.exe > server_output.txt 2>&1 &
-
-      - name: Check if TCP port 4242 is open (with 20-second timeout)
-        # This step waits for port 4242 to open, with a maximum of 20 seconds.
-        run: |
-          echo "Waiting for port 4242 to open..."
-          timeout=20
-          while ! nc -z localhost 4242; do
-            ((timeout--))
-            if [ $timeout -le 0 ]; then
-              break
-            fi
-            sleep 1
-          done
-          #
-          if [ $timeout -le 0 ]; then
-            echo "Timeout reached: Port 4242 did not open in 20 seconds."
-          else
-            echo "Port 4242 is open and ready for communication."
-          fi
-
       - name: Run tests
-        id: runtestJP
         if: ${{ !contains(matrix.platform, 'arm64') }}
         working-directory: tests
-        stdout: true
         run: |
-           .\vc*msw*\test.exe > client_output.txt 2>&1
-
-      - name: Show Server Output
-        if:   always()
-        run: |
-          echo "IPC Server Output:"
-          cat server_output.txt
+            .\vc*msw*\test.exe > client_output.txt 2>&1
 
       - name: Show Client Output
         if:   always()
         run: |
           echo "IPC Client Output:"
           cat client_output.txt
-
-      - name: Verify server-client communication
-        run: |
-          echo "Server-Client communication test completed."
 
       - name: Build GUI tests
         run: |

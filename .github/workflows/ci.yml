@@ -346,7 +346,18 @@ jobs:
         # The server runs in the background and stdout/err is redirected to server_output.txt.
         working-directory: tests
         run: |
-          ./test_sckipc_server.exe > server_output.txt 2>&1 &
+          echo "Starting server..."
+          ./test_sckipc_server.exe > server_output.log 2>&1 &
+          # Store server PID
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+          # Wait for server to start (adjust sleep time as needed)
+          sleep 2
+          # Check if server is running
+          if ! ps -p $! > /dev/null; then
+            echo "Server failed to start"
+            cat server_output.log
+            exit 1
+          fi
 
       - name: Check if TCP port 4242 is open (with 20-second timeout)
         # This step waits for port 4242 to open, with a maximum of 20 seconds.
@@ -395,6 +406,23 @@ jobs:
             httpbin_show_log
             exit $rc
           fi
+
+      - name: Stop Server
+        if: always()
+        run: |
+          if [ ! -z "${SERVER_PID}" ]; then
+            echo "Stopping server (PID: ${SERVER_PID})..."
+            kill ${SERVER_PID} || true
+          fi
+
+     - name: Upload Test Logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-logs
+          path: |
+            tests/server_output.log
+            tests/test.out
 
       - name: Testing launching GUI test
         working-directory: tests
