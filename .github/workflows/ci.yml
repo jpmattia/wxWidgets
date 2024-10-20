@@ -305,31 +305,6 @@ jobs:
             exit 1
           fi
 
-      - name: Verify PID storage
-        # learning about github env
-        run: |
-          echo "server id braces = ${SERVER_PID}"
-          echo "server id no braces = $SERVER_PID"
-
-      - name: Check if TCP port 4242 is open (with 20-second timeout)
-        # This step waits for port 4242 to open, with a maximum of 20 seconds.
-        run: |
-          echo "Waiting for port 4242 to open..."
-          timeout=20
-          while ! nc -z localhost 4242; do
-            ((timeout--))
-            if [ $timeout -le 0 ]; then
-              break
-            fi
-            sleep 1
-          done
-          #
-          if [ $timeout -le 0 ]; then
-            echo "Timeout reached: Port 4242 did not open in 20 seconds."
-          else
-            echo "Port 4242 is open and ready for communication."
-          fi
-
       - name: Testing
         working-directory: tests
         run: |
