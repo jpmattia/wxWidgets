@@ -893,7 +893,7 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( wxString(data).IsEmpty() );
 }
 
-// #ifdef wxMSW
+#ifdef wxMSW
 
 // Run three concurrent threads in the client sending Requests() to the
 // server, and simultaneously run three concurrent threads in the server
@@ -996,6 +996,6 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( wxString(data).IsEmpty() );
 }
 
-// #endif // wxMSW
+#endif // wxMSW
 
 #endif // wxUSE_THREADS
