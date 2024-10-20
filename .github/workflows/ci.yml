@@ -294,7 +294,8 @@ jobs:
           echo "Starting server..."
           ./test_sckipc_server > server_output.log 2>&1 &
           echo "SERVER_PID=$!" >> $GITHUB_ENV
-          echo "${SERVER_PID}"
+          echo "server id braces = ${SERVER_PID}"
+          echo "server id no braces = $SERVER_PID"
 
           # Store server PID
 
@@ -303,9 +304,9 @@ jobs:
           # Wait for server to start (adjust sleep time as needed)
           sleep 2
           # Check if server is running
-          if ! ps -p ${SERVER_PID} > /dev/null; then
+          if ! ps -p $SERVER_PID > /dev/null; then
             echo "Server failed to start"
-            cat server_output.log
+            cat tests/server_output.log
             exit 1
           fi
 
