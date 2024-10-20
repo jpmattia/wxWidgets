@@ -292,7 +292,7 @@ jobs:
         working-directory: tests
         run: |
           echo "Starting server..."
-          ./test_sckipc_server.exe > server_output.log 2>&1 &
+          ./test_sckipc_server > server_output.log 2>&1 &
           echo "SERVER_PID=$!" >> $GITHUB_ENV
           echo "${SERVER_PID}"
 
