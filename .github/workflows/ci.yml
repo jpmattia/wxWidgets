@@ -348,7 +348,7 @@ jobs:
         run: |
           echo "Starting server..."
           ./test_sckipc_server.exe > server_output.log 2>&1 &
-          cat `ps`
+          echo `ps`
 
           # Store server PID
 
