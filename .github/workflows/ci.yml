@@ -348,7 +348,11 @@ jobs:
         run: |
           echo "Starting server..."
           ./test_sckipc_server.exe > server_output.log 2>&1 &
+          cat `ps`
+
           # Store server PID
+
+
           echo "SERVER_PID=$!" >> $GITHUB_ENV
           # Wait for server to start (adjust sleep time as needed)
           sleep 2
@@ -407,17 +411,8 @@ jobs:
       - name: Show Client Output
         if: always()
         run: |
-          echo "IPC Client Output:"
+          echo " IPC Client Output: "
           cat tests/test.out
-
-      - name: Upload Test Logs
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: test-logs
-          path: |
-            tests/server_output.log
-            tests/test.out
 
       - name: Show Server Output
         if: always()
