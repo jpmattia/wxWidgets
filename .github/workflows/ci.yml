@@ -293,22 +293,23 @@ jobs:
         run: |
           echo "Starting server..."
           ./test_sckipc_server > server_output.log 2>&1 &
-          echo "SERVER_PID=$!" >> $GITHUB_ENV
-          echo "server id braces = ${SERVER_PID}"
-          echo "server id no braces = $SERVER_PID"
 
-          # Store server PID
-
-
+          echo "SERVER_PID=$!" >> $GITHUB_ENV # not available in this step, only those following
 
           # Wait for server to start (adjust sleep time as needed)
           sleep 2
           # Check if server is running
-          if ! ps -p $SERVER_PID > /dev/null; then
+          if ! ps -p $! > /dev/null; then
             echo "Server failed to start"
             cat tests/server_output.log
             exit 1
           fi
+
+      - name: Verify PID storage
+        # learning about github env
+        run: |
+          echo "server id braces = ${SERVER_PID}"
+          echo "server id no braces = $SERVER_PID"
 
       - name: Check if TCP port 4242 is open (with 20-second timeout)
         # This step waits for port 4242 to open, with a maximum of 20 seconds.
