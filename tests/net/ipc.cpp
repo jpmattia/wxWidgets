@@ -269,6 +269,11 @@ public:
         m_command = fn_executable.GetFullPath();
     }
 
+    ~ExecAsyncWrapper()
+    {
+        if (m_process) delete m_process;
+    }
+
     long DoExecute()
     {
         // JPDEBUG print out command that is being executed.
@@ -440,6 +445,7 @@ public:
         if ( m_conn )
         {
             m_conn->Disconnect();
+            delete m_conn;
             m_conn = nullptr;
         }
     }
