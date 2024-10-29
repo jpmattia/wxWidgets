@@ -111,16 +111,16 @@ jobs:
         run: |
             msbuild /noLogo /m '/p:Configuration=${{ matrix.configuration }}' /p:Platform=${{ matrix.platform }} samples\minimal\minimal_vc16.sln
 
+      - name: Build tests
+        run: |
+            msbuild /noLogo /m '/p:Configuration=${{ matrix.configuration }}' /p:Platform=${{ matrix.platform }} tests\test_vc16.sln
+
       - name: Start IPC Server
         # The server runs in the background and stdout/err is redirected to server_output.txt.
         working-directory: tests
         run: |
           echo "Starting server..."
           .\vc*msw*\test_sckipc_server > server_output.log 2>&1 &
-
-      - name: Build tests
-        run: |
-            msbuild /noLogo /m '/p:Configuration=${{ matrix.configuration }}' /p:Platform=${{ matrix.platform }} tests\test_vc16.sln
 
       - name: Run tests
         if: ${{ !contains(matrix.platform, 'arm64') }}
