@@ -46,7 +46,7 @@ class ExecAsyncWrapper;
 // Automated test spawns a process with an external server.  When running this
 // test manually, set g_use_external_server to false and then start the
 // test_sckipc_server via a command line. Then the TEST_CASE below can run.
-bool g_use_external_server = true;
+bool g_use_external_server = false;
 
 // When g_show_message_timing is set to true, Advise() and RequestReply()
 // messages will be printed when they arrive. This shows how the IPC messages
@@ -265,6 +265,8 @@ public:
 
         wxFileName fn_executable;
         fn_executable.Assign(testPath, SERVER_COMMAND);
+
+        REQUIRE( fn_executable.Exists() );
 
         m_command = fn_executable.GetFullPath();
     }
