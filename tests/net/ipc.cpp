@@ -43,10 +43,10 @@ class ExecAsyncWrapper;
 // runs the checks in this file.
 
 
-// Automated test spawns a process with an external server.  When running this
-// test manually, set g_use_external_server to false and then start the
-// test_sckipc_server via a command line. Then the TEST_CASE below can run.
-bool g_use_external_server = false;
+// Automated test needs a process with an external server.  When running the
+// tests manually, set g_start_external_server to false and then start the
+// test_sckipc_server via the command line.
+bool g_start_external_server = false;
 
 // When g_show_message_timing is set to true, Advise() and RequestReply()
 // messages will be printed when they arrive. This shows how the IPC messages
@@ -254,7 +254,11 @@ class ExecAsyncWrapper : public wxTimer
 {
 public:
     ExecAsyncWrapper()
+        : m_process(nullptr)
     {
+        if (!g_start_external_server)
+            return;
+
         m_process = new IPCServerProcess(this);
         m_process_finished = false;
 
@@ -548,7 +552,7 @@ public:
 
         gs_client = new IPCTestClient;
 
-        if ( g_use_external_server )
+        if ( g_start_external_server )
         {
             long pid = m_exec.DoExecute();
 
@@ -562,7 +566,7 @@ public:
 
     ~IPCFixture()
     {
-        if ( g_use_external_server )
+        if ( g_start_external_server )
         {
             // Make sure there is a connection
             IPCTestConnection& conn = gs_client->GetConn();
