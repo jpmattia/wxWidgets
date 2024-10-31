@@ -267,15 +267,17 @@ public:
         //////////////////////////////////////////////////////////////////////////////
         // DELETE BLOCK
         //
-        wxFileName fn_testpath(wxStandardPaths::Get().GetExecutablePath());
-        wxString testPath(fn_testpath.GetPath());
+        {
+            wxFileName fn_testpath(wxStandardPaths::Get().GetExecutablePath());
+            wxString testPath(fn_testpath.GetPath());
 
-        wxFileName fn_executable;
-        fn_executable.Assign(testPath, SERVER_COMMAND);
-        std::cout << "\n------------------------------------------------------------";
-        std::cout << "\ncommand will be: " << fn_executable.GetFullPath();
-        std::cout << "\n------------------------------------------------------------\n";
-        std::cout << std::flush;
+            wxFileName fn_executable;
+            fn_executable.Assign(testPath, SERVER_COMMAND);
+            std::cout << "\n------------------------------------------------------------";
+            std::cout << "\ncommand will be: " << fn_executable.GetFullPath();
+            std::cout << "\n------------------------------------------------------------\n";
+            std::cout << std::flush;
+        }
         //
         // END DELETE
         //////////////////////////////////////////////////////////////////////////////
