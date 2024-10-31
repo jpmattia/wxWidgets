@@ -61,7 +61,15 @@ bool g_show_message_timing = false;
 #ifdef __UNIX__
     #define SERVER_COMMAND "test_sckipc_server"
 #elif defined(__WINDOWS__)
-    #define SERVER_COMMAND "test_sckipc_server.exe"
+    // At this time of writing: test_sckipc_server.exe needs to be
+    // compiled via msbuild for the testing, but this is not in my (JPM)
+    // wheelhouse.
+    //   Once test_sckipc_server.exe is added to the msbuild scripts
+    //   SERVER_COMMAND should be defined by line immediately below
+    //   #define SERVER_COMMAND "test_sckipc_server.exe"
+    #define SERVER_COMMAND "..\..\test_sckipc_server.exe"
+
+
 #else
     #error "no command to exec"
 #endif // OS
@@ -256,6 +264,22 @@ public:
     ExecAsyncWrapper()
         : m_process(nullptr)
     {
+        //////////////////////////////////////////////////////////////////////////////
+        // DELETE BLOCK
+        //
+        wxFileName fn_testpath(wxStandardPaths::Get().GetExecutablePath());
+        wxString testPath(fn_testpath.GetPath());
+
+        wxFileName fn_executable;
+        fn_executable.Assign(testPath, SERVER_COMMAND);
+        std::cout << "\n------------------------------------------------------------";
+        std::cout << "\ncommand will be: " << fn_executable.GetFullPath();
+        std::cout << "\n------------------------------------------------------------\n";
+        std::cout << std::flush;
+        //
+        // END DELETE
+        //////////////////////////////////////////////////////////////////////////////
+
         if (!g_start_external_server)
             return;
 

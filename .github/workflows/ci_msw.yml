@@ -132,6 +132,12 @@ jobs:
         run: |
             msbuild /noLogo /m '/p:Configuration=${{ matrix.configuration }}' /p:Platform=${{ matrix.platform }} tests\test_gui_vc16.sln
 
+      - name: Show Server Output
+        if: always()
+        run: |
+          echo "IPC Server Output:"
+          cat tests/server_output.log
+
       - name: Run GUI tests
         if: ${{ !contains(matrix.platform, 'arm64') }}
         working-directory: tests
