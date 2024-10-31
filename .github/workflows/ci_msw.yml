@@ -134,9 +134,10 @@ jobs:
 
       - name: Show Server Output
         if: always()
+        working-directory: tests
         run: |
           echo "IPC Server Output:"
-          cat tests/server_output.log
+          cat server_output.log
 
       - name: Run GUI tests
         if: ${{ !contains(matrix.platform, 'arm64') }}
