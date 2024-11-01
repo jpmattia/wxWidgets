@@ -342,6 +342,27 @@ jobs:
           go-version: '1'
           cache: false
 
+      - name: Start IPC Server
+        # The server runs in the background and stdout/err is redirected to server_output.txt.
+        working-directory: tests
+        run: |
+          echo "Starting server..."
+          ./test_sckipc_server > server_output.log 2>&1 &
+
+          # Save the process id. We'll use it later to kill the server. Also note that
+          # SERVER_PID is not available in this step, only those that follow.
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+
+          # Give the server time to start
+          sleep 2
+
+          # Check if server is running
+          if ! ps -p $! > /dev/null; then
+            echo "Server failed to start"
+            cat tests/server_output.log
+            exit 1
+          fi
+
       - name: Testing
         working-directory: tests
         run: |
@@ -366,6 +387,21 @@ jobs:
           if [ -n "$rc" ]; then
             httpbin_show_log
             exit $rc
+          fi
+
+      - name: Show Server Output
+        if: always()
+        run: |
+          echo "IPC Server Output:"
+          cat tests/server_output.log
+
+      - name: Stop Server
+        if: always()
+        run: |
+          echo "Stop Server"
+          if [ ! -z "${SERVER_PID}" ]; then
+            echo "Stopping server (PID: ${SERVER_PID})..."
+            kill ${SERVER_PID} || true
           fi
 
       - name: Testing launching GUI test

@@ -115,6 +115,13 @@ jobs:
         run: |
             msbuild /noLogo /m '/p:Configuration=${{ matrix.configuration }}' /p:Platform=${{ matrix.platform }} tests\test_vc16.sln
 
+      - name: Start IPC Server
+        # The server runs in the background and stdout/err is redirected to server_output.txt.
+        working-directory: tests
+        run: |
+          echo "Starting server..."
+          .\bin\test_sckipc_server > server_output.log 2>&1 &
+
       - name: Run tests
         if: ${{ !contains(matrix.platform, 'arm64') }}
         working-directory: tests
@@ -124,6 +131,13 @@ jobs:
       - name: Build GUI tests
         run: |
             msbuild /noLogo /m '/p:Configuration=${{ matrix.configuration }}' /p:Platform=${{ matrix.platform }} tests\test_gui_vc16.sln
+
+      - name: Show Server Output
+        if: always()
+        working-directory: tests
+        run: |
+          echo "IPC Server Output:"
+          cat server_output.log
 
       - name: Run GUI tests
         if: ${{ !contains(matrix.platform, 'arm64') }}
