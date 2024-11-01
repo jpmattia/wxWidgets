@@ -274,7 +274,7 @@ public:
             wxFileName fn_executable;
             fn_executable.Assign(testPath, SERVER_COMMAND);
             std::cout << "\n------------------------------------------------------------";
-            std::cout << "\ncommand will be: " << fn_executable.GetFullPath();
+            std::cout << "\ncommand will be: \n" << fn_executable.GetFullPath();
             std::cout << "\n------------------------------------------------------------\n";
             std::cout << std::flush;
         }
