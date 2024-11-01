@@ -46,7 +46,7 @@ class ExecAsyncWrapper;
 // Automated test needs a process with an external server.  When running the
 // tests manually, set g_start_external_server to false and then start the
 // test_sckipc_server via the command line.
-bool g_start_external_server = false;
+bool g_start_external_server = true;
 
 // When g_show_message_timing is set to true, Advise() and RequestReply()
 // messages will be printed when they arrive. This shows how the IPC messages
@@ -66,8 +66,8 @@ bool g_show_message_timing = false;
     // wheelhouse.
     //   Once test_sckipc_server.exe is added to the msbuild scripts
     //   SERVER_COMMAND should be defined by line immediately below
-    //   #define SERVER_COMMAND "test_sckipc_server.exe"
-    #define SERVER_COMMAND "..\..\test_sckipc_server.exe"
+    #define SERVER_COMMAND "test_sckipc_server.exe"
+    // #define SERVER_COMMAND "..\..\test_sckipc_server.exe"
 
 
 #else
