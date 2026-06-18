@@ -9,7 +9,7 @@
 
 #include "testprec.h"
 
-// this test needs threads as it runs the test server in a secondary thread
+// this test needs threads as it runs the test server concurrently with the client
 #if wxUSE_THREADS
 
 #ifndef WX_PRECOMP
@@ -17,54 +17,31 @@
 #endif // WX_PRECOMP
 
 #include "ipc_setup_test.h"
+#include "ipc_test_server.h"
 
 #include <wx/ipc.h>
 #include <wx/thread.h>
-#include <wx/process.h>
-#include <wx/timer.h>
-#include <wx/txtstrm.h>
-#include <wx/sstream.h>
 #include <wx/utils.h>
-
-#include <wx/filename.h>
-#include <wx/stdpaths.h>
+#include <wx/evtloop.h>
 
 // forward decl
 class IPCTestClient;
-class ExecAsyncWrapper;
 
-// The test for IPC needs to run the client and socket in separate
-// processes. Since catch2 does not have a facility for another process, we
-// create one using wxExecute. The client is run below, and the wxExecute runs
-// the server.
-//
-// Note that catch2 cannot run checks in the external server process, so
-// instead the client queries the server for the desired information and then
-// runs the checks in this file.
-
-
-// Automated test needs a process with an external server.  When running the
-// tests manually, set g_start_external_server to false and then start the
-// test_sckipc_server via the command line.
-bool g_start_external_server = true;
+// The IPC tests use a single test binary: the server is started by re-executing
+// the same test program with WX_IPC_TEST_SERVER set (see ipc_test_server.cpp).
+// The client runs in the main Catch2 process. Catch2 cannot run checks in the
+// server process, so the client queries the server for state and verifies it
+// here.
 
 // When g_show_message_timing is set to true, Advise() and RequestReply()
 // messages will be printed when they arrive. This shows how the IPC messages
-// arrive and whether they interleave,
+// arrive and whether they interleave.
 bool g_show_message_timing = false;
 
 // Output for g_show_message_timing uses std::cout, so we can get a sense of the
 // raw arrival times.
 #include <iostream>
-
-// The command to run the external server.
-#ifdef __UNIX__
-    #define SERVER_COMMAND "test_sckipc_server"
-#elif defined(__WINDOWS__)
-    #define SERVER_COMMAND "test_sckipc_server.exe"
-#else
-    #error "no command to exec"
-#endif // OS
+#include <memory>
 
 // Test connection class used by the client.
 class IPCTestConnection : public wxConnection
@@ -227,191 +204,6 @@ void IPCTestConnection::HandleThreadAdviseCounting(const wxString& advise_string
     }
 }
 
-// After the server finishes running in its process, IPCServerProcess gets
-// notified of the termination.
-class IPCServerProcess : public wxProcess
-{
-public:
-    IPCServerProcess(ExecAsyncWrapper* parent)
-    {
-        m_parent = parent;
-    }
-
-    virtual void OnTerminate(int pid, int status);
-
-    ExecAsyncWrapper* m_parent;
-};
-
-// The server is started in an external process using wxExecute. Since
-// wxExecute needs an event loop to run, we set up a wrapper to start a loop
-// and use wxTimer as a callback to run the wxExecute command.
-//
-// There are a number of utilities included here, so that we can make sure the
-// server process terminates when we want it to. If the server were not to
-// terminate, then the IPC port would remain bound and all further tests would
-// potentially run into trouble if the server had hung.
-class ExecAsyncWrapper : public wxTimer
-{
-public:
-    ExecAsyncWrapper()
-        : m_process(nullptr)
-    {
-        if (!g_start_external_server)
-            return;
-
-        m_process = new IPCServerProcess(this);
-        m_process_finished = false;
-
-        // Get the path that test is running in, and compose the full path to
-        // the executable for the server command.
-        wxFileName fn_testpath(wxStandardPaths::Get().GetExecutablePath());
-        wxString testPath(fn_testpath.GetPath());
-
-        wxFileName fn_executable;
-        fn_executable.Assign(testPath, SERVER_COMMAND);
-
-        REQUIRE( fn_executable.Exists() );
-
-        m_command = fn_executable.GetFullPath();
-    }
-
-    ~ExecAsyncWrapper()
-    {
-        if (m_process) delete m_process;
-    }
-
-    long DoExecute()
-    {
-        // Trigger the timer to go off inside the event loop
-        // so that we can run wxExecute there.
-        StartOnce(10);
-
-        // Run the event loop.
-        wxEventLoop loop;
-        loop.Run();
-
-        return m_pid;
-    }
-
-    void Notify() override
-    {
-        // Run wxExecute inside the event loop.
-        m_pid = wxExecute(m_command, wxEXEC_ASYNC, m_process);
-
-        REQUIRE( m_pid != 0);
-
-        wxEventLoop::GetActive()->Exit();
-    }
-
-    bool SendSIGTERM()
-    {
-        if (IsFinished())
-            return true;
-
-        // For some reason on wxMSW, the process sometimes needs more than one
-        //  iteration, even with wxKILL_OK as the return value from wxKill.
-        for ( int i=0; i < 3 && StillRunning(); i++ )
-        {
-            wxKill(m_pid, wxSIGTERM);
-            wxMilliSleep(50);
-        }
-
-        return IsFinished();
-    }
-
-    bool SendSIGKILL()
-    {
-        if (IsFinished())
-            return true;
-
-        wxKillError result;
-
-        wxKill(m_pid, wxSIGKILL, &result);
-
-        bool process_killed = result == wxKILL_OK || result == wxKILL_NO_PROCESS;
-
-        // SIGKILL will bypass wxProcess::OnTerminate, so set the following
-        // manually.
-        if ( process_killed )
-            m_process_finished = true;
-
-        if ( g_show_message_timing )
-        {
-            if ( process_killed )
-                std::cout << "server process killed\n" << std::flush;
-            else
-                std::cout << "wxSIGKILL unsucessful: "
-                          << wxKILL_ResultToString(result)
-                          << "\n" << std::flush;
-        }
-
-        return process_killed;
-    }
-
-    // Utility for wxKILL
-    wxString wxKILL_ResultToString(wxKillError result)
-    {
-        switch (result)
-        {
-        case wxKILL_OK:            return "wxKILL_OK";
-        case wxKILL_BAD_SIGNAL:    return "wxKILL_BAD_SIGNAL";
-        case wxKILL_ACCESS_DENIED: return "wxKILL_ACCESS_DENIED";
-        case wxKILL_NO_PROCESS:    return "wxKILL_NO_PROCESS";
-        case wxKILL_ERROR:         return "wxKILL_ERROR";
-        default:
-            return "Unknown result from wxKILL";
-        };
-    };
-
-    bool IsFinished() const { return m_process_finished; }
-    bool StillRunning() const { return !m_process_finished; }
-
-    wxString m_command;
-    long m_pid;
-    IPCServerProcess* m_process;
-    bool m_process_finished;
-
-    wxDECLARE_NO_COPY_CLASS(ExecAsyncWrapper);
-};
-
-void IPCServerProcess::OnTerminate(int pid, int status)
-{
-    m_parent->m_process_finished = true;
-
-    if ( g_show_message_timing )
-    {
-        std::cout
-            << wxString::Format("Process %u terminated, exit code %d.\n",
-                                pid, status)
-            << std::flush;
-    }
-}
-
-// SleepProcess starts a loop, for methods that need a main loop to be running,
-// eg wxProcess::OnTerminate
-class SleepProcess : public wxTimer
-{
-public:
-    SleepProcess() {};
-
-    void DoWait()
-    {
-        // Trigger the timer to go off inside the event loop.
-        // While the loop is running, wxProcess::OnTerminate gets called
-        // if the IPC server terminated.
-        StartOnce(50);
-
-        // Run the event loop.
-        wxEventLoop loop;
-        loop.Run();
-    }
-
-    void Notify() override
-    {
-        wxEventLoop::GetActive()->Exit();
-    }
-};
-
 // The actual client is pretty thin, most of the work is done in the
 // connection class.
 class IPCTestClient : public wxClient
@@ -463,6 +255,28 @@ public:
 };
 
 static IPCTestClient *gs_client = nullptr;
+static wxEventLoop *gs_clientLoop = nullptr;
+
+static bool PumpConnect(const wxString& host,
+                        const wxString& service,
+                        const wxString& topic)
+{
+    return gs_client->Connect(host, service, topic);
+}
+
+void IPCClientDispatch(unsigned long timeoutMs)
+{
+    if ( !gs_clientLoop )
+        return;
+
+    wxEventLoopActivator activate(gs_clientLoop);
+    gs_clientLoop->DispatchTimeout(timeoutMs);
+}
+
+static void PumpDispatch()
+{
+    IPCClientDispatch(10);
+}
 
 bool IPCTestConnection::OnDisconnect()
 {
@@ -526,63 +340,52 @@ public:
     wxDECLARE_NO_COPY_CLASS(MultiRequestThread);
 };
 
-// IPCFixture is responsible for setting up and tearing down the external
-// server process for the test cases.
+// IPCFixture starts the in-process server and the client.
 class IPCFixture
 {
+    std::unique_ptr<wxEventLoop> m_clientLoop{new wxEventLoop};
+    IPCServerThread m_server;
+
 public:
     IPCFixture()
     {
 #if wxUSE_SOCKETS_FOR_IPC
-        // We will be using sockets from worker threads, so we need to
-        // initialize.
         wxSocketBase::Initialize();
 #endif // wxUSE_SOCKETS_FOR_IPC
 
+        gs_clientLoop = m_clientLoop.get();
         gs_client = new IPCTestClient;
 
-        if ( g_start_external_server )
-        {
-            long pid = m_exec.DoExecute();
+        REQUIRE( m_server.Start() );
 
-            // Allow a moment for the server to bind the port
-            wxMilliSleep(50);
-
-            REQUIRE( pid != 0);
-        };
-
-    };
+        wxMilliSleep(200);
+    }
 
     ~IPCFixture()
     {
-        if ( g_start_external_server )
+        if ( gs_client )
         {
-            // Make sure there is a connection
-            IPCTestConnection& conn = gs_client->GetConn();
+            if ( !gs_client->m_conn )
+                PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC);
 
-            // Executing a shutdown on the server should cause the server to
-            // self-terminate.
-            const wxString s("shutdown");
-            CHECK( conn.Execute(s) );
-
-            // Give the server a moment to self-exit
-            for ( int i=0; i < 3 && m_exec.StillRunning(); i++ )
+            if ( gs_client->m_conn )
             {
-                SleepProcess proc;
-                proc.DoWait();
+                const wxString s("shutdown");
+                gs_client->GetConn().Execute(s);
+                wxMilliSleep(100);
             }
+        }
 
-            // Self-exit failed, send a SIGTERM.
-            if ( !m_exec.SendSIGTERM() )
-            {
-                // SIGTERM did not work, try SIGKILL
-                m_exec.SendSIGKILL();
-            }
+        m_server.WaitForExit();
 
-            CHECK( m_exec.IsFinished() );
-        };
+        if ( gs_client )
+            gs_client->Disconnect();
+
+        gs_clientLoop = nullptr;
+        m_clientLoop.reset();
 
         delete gs_client;
+        gs_client = nullptr;
 
 #if wxUSE_SOCKETS_FOR_IPC
         wxSocketBase::Shutdown();
@@ -591,8 +394,6 @@ public:
         if ( g_show_message_timing )
             std::cout << "teardown complete\n" << std::flush;
     }
-
-    ExecAsyncWrapper m_exec;
 };
 
 // Test the basics of Connect()
@@ -603,13 +404,13 @@ TEST_CASE_METHOD(IPCFixture,
         std::cout << "Running test Connect\n" << std::flush;
 
     // connecting to the wrong port should fail
-    CHECK( !gs_client->Connect("localhost", "2424", IPC_TEST_TOPIC) );
+    CHECK( !PumpConnect("localhost", "2424", IPC_TEST_TOPIC) );
 
     // connecting with the wrong topic should fail
-    CHECK( !gs_client->Connect("localhost", IPC_TEST_PORT, "VCP GRFG") );
+    CHECK( !PumpConnect("localhost", IPC_TEST_PORT, "VCP GRFG") );
 
     // Connecting to the right port on the right topic should succeed.
-    REQUIRE( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    REQUIRE( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 }
 
 // Test the basics of Request(): A Request() goes out and it should result in
@@ -620,13 +421,13 @@ TEST_CASE_METHOD(IPCFixture,
     if ( g_show_message_timing )
         std::cout << "Running test SingleRequest\n" << std::flush;
 
-    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    CHECK( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
     IPCTestConnection& conn = gs_client->GetConn();
 
     const wxString s("ping");
     size_t size=0;
-    const char* data = (char*) conn.Request(s, &size, wxIPC_PRIVATE);
+    const char* data = (char*) conn.Request( s, &size, wxIPC_PRIVATE);
 
     // Make sure that Request() works, because we use it to probe the
     // state of the server for the remaining tests.
@@ -643,7 +444,7 @@ TEST_CASE_METHOD(IPCFixture,
     if ( g_show_message_timing )
         std::cout << "Running test Execute\n" << std::flush;
 
-    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    CHECK( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
     IPCTestConnection& conn = gs_client->GetConn();
 
@@ -675,11 +476,11 @@ TEST_CASE_METHOD(IPCFixture,
     if ( g_show_message_timing )
         std::cout << "Running test Single Thread Of Requests\n" << std::flush;
 
-    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    CHECK( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
     MultiRequestThread thread1("MultiRequest thread 1");
     thread1.Run();
-    thread1.Wait();
+    WaitForThreadWithDispatch(thread1);
 
     INFO( thread1.m_error );
     CHECK( thread1.m_error.IsEmpty() );
@@ -713,7 +514,7 @@ TEST_CASE_METHOD(IPCFixture,
         std::cout << "Running test Requests with Multiple Threads\n"
                   << std::flush;
 
-    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    CHECK( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
     MultiRequestThread thread1("MultiRequest thread 1");
     MultiRequestThread thread2("MultiRequest thread 2");
@@ -723,9 +524,9 @@ TEST_CASE_METHOD(IPCFixture,
     thread2.Run();
     thread3.Run();
 
-    thread1.Wait();
-    thread2.Wait();
-    thread3.Wait();
+    WaitForThreadWithDispatch(thread1);
+    WaitForThreadWithDispatch(thread2);
+    WaitForThreadWithDispatch(thread3);
 
     INFO( thread1.m_error );
     CHECK( thread1.m_error.IsEmpty() );
@@ -774,7 +575,7 @@ TEST_CASE_METHOD(IPCFixture,
     if ( g_show_message_timing )
         std::cout << "Running test Advise as single command\n" << std::flush;
 
-    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    CHECK( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
     IPCTestConnection& conn = gs_client->GetConn();
     wxString item = "SimpleAdvise test";
@@ -785,7 +586,7 @@ TEST_CASE_METHOD(IPCFixture,
     int cnt = 0;
     while ( cnt++ < 200 && !conn.m_advise_complete )
     {
-        wxMilliSleep(10);
+        PumpDispatch();
     }
 
     CHECK( conn.StopAdvise(item) );
@@ -811,7 +612,7 @@ TEST_CASE_METHOD(IPCFixture,
     if ( g_show_message_timing )
         std::cout << "Running test Single Thread Of Advise()'s\n" << std::flush;
 
-    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    CHECK( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
     IPCTestConnection& conn = gs_client->GetConn();
     wxString item = "MultiAdvise test";
@@ -823,7 +624,7 @@ TEST_CASE_METHOD(IPCFixture,
     while ( cnt++ < 2000 &&
             conn.m_thread1_advise_lastval != MESSAGE_ITERATIONS )
     {
-        wxMilliSleep(10);
+        PumpDispatch();
     }
 
     CHECK( conn.StopAdvise(item) );
@@ -854,7 +655,7 @@ TEST_CASE_METHOD(IPCFixture,
     if ( g_show_message_timing )
         std::cout << "Running test MultipleThreadsOfMultiAdvise\n" << std::flush;
 
-    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    CHECK( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
     IPCTestConnection& conn = gs_client->GetConn();
     wxString item = "MultiAdvise MultiThread test";
@@ -865,7 +666,7 @@ TEST_CASE_METHOD(IPCFixture,
     int cnt = 0;
     while ( cnt++ < 2000 )
     {
-        wxMilliSleep(10);
+        PumpDispatch();
 
         if ( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS &&
              conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS &&
@@ -894,8 +695,6 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( wxString(data).IsEmpty() );
 }
 
-#ifdef wxMSW
-
 // Run three concurrent threads in the client sending Requests() to the
 // server, and simultaneously run three concurrent threads in the server
 // sending Advise() information to the client. Verify that all messages are
@@ -905,20 +704,17 @@ TEST_CASE_METHOD(IPCFixture,
 // By setting g_show_message_timing to "true", the ordering of the Requests
 // and Advise's can be seen. Different systems may need to change the delay
 // wxMilliSleep in the client and server threads to make the interleave happen
-// properly, which is a strigent test of race conditions that might be present
+// properly, which is a stringent test of race conditions that might be present
 // in wxIPC.
-//
-// Note that this currently works only on MSW. When run on Linux (Rocky 9) there
-// is some hang with an unidentified cause. The hang gets better by turning off
-// ReenableEvents in ~wxSocketWriteGuard, but that is not a viable solution.
-//
+// Concurrent simultaneous Advise and Request IPC is only reliable on Windows.
+#ifdef wxMSW
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::AdviseAndRequestMultiThread", "[net][ipc][multi_thread]")
 {
     if ( g_show_message_timing )
         std::cout << "Running test MultiAdvise MultiThreads test with simultaneous MultiRequests MultiThreads\n" << std::flush;
 
-    CHECK( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    CHECK( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
     IPCTestConnection& conn = gs_client->GetConn();
 
     MultiRequestThread thread1("MultiRequest thread 1");
@@ -934,22 +730,21 @@ TEST_CASE_METHOD(IPCFixture,
     thread2.Run();
     thread3.Run();
 
+    // Phase 1: complete Request() threads without client-side dispatch.
+    WaitForThreadWithDispatch(thread1);
+    WaitForThreadWithDispatch(thread2);
+    WaitForThreadWithDispatch(thread3);
 
-    // Wait for local threads to finish ...
-    thread1.Wait();
-    thread2.Wait();
-    thread3.Wait();
-
-    // ... and the remote threads too.
+    // Phase 2: process any pending Advise() notifications and wait for the
+    // server advise threads to finish.
     int cnt = 0;
-    while ( cnt++ < 200 ) // max of 2 seconds
+    while ( cnt++ < 20000 )
     {
-        SleepProcess proc;
-        proc.DoWait();
+        PumpDispatch();
 
         if ( conn.m_thread1_advise_lastval == MESSAGE_ITERATIONS &&
              conn.m_thread2_advise_lastval == MESSAGE_ITERATIONS &&
-             conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS)
+             conn.m_thread3_advise_lastval == MESSAGE_ITERATIONS )
         {
             break;
         }
@@ -996,7 +791,6 @@ TEST_CASE_METHOD(IPCFixture,
     INFO( wxString(data) );
     CHECK( wxString(data).IsEmpty() );
 }
-
 #endif // wxMSW
 
 #endif // wxUSE_THREADS

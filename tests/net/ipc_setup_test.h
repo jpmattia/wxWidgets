@@ -28,7 +28,7 @@ const char *IPC_TEST_TOPIC = "IPC TEST";
 //
 // For stress-testing: if the number of MESSAGE_ITERATIONS is set much beyond
 // 200, then the wait times should likely also be increased. Search for "wait
-// a maximum" in ipc.cpp and sckipc_server to find those values.
+// a maximum" in ipc.cpp and ipc_test_server.cpp to find those values.
 #define MESSAGE_ITERATIONS 20
 #define MESSAGE_ITERATIONS_STRING  wxString::Format("%d",MESSAGE_ITERATIONS)
 

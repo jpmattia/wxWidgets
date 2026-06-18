@@ -55,6 +55,10 @@ std::string wxTheCurrentTestClass, wxTheCurrentTestMethod;
 #include "wx/socket.h"
 #include "wx/evtloop.h"
 
+#if wxUSE_THREADS
+    #include "net/ipc_test_server.h"
+#endif
+
 using namespace std;
 
 // ----------------------------------------------------------------------------
@@ -351,6 +355,14 @@ public:
 #else // !wxUSE_GUI
     virtual int OnRun() override
     {
+#if wxUSE_THREADS
+        if ( wxGetEnv("WX_IPC_TEST_SERVER", nullptr) )
+        {
+            RunIPCServerUntilStopped();
+            return 0;
+        }
+#endif // wxUSE_THREADS
+
         return RunTests();
     }
 #endif // wxUSE_GUI/!wxUSE_GUI
