@@ -29,33 +29,7 @@
     #include <unistd.h>
 #endif
 
-#include <cstdio>
-#include <ctime>
-
 #define MAX_MSG_BUFFERS 2048
-
-// #region agent log
-void IpcDebugLog(const char* location,
-                 const char* message,
-                 const char* hypothesisId,
-                 const char* dataJson)
-{
-    FILE* f = fopen("/home/jpmattia/wxWidgetsIssue/.cursor/debug-98a1fb.log", "a");
-    if ( !f )
-        return;
-
-    std::fprintf(f,
-                 "{\"sessionId\":\"98a1fb\",\"timestamp\":%ld,"
-                 "\"location\":\"%s\",\"message\":\"%s\","
-                 "\"hypothesisId\":\"%s\",\"data\":%s}\n",
-                 static_cast<long>(std::time(nullptr)),
-                 location,
-                 message,
-                 hypothesisId,
-                 dataJson ? dataJson : "{}");
-    std::fclose(f);
-}
-// #endregion
 
 class IPCServerTestServer;
 
@@ -394,13 +368,6 @@ void IPCServerConnection::StartAdviseWorker(wxThread* thread)
 
 void IPCServerConnection::WaitForAdviseWorkers()
 {
-    // #region agent log
-    IpcDebugLog("ipc_test_server.cpp:WaitForAdviseWorkers",
-                "wait begin",
-                "H3",
-                wxString::Format("{\"count\":%zu}", m_adviseThreads.size()).mb_str());
-    // #endregion
-
     for ( wxThread* thread : m_adviseThreads )
     {
         if ( thread->IsRunning() )
@@ -410,13 +377,6 @@ void IPCServerConnection::WaitForAdviseWorkers()
     }
 
     m_adviseThreads.clear();
-
-    // #region agent log
-    IpcDebugLog("ipc_test_server.cpp:WaitForAdviseWorkers",
-                "wait end",
-                "H3",
-                "{}");
-    // #endregion
 }
 
 bool IPCServerConnection::OnStartAdvise(const wxString& topic,
@@ -474,12 +434,6 @@ bool IPCServerConnection::OnStopAdvise(const wxString& topic,
         return false;
 
     m_advise_active = false;
-    // #region agent log
-    IpcDebugLog("ipc_test_server.cpp:OnStopAdvise",
-                "StopAdvise",
-                "H3",
-                "{}");
-    // #endregion
 
     return true;
 }
@@ -527,13 +481,6 @@ void* MultiAdviseThread::Entry()
             conn.m_general_error
                 += wxString::Format(m_label +
                                     "Advise() call returned false: %zu", n);
-            // #region agent log
-            IpcDebugLog("ipc_test_server.cpp:MultiAdviseThread",
-                        "Advise failed",
-                        "H2",
-                        wxString::Format("{\"label\":\"%s\",\"n\":%zu}",
-                                         m_label, n).mb_str());
-            // #endregion
         }
     }
 

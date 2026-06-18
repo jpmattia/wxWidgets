@@ -41,10 +41,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
-#include <time.h>
 
 #include "wx/socket.h"
-#include "wx/thread.h"
 
 class wxIPCMessageBase;
 
@@ -84,29 +82,6 @@ enum IPCCode
 // data stream. The header is 24-bits, and the IPCCode above is sent in the
 // last 8 bits.
 const wxUint32 IPCCodeHeader=0x439d9600;
-
-// #region agent log
-void IpcSckDebugLog(const char* location,
-                    const char* message,
-                    const char* hypothesisId,
-                    const char* dataJson)
-{
-    FILE* f = fopen("/home/jpmattia/wxWidgetsIssue/.cursor/debug-98a1fb.log", "a");
-    if ( !f )
-        return;
-
-    std::fprintf(f,
-                 "{\"sessionId\":\"98a1fb\",\"timestamp\":%ld,"
-                 "\"location\":\"%s\",\"message\":\"%s\","
-                 "\"hypothesisId\":\"%s\",\"data\":%s}\n",
-                 static_cast<long>(time(nullptr)),
-                 location,
-                 message,
-                 hypothesisId,
-                 dataJson ? dataJson : "{}");
-    std::fclose(f);
-}
-// #endregion
 
 } // anonymous namespace
 
@@ -1695,10 +1670,8 @@ void wxTCPEventHandler::HandleDisconnect(wxTCPConnection *connection)
 // message was read.  The returned message must be freed by the caller.
 wxIPCMessageBase* wxTCPEventHandler::ReadMessageFromSocket(wxSocketBase* socket)
 {
-    // ensure that we read from the socket without any read call from another
-    // thread
-    // Serialize all socket reads and writes: wxSocketBase is not safe for
-    // concurrent read on one thread and write on another even on TCP.
+    // Serialize all socket I/O: wxSocketBase is not safe for concurrent use
+    // from multiple threads on the same connection.
     wxCRIT_SECT_LOCKER(lock, gs_critical_io);
 
     wxIPCMessageNull* null_msg = new wxIPCMessageNull(socket);
@@ -1758,24 +1731,6 @@ wxIPCMessageBase* wxTCPEventHandler::ReadMessageFromSocket(wxSocketBase* socket)
 
     if (!msg->DataFromSocket())
     {
-        // #region agent log
-        {
-            wxSocketBase* sock = socket;
-            char buf[256];
-            std::snprintf(buf, sizeof(buf),
-                          "{\"ipcCode\":%d,\"msgError\":%d,\"sockError\":%d,"
-                          "\"lastRead\":%u,\"isMain\":%d}",
-                          static_cast<int>(null_msg->GetIPCCode()),
-                          static_cast<int>(msg->GetError()),
-                          sock ? static_cast<int>(sock->LastError()) : -1,
-                          sock ? sock->LastReadCount() : 0u,
-                          wxIsMainThread() ? 1 : 0);
-            IpcSckDebugLog("sckipc.cpp:ReadMessageFromSocket",
-                           "DataFromSocket failed",
-                           "H9",
-                           buf);
-        }
-        // #endregion
         null_msg->SetError(msg->GetError());
         delete msg;
         return null_msg;
@@ -1788,59 +1743,11 @@ wxIPCMessageBase* wxTCPEventHandler::ReadMessageFromSocket(wxSocketBase* socket)
 // Writes this message object to the socket.
 bool wxTCPEventHandler::WriteMessageToSocket(wxIPCMessageBase& msg)
 {
-    // ensure that we write to the socket without any write call from another
-    // thread
+    // Serialize all socket I/O: wxSocketBase is not safe for concurrent use
+    // from multiple threads on the same connection.
     wxCRIT_SECT_LOCKER(lock, gs_critical_io);
 
-    if ( !msg.WriteIPCCode() )
-    {
-        // #region agent log
-        {
-            wxSocketBase* sock = msg.GetSocket();
-            char buf[256];
-            std::snprintf(buf, sizeof(buf),
-                          "{\"ipcCode\":%d,\"stage\":\"WriteIPCCode\","
-                          "\"msgError\":%d,\"sockError\":%d,\"lastWrite\":%u,"
-                          "\"isMain\":%d}",
-                          static_cast<int>(msg.GetIPCCode()),
-                          static_cast<int>(msg.GetError()),
-                          sock ? static_cast<int>(sock->LastError()) : -1,
-                          sock ? sock->LastWriteCount() : 0u,
-                          wxIsMainThread() ? 1 : 0);
-            IpcSckDebugLog("sckipc.cpp:WriteMessageToSocket",
-                           "write failed",
-                           "H7",
-                           buf);
-        }
-        // #endregion
-        return false;
-    }
-
-    if ( !msg.DataToSocket() )
-    {
-        // #region agent log
-        {
-            wxSocketBase* sock = msg.GetSocket();
-            char buf[256];
-            std::snprintf(buf, sizeof(buf),
-                          "{\"ipcCode\":%d,\"stage\":\"DataToSocket\","
-                          "\"msgError\":%d,\"sockError\":%d,\"lastWrite\":%u,"
-                          "\"isMain\":%d}",
-                          static_cast<int>(msg.GetIPCCode()),
-                          static_cast<int>(msg.GetError()),
-                          sock ? static_cast<int>(sock->LastError()) : -1,
-                          sock ? sock->LastWriteCount() : 0u,
-                          wxIsMainThread() ? 1 : 0);
-            IpcSckDebugLog("sckipc.cpp:WriteMessageToSocket",
-                           "write failed",
-                           "H7",
-                           buf);
-        }
-        // #endregion
-        return false;
-    }
-
-    return true;
+    return msg.WriteIPCCode() && msg.DataToSocket();
 };
 
 // We determine if there is more data waiting in the socket buffer for read.
@@ -1848,8 +1755,8 @@ bool wxTCPEventHandler::WriteMessageToSocket(wxIPCMessageBase& msg)
 // IPCCode.
 bool wxTCPEventHandler::PeekAtMessageInSocket(wxSocketBase* socket)
 {
-    // Serialize all socket reads and writes: wxSocketBase is not safe for
-    // concurrent read on one thread and write on another even on TCP.
+    // Serialize all socket I/O: wxSocketBase is not safe for concurrent use
+    // from multiple threads on the same connection.
     wxCRIT_SECT_LOCKER(lock, gs_critical_io);
 
     if ( !socket || !socket->IsOk() )
