@@ -51,6 +51,7 @@ set(TEST_SRC
     misc/pathlist.cpp
     misc/typeinfotest.cpp
     net/ipc.cpp
+    net/ipc_test_server.cpp
     net/socket.cpp
     net/webrequest.cpp
     regex/regextest.cpp

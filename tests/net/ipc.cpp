@@ -707,7 +707,7 @@ TEST_CASE_METHOD(IPCFixture,
 // properly, which is a stringent test of race conditions that might be present
 // in wxIPC.
 // Concurrent simultaneous Advise and Request IPC is only reliable on Windows.
-#ifdef wxMSW
+// #ifdef wxMSW
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::AdviseAndRequestMultiThread", "[net][ipc][multi_thread]")
 {
@@ -791,6 +791,6 @@ TEST_CASE_METHOD(IPCFixture,
     INFO( wxString(data) );
     CHECK( wxString(data).IsEmpty() );
 }
-#endif // wxMSW
+// #endif // wxMSW
 
 #endif // wxUSE_THREADS

@@ -19,6 +19,7 @@
 #include <wx/ipc.h>
 #include <wx/thread.h>
 #include <wx/evtloop.h>
+#include <wx/vector.h>
 #include <wx/process.h>
 #include <wx/timer.h>
 #include <wx/filename.h>
@@ -48,6 +49,9 @@ public:
 
     ~IPCServerConnection()
     {
+        m_advise_active = false;
+        WaitForAdviseWorkers();
+
         for (int i = 0; i < MAX_MSG_BUFFERS; i++)
             if (m_bufferList[i])
                 delete[] m_bufferList[i];
@@ -70,6 +74,8 @@ public:
 private:
     wxString HandleThreadRequestCounting(const wxString& item);
     void ResetThreadTrackers();
+    void StartAdviseWorker(wxThread* thread);
+    void WaitForAdviseWorkers();
 
     char* GetBufPtr(size_t size)
     {
@@ -104,6 +110,8 @@ public:
 
     bool m_wait_for_first_request;
     bool m_first_request_received;
+
+    wxVector<wxThread*> m_adviseThreads;
 
     wxDECLARE_NO_COPY_CLASS(IPCServerConnection);
 };
@@ -203,6 +211,8 @@ bool IPCServerConnection::OnExec(const wxString& topic, const wxString& data)
 
     if (data == "shutdown")
     {
+        m_advise_active = false;
+        WaitForAdviseWorkers();
         m_server->Shutdown();
         if ( wxEventLoopBase::GetActive() )
             wxEventLoopBase::GetActive()->ScheduleExit(0);
@@ -350,52 +360,63 @@ void IPCServerConnection::ResetThreadTrackers()
     m_first_request_received = false;
 }
 
+void IPCServerConnection::StartAdviseWorker(wxThread* thread)
+{
+    thread->Run();
+    m_adviseThreads.push_back(thread);
+}
+
+void IPCServerConnection::WaitForAdviseWorkers()
+{
+    for ( wxThread* thread : m_adviseThreads )
+    {
+        if ( thread->IsRunning() )
+            thread->Wait();
+
+        delete thread;
+    }
+
+    m_adviseThreads.clear();
+}
+
 bool IPCServerConnection::OnStartAdvise(const wxString& topic,
                                       const wxString& item)
 {
     if ( topic != IPC_TEST_TOPIC )
         return false;
 
+    WaitForAdviseWorkers();
+
     m_advise_active = true;
 
     if (item == "SimpleAdvise test")
     {
-        SingleAdviseThread* thread = new SingleAdviseThread(m_server, item);
-        thread->Run();
+        StartAdviseWorker(new SingleAdviseThread(m_server, item));
     }
     else if (item.StartsWith("MultiAdvise test"))
     {
-        MultiAdviseThread* thread1 =
-            new MultiAdviseThread(m_server, item, "MultiAdvise thread 1");
-        thread1->Run();
+        StartAdviseWorker(
+            new MultiAdviseThread(m_server, item, "MultiAdvise thread 1"));
     }
     else if (item.StartsWith("MultiAdvise MultiThread test"))
     {
-        MultiAdviseThread* thread1 =
-            new MultiAdviseThread(m_server, item, "MultiAdvise thread 1");
-        MultiAdviseThread* thread2 =
-            new MultiAdviseThread(m_server, item, "MultiAdvise thread 2");
-        MultiAdviseThread* thread3 =
-            new MultiAdviseThread(m_server, item, "MultiAdvise thread 3");
-
-        thread1->Run();
-        thread2->Run();
-        thread3->Run();
+        StartAdviseWorker(
+            new MultiAdviseThread(m_server, item, "MultiAdvise thread 1"));
+        StartAdviseWorker(
+            new MultiAdviseThread(m_server, item, "MultiAdvise thread 2"));
+        StartAdviseWorker(
+            new MultiAdviseThread(m_server, item, "MultiAdvise thread 3"));
     }
     else if (item.StartsWith("MultiAdvise MultiThread test with simultaneous Requests"))
     {
         m_wait_for_first_request = true;
 
-        MultiAdviseThread* thread1 =
-            new MultiAdviseThread(m_server, item, "MultiAdvise thread 1");
-        MultiAdviseThread* thread2 =
-            new MultiAdviseThread(m_server, item, "MultiAdvise thread 2");
-        MultiAdviseThread* thread3 =
-            new MultiAdviseThread(m_server, item, "MultiAdvise thread 3");
-
-        thread1->Run();
-        thread2->Run();
-        thread3->Run();
+        StartAdviseWorker(
+            new MultiAdviseThread(m_server, item, "MultiAdvise thread 1"));
+        StartAdviseWorker(
+            new MultiAdviseThread(m_server, item, "MultiAdvise thread 2"));
+        StartAdviseWorker(
+            new MultiAdviseThread(m_server, item, "MultiAdvise thread 3"));
     }
     else
     {
@@ -413,6 +434,7 @@ bool IPCServerConnection::OnStopAdvise(const wxString& topic,
         return false;
 
     m_advise_active = false;
+    WaitForAdviseWorkers();
 
     return true;
 }
