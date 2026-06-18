@@ -17,6 +17,11 @@
 
 #if wxUSE_THREADS
 
+void IpcDebugLog(const char* location,
+                 const char* message,
+                 const char* hypothesisId,
+                 const char* dataJson = "{}");
+
 // Starts the IPC test server and blocks until it is listening (or failed).
 // Stops the server in WaitForExit().
 class IPCServerThread

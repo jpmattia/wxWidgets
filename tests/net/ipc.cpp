@@ -78,9 +78,10 @@ public:
 
         if (item == "SimpleAdvise test")
         {
-
-            CHECK( s == "OK SimpleAdvise" );
-            m_advise_complete = true;
+            if ( s == "OK SimpleAdvise" )
+                m_advise_complete = true;
+            else
+                m_general_error << "SimpleAdvise: unexpected payload: " << s << '\n';
         }
 
         else if (item == "MultiAdvise test" ||
@@ -145,6 +146,8 @@ public:
 // test.
 void IPCTestConnection::HandleThreadAdviseCounting(const wxString& advise_string)
 {
+    wxCRIT_SECT_LOCKER(lock, m_cs_assign_buffer);
+
     wxString info;
     advise_string.StartsWith("MultiAdvise thread", &info);
 
@@ -311,7 +314,21 @@ protected:
         {
             wxString s = m_label + wxString::Format(" %zu", n);
             size_t size=0;
+            // #region agent log
+            IpcDebugLog("ipc.cpp:MultiRequestThread",
+                        "Request begin",
+                        "H4",
+                        wxString::Format("{\"label\":\"%s\",\"n\":%zu}",
+                                         m_label, n).mb_str());
+            // #endregion
             const char* data = (char*) conn.Request(s, &size, wxIPC_PRIVATE);
+            // #region agent log
+            IpcDebugLog("ipc.cpp:MultiRequestThread",
+                        "Request end",
+                        "H4",
+                        wxString::Format("{\"label\":\"%s\",\"n\":%zu,\"ok\":%d}",
+                                         m_label, n, data ? 1 : 0).mb_str());
+            // #endregion
 
             // Catch2 macros are not thread safe, so we check explicitly and
             // store any deviation from the expected result.
@@ -706,8 +723,7 @@ TEST_CASE_METHOD(IPCFixture,
 // wxMilliSleep in the client and server threads to make the interleave happen
 // properly, which is a stringent test of race conditions that might be present
 // in wxIPC.
-// Concurrent simultaneous Advise and Request IPC is only reliable on Windows.
-// #ifdef wxMSW
+// Concurrent simultaneous Advise and Request IPC stress test.
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::AdviseAndRequestMultiThread", "[net][ipc][multi_thread]")
 {
@@ -730,13 +746,23 @@ TEST_CASE_METHOD(IPCFixture,
     thread2.Run();
     thread3.Run();
 
-    // Phase 1: complete Request() threads without client-side dispatch.
+    // Phase 1: Request() threads process interleaved Advise() via FindMessage().
+    // Do not PumpDispatch() here: main-thread dispatch races worker Request().
     WaitForThreadWithDispatch(thread1);
     WaitForThreadWithDispatch(thread2);
     WaitForThreadWithDispatch(thread3);
 
-    // Phase 2: process any pending Advise() notifications and wait for the
-    // server advise threads to finish.
+    // #region agent log
+    IpcDebugLog("ipc.cpp:AdviseAndRequestMultiThread",
+                "phase1 end",
+                "H1",
+                wxString::Format("{\"t1\":%d,\"t2\":%d,\"t3\":%d}",
+                                 conn.m_thread1_advise_lastval,
+                                 conn.m_thread2_advise_lastval,
+                                 conn.m_thread3_advise_lastval).mb_str());
+    // #endregion
+
+    // Phase 2: dispatch any remaining Advise() notifications on the main thread.
     int cnt = 0;
     while ( cnt++ < 20000 )
     {
@@ -749,6 +775,17 @@ TEST_CASE_METHOD(IPCFixture,
             break;
         }
     }
+
+    // #region agent log
+    IpcDebugLog("ipc.cpp:AdviseAndRequestMultiThread",
+                "phase2 end",
+                "H5",
+                wxString::Format("{\"t1\":%d,\"t2\":%d,\"t3\":%d,\"iter\":%d}",
+                                 conn.m_thread1_advise_lastval,
+                                 conn.m_thread2_advise_lastval,
+                                 conn.m_thread3_advise_lastval,
+                                 cnt).mb_str());
+    // #endregion
 
     CHECK( conn.StopAdvise(item) );
 
@@ -791,6 +828,5 @@ TEST_CASE_METHOD(IPCFixture,
     INFO( wxString(data) );
     CHECK( wxString(data).IsEmpty() );
 }
-// #endif // wxMSW
 
 #endif // wxUSE_THREADS
