@@ -15,6 +15,7 @@
 #endif
 
 #include "ipc_test_server.h"
+#include "ipc_setup_test.h"
 
 #include <wx/ipc.h>
 #include <wx/thread.h>

@@ -10,8 +10,6 @@
 #ifndef _WX_TESTS_NET_IPC_TEST_SERVER_H_
 #define _WX_TESTS_NET_IPC_TEST_SERVER_H_
 
-#include "ipc_setup_test.h"
-
 #include <wx/evtloop.h>
 #include <wx/thread.h>
 

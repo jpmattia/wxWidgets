@@ -14,12 +14,8 @@
 #define wxUSE_SOCKETS_FOR_IPC 1
 #define wxUSE_DDE_FOR_IPC     0
 
-namespace
-{
-const char *IPC_TEST_PORT = "4242";
-const char *IPC_TEST_TOPIC = "IPC TEST";
-
-} // anonymous namespace
+#define IPC_TEST_PORT  "4242"
+#define IPC_TEST_TOPIC "IPC TEST"
 
 // Many IPC issues show up only after several iterations, and
 // MESSAGE_ITERATIONS sets the number of iterations. The value of 20 is chosen
