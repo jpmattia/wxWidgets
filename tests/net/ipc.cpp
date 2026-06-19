@@ -457,13 +457,23 @@ TEST_CASE_METHOD(IPCFixture,
     if ( g_show_message_timing )
         std::cout << "Running test SingleRequest\n" << std::flush;
 
-    CHECK( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    // Use REQUIRE: if the connection itself failed there is no point in
+    // probing the server, and it distinguishes a connect failure from a
+    // Request() failure below.
+    REQUIRE( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
     IPCTestConnection& conn = gs_client->GetConn();
 
     const wxString s("ping");
     size_t size=0;
     const char* data = (char*) conn.Request( s, &size, wxIPC_PRIVATE);
+
+    // Guard against a null return before constructing a wxString from it:
+    // a failed Request() must report cleanly instead of dereferencing null
+    // (this was an information-free SIGSEGV on wxMSW). size is logged to help
+    // diagnose why the very first post-connect Request would fail.
+    INFO( "Request() returned size=" << size );
+    REQUIRE( data != nullptr );
 
     // Make sure that Request() works, because we use it to probe the
     // state of the server for the remaining tests.
