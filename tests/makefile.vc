@@ -898,7 +898,7 @@ $(OBJS)\test_dummy.obj: .\dummy.cpp
 	$(CXX) /c /nologo /TP /Fo$@ $(TEST_CXXFLAGS) /Yctestprec.h .\dummy.cpp
 
 $(OBJS)\test_test.obj: .\test.cpp
-	$(CXX) /c /nologo /TP /Fo$@ $(TEST_CXXFLAGS) .\test.cpp
+	$(CXX) /c /nologo /TP /Fo$@ $(TEST_CXXFLAGS) /DTEST_HAS_IPC_SERVER .\test.cpp
 
 $(OBJS)\test_anytest.obj: .\any\anytest.cpp
 	$(CXX) /c /nologo /TP /Fo$@ $(TEST_CXXFLAGS) .\any\anytest.cpp
