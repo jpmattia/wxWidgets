@@ -661,7 +661,7 @@ test_test_rc.o: $(srcdir)/../tests/test.rc $(TEST_ODEP)
 	$(WINDRES) -i$< -o$@    --define __WX$(TOOLKIT)__ $(__WXUNIV_DEFINE_p_10) $(__DEBUG_DEFINE_p_10)  $(__EXCEPTIONS_DEFINE_p_10) $(__RTTI_DEFINE_p_10) $(__THREAD_DEFINE_p_10) --include-dir $(srcdir) $(__DLLFLAG_p_10) --define wxUSE_GUI=0 --include-dir $(top_srcdir)/samples $(__RCDEFDIR_p) --include-dir $(top_srcdir)/include --include-dir $(top_srcdir)/3rdparty/catch/single_include
 
 test_test.o: $(srcdir)/test.cpp $(TEST_ODEP)
-	$(CXXC) -c -o $@ $(TEST_CXXFLAGS) $(srcdir)/test.cpp
+	$(CXXC) -c -o $@ $(TEST_CXXFLAGS) -DTEST_HAS_IPC_SERVER $(srcdir)/test.cpp
 
 test_anytest.o: $(srcdir)/any/anytest.cpp $(TEST_ODEP)
 	$(CXXC) -c -o $@ $(TEST_CXXFLAGS) $(srcdir)/any/anytest.cpp

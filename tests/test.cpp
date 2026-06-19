@@ -55,7 +55,7 @@ std::string wxTheCurrentTestClass, wxTheCurrentTestMethod;
 #include "wx/socket.h"
 #include "wx/evtloop.h"
 
-#if wxUSE_THREADS
+#if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER)
     #include "net/ipc_test_server.h"
 #endif
 
@@ -355,13 +355,13 @@ public:
 #else // !wxUSE_GUI
     virtual int OnRun() override
     {
-#if wxUSE_THREADS
+#if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER)
         if ( wxGetEnv("WX_IPC_TEST_SERVER", nullptr) )
         {
             RunIPCServerUntilStopped();
             return 0;
         }
-#endif // wxUSE_THREADS
+#endif // wxUSE_THREADS && TEST_HAS_IPC_SERVER
 
         return RunTests();
     }
