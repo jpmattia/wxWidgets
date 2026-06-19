@@ -281,6 +281,33 @@ static void PumpDispatch()
     IPCClientDispatch(10);
 }
 
+static void DrainPendingIPCEvents()
+{
+    if ( gs_clientLoop )
+    {
+        wxEventLoopActivator activate(gs_clientLoop);
+
+        for ( int i = 0; i < 100; ++i )
+        {
+            if ( !gs_clientLoop->Pending() )
+                break;
+
+            gs_clientLoop->DispatchTimeout(10);
+        }
+    }
+
+    if ( wxTheApp )
+    {
+        for ( int i = 0; i < 100; ++i )
+        {
+            if ( !wxTheApp->Pending() )
+                break;
+
+            wxTheApp->ProcessPendingEvents();
+        }
+    }
+}
+
 bool IPCTestConnection::OnDisconnect()
 {
     m_client->m_conn = nullptr;
@@ -356,6 +383,8 @@ public:
         wxSocketBase::Initialize();
 #endif // wxUSE_SOCKETS_FOR_IPC
 
+        DrainPendingIPCEvents();
+
         gs_clientLoop = m_clientLoop.get();
         gs_client = new IPCTestClient;
 
@@ -381,8 +410,12 @@ public:
 
         m_server.WaitForExit();
 
+        DrainPendingIPCEvents();
+
         if ( gs_client )
             gs_client->Disconnect();
+
+        DrainPendingIPCEvents();
 
         gs_clientLoop = nullptr;
         m_clientLoop.reset();
