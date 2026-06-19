@@ -71,9 +71,6 @@ public:
     virtual void SetTitle( const wxString &title ) override;
     virtual wxString GetTitle() const override { return m_title; }
 
-    virtual void SetLabel(const wxString& label) override { SetTitle( label ); }
-    virtual wxString GetLabel() const override            { return GetTitle(); }
-
     virtual wxVisualAttributes GetDefaultAttributes() const override;
 
     virtual bool SetTransparent(wxByte alpha) override;
@@ -94,6 +91,7 @@ public:
 
     // GTK callbacks
     virtual void GTKHandleRealized() override;
+    void GTKHandleMapped();
 
     void GTKConfigureEvent(int x, int y);
 
@@ -113,15 +111,10 @@ public:
     // size of WM decorations
     struct DecorSize
     {
-        DecorSize()
-        {
-            left =
-            right =
-            top =
+        int left = 0,
+            right = 0,
+            top = 0,
             bottom = 0;
-        }
-
-        int left, right, top, bottom;
     };
     DecorSize m_decorSize;
 
@@ -130,9 +123,6 @@ public:
     int m_urgency_hint;
     // timer for detecting WM with broken _NET_REQUEST_FRAME_EXTENTS handling
     unsigned m_netFrameExtentsTimerId;
-
-    // return the size of the window without WM decorations
-    void GTKDoGetSize(int *width, int *height) const;
 
     void GTKUpdateDecorSize(const DecorSize& decorSize);
 
@@ -175,6 +165,11 @@ protected:
 private:
     void Init();
     DecorSize& GetCachedDecorSize();
+
+    // return the size of the window without WM (i.e. SSD, as opposed to CSD)
+    // decorations but only take them into account for resizeable windows
+    wxSize GTKDoGetSize(bool isResizeable) const;
+
 
     // size hint increments
     int m_incWidth, m_incHeight;

@@ -127,12 +127,14 @@ public:
 
         @since 2.9.5
      */
-    virtual void ScheduleExit(int rc = 0) = 0;
+    void ScheduleExit(int rc = 0);
 
     /**
         Return true if any events are available.
 
         If this method returns @true, calling Dispatch() will not block.
+
+        @note This function always returns @false under wxQt since 3.3.0
      */
     virtual bool Pending() const = 0;
 
@@ -146,6 +148,14 @@ public:
         @code
         while (evtloop->Pending())
             evtloop->Dispatch();
+        @endcode
+
+        Notice that since wxWidgets 3.3.0, Pending() always returns false under wxQt.
+        Therefore, the above code should be replaced with the following instead:
+
+        @code
+        while (evtloop->QtDispatch())
+            ;
         @endcode
 
         @return @false if the event loop should stop and @true otherwise.
@@ -251,6 +261,11 @@ public:
         native events coming from the underlying GUI toolkit.
         wxWidgets events posted using wxEvtHandler::AddPendingEvent or
         wxEvtHandler::QueueEvent are instead selectively processed by all ports.
+
+        @note Under wxMSW, if @a eventsToProcess doesn't include
+        ::wxEVT_CATEGORY_TIMER, events from one-off timers may be lost,
+        so it's recommended to either include this category in the argument or
+        use repeatedly firing timers instead.
 
         @see wxEvent::GetEventCategory
     */

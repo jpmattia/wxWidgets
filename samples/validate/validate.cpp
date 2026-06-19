@@ -326,7 +326,8 @@ MyDialog::MyDialog( wxWindow *parent, const wxString& title,
                                     3,
                                     &g_data.m_doubleValue,
                                     wxNUM_VAL_THOUSANDS_SEPARATOR |
-                                    wxNUM_VAL_NO_TRAILING_ZEROES
+                                    wxNUM_VAL_NO_TRAILING_ZEROES |
+                                    wxNUM_VAL_SIGN_PLUS
                                 )
                               );
     numSizer->Add(new wxStaticText(this, wxID_ANY, "Up to 3 decimals:"),
@@ -491,7 +492,7 @@ TextValidatorDialog::TextValidatorDialog(wxWindow *parent, wxTextCtrl* txtCtrl)
     // Set the main sizer.
     wxBoxSizer *mainsizer = new wxBoxSizer( wxVERTICAL );
 
-    mainsizer->Add(fgSizer, wxSizerFlags(1).Border(wxALL, 10).Expand());
+    mainsizer->Add(fgSizer, wxSizerFlags(1).DoubleBorder(wxALL).Expand());
 
     mainsizer->Add(CreateButtonSizer(wxOK | wxCANCEL),
                    wxSizerFlags().Expand().DoubleBorder());

@@ -11,7 +11,7 @@ wx_add_sample(access accesstest.cpp DEPENDS wxUSE_ACCESSIBILITY)
 wx_add_sample(animate anitest.cpp anitest.h DATA throbber.gif throbber_2x.gif hourglass.ani DEPENDS wxUSE_ANIMATIONCTRL)
 wx_add_sample(archive CONSOLE)
 wx_add_sample(artprov arttest.cpp artbrows.cpp artbrows.h)
-wx_add_sample(aui auidemo.cpp LIBRARIES wxaui wxhtml NAME auidemo DEPENDS wxUSE_AUI)
+wx_add_sample(aui auidemo.cpp LIBRARIES wxaui wxhtml wxxml NAME auidemo DEPENDS wxUSE_AUI wxUSE_XML wxUSE_HTML)
 wx_add_sample(calendar DEPENDS wxUSE_CALENDARCTRL)
 wx_add_sample(caret DEPENDS wxUSE_CARET)
 wx_add_sample(collpane DEPENDS wxUSE_COLLPANE)
@@ -33,11 +33,11 @@ if(WXGTK2)
     wx_list_add_prefix(SAMPLE_DIALOGS_SRC ../../src/generic/ filedlgg.cpp)
 endif()
 wx_add_sample(dialogs ${SAMPLE_DIALOGS_SRC} DATA tips.txt)
-wx_add_sample(dialup nettest.cpp LIBRARIES wxnet DEPENDS wxUSE_DIALUP_MANAGER)
+wx_add_sample(dialup nettest.cpp LIBRARIES wxnet DEPENDS wxUSE_DIALUP_MANAGER wxUSE_SOCKETS)
 wx_add_sample(display)
 wx_add_sample(dnd dnd.cpp RES dnd.rc DATA wxwin.png DEPENDS wxUSE_DRAG_AND_DROP)
 wx_add_sample(docview docview.cpp doc.cpp view.cpp docview.h doc.h view.h
-    RES docview.rc PLIST Info.plist.in LIBRARIES wxaui DEPENDS wxUSE_DOC_VIEW_ARCHITECTURE)
+    RES docview.rc PLIST Info.plist.in LIBRARIES wxaui DEPENDS wxUSE_DOC_VIEW_ARCHITECTURE wxUSE_AUI)
 wx_add_sample(dragimag dragimag.cpp dragimag.h RES dragimag.rc
     DATA backgrnd.png shape01.png shape02.png shape03.png
     DEPENDS wxUSE_DRAGIMAGE)
@@ -60,14 +60,14 @@ wx_add_sample(help demo.cpp LIBRARIES wxhtml
     doc.hhk doc.hhp doc.hlp doc.hpj doc.zip forward.gif up.gif
     ${HELP_DOC_FILES}
     NAME helpdemo
-    DEPENDS wxUSE_HELP
+    DEPENDS wxUSE_HELP wxUSE_HTML
     )
 wx_add_sample(htlbox LIBRARIES wxhtml DEPENDS wxUSE_HTML)
 if(wxUSE_HTML)
     include(html.cmake)
 endif()
 wx_add_sample(image image.cpp canvas.cpp canvas.h RES image.rc
-    DATA horse.png horse.jpg horse.bmp horse.gif horse.pcx horse.pnm
+    DATA horse.png horse.jpg horse.bmp horse.gif horse.pcx horse.pnm horse.webp
     horse_ag.pnm horse_rg.pnm horse.tif horse.tga horse.xpm horse.cur
     horse.ico horse3.ani horse.svg smile.xbm toucan.png cmyk.jpg cursor.png
     NAME imagesample DEPENDS wxUSE_IMAGE)
@@ -77,10 +77,10 @@ endforeach()
 wx_add_sample(internat DATA ${INTERNAT_DATA_FILES} PLIST Info.plist.in DEPENDS wxUSE_INTL)
 # IPC samples
 set(wxSAMPLE_FOLDER ipc)
-wx_add_sample(ipc client.cpp client.h connection.h ipcsetup.h NAME ipcclient LIBRARIES wxnet DEPENDS wxUSE_IPC)
-wx_add_sample(ipc server.cpp server.h connection.h ipcsetup.h NAME ipcserver LIBRARIES wxnet DEPENDS wxUSE_IPC)
-wx_add_sample(ipc CONSOLE baseclient.cpp connection.h ipcsetup.h NAME baseipcclient LIBRARIES wxnet DEPENDS wxUSE_IPC)
-wx_add_sample(ipc CONSOLE baseserver.cpp connection.h ipcsetup.h NAME baseipcserver LIBRARIES wxnet DEPENDS wxUSE_IPC)
+wx_add_sample(ipc client.cpp client.h connection.h ipcsetup.h NAME ipcclient LIBRARIES wxnet DEPENDS wxUSE_IPC wxUSE_SOCKETS)
+wx_add_sample(ipc server.cpp server.h connection.h ipcsetup.h NAME ipcserver LIBRARIES wxnet DEPENDS wxUSE_IPC wxUSE_SOCKETS)
+wx_add_sample(ipc CONSOLE baseclient.cpp connection.h ipcsetup.h NAME baseipcclient LIBRARIES wxnet DEPENDS wxUSE_IPC wxUSE_SOCKETS)
+wx_add_sample(ipc CONSOLE baseserver.cpp connection.h ipcsetup.h NAME baseipcserver LIBRARIES wxnet DEPENDS wxUSE_IPC wxUSE_SOCKETS)
 set(wxSAMPLE_FOLDER)
 wx_add_sample(joytest joytest.cpp joytest.h DATA buttonpress.wav DEPENDS wxUSE_JOYSTICK)
 wx_add_sample(keyboard)
@@ -90,7 +90,7 @@ wx_add_sample(mdi mdi.cpp mdi.h RES mdi.rc DEPENDS wxUSE_MDI wxUSE_DOC_VIEW_ARCH
 wx_add_sample(mediaplayer LIBRARIES wxmedia DEPENDS wxUSE_MEDIACTRL)
 wx_add_sample(menu DEPENDS wxUSE_MENUS wxUSE_MENUBAR)
 wx_add_sample(minimal IMPORTANT)
-wx_add_sample(notebook notebook.cpp notebook.h LIBRARIES wxaui DEPENDS wxUSE_NOTEBOOK)
+wx_add_sample(notebook notebook.cpp notebook.h LIBRARIES wxaui DEPENDS wxUSE_NOTEBOOK wxUSE_AUI)
 if(wxUSE_OPENGL)
     set(wxSAMPLE_SUBDIR opengl/)
     set(wxSAMPLE_FOLDER OpenGL)
@@ -139,11 +139,13 @@ wx_add_sample(statbar DEPENDS wxUSE_STATUSBAR)
 wx_add_sample(stc stctest.cpp edit.cpp prefs.cpp edit.h defsext.h prefs.h
     DATA stctest.cpp NAME stctest LIBRARIES wxstc DEPENDS wxUSE_STC)
 wx_add_sample(svg svgtest.cpp RES svgtest.rc DEPENDS wxUSE_SVG)
+wx_add_sample(stylus stylus.cpp)
 wx_add_sample(taborder)
 wx_add_sample(taskbar tbtest.cpp tbtest.h DATA info.svg DEPENDS wxUSE_TASKBARICON)
 wx_add_sample(text DEPENDS wxUSE_TEXTCTRL)
 wx_add_sample(thread DEPENDS wxUSE_THREADS)
 wx_add_sample(toolbar RES toolbar.rc DEPENDS wxUSE_TOOLBAR)
+wx_add_sample(touchtest touchtest.cpp)
 wx_add_sample(treectrl treetest.cpp treetest.h DEPENDS wxUSE_TREECTRL)
 wx_add_sample(treelist DEPENDS wxUSE_TREELISTCTRL)
 wx_add_sample(typetest typetest.cpp typetest.h)
@@ -214,7 +216,9 @@ wx_add_sample(widgets IMPORTANT ${SAMPLE_WIDGETS_SRC}
     DATA ${WIDGETS_RC_FILES} textctrl.cpp ../image/toucan.png:toucan.png
     )
 # includes needed by the native widget (like gtk.h)
-target_include_directories(widgets PRIVATE ${wxTOOLKIT_INCLUDE_DIRS})
+if(TARGET widgets)
+    target_include_directories(widgets PRIVATE ${wxTOOLKIT_INCLUDE_DIRS})
+endif()
 wx_add_sample(wizard DATA wiztest.svg wiztest2.svg DEPENDS wxUSE_WIZARDDLG)
 wx_add_sample(wrapsizer)
 
@@ -246,7 +250,7 @@ wx_add_sample(xrc
     DATA ${XRC_RC_FILES}
     LIBRARIES wxaui wxribbon wxxrc wxhtml
     NAME xrcdemo
-    DEPENDS wxUSE_XML wxUSE_XRC
+    DEPENDS wxUSE_XML wxUSE_XRC wxUSE_AUI
     )
 wx_add_sample(xti xti.cpp classlist.cpp codereadercallback.cpp
     classlist.h codereadercallback.h LIBRARIES wxxml
@@ -263,11 +267,15 @@ if(WIN32)
             # this test only makes sense with statically built wx, otherwise
             # the same copy of wx would be used
             wx_add_sample(dll wx_exe.cpp my_dll.h NAME wx_exe FOLDER dll)
-            wx_link_sample_libraries(wx_exe my_dll)
+            if(TARGET wx_exe AND TARGET my_dll)
+                target_link_libraries(wx_exe PRIVATE my_dll)
+            endif()
         endif()
 
         wx_add_sample(dll sdk_exe.cpp my_dll.h NAME sdk_exe FOLDER dll)
-        wx_link_sample_libraries(sdk_exe my_dll)
+        if(TARGET sdk_exe AND TARGET my_dll)
+            target_link_libraries(sdk_exe PRIVATE my_dll)
+        endif()
     endif()
 
     wx_add_sample(regtest RES regtest.rc DEPENDS wxUSE_REGKEY)
@@ -275,8 +283,14 @@ if(WIN32)
 
     if(WXMSW)
         wx_add_sample(nativdlg nativdlg.cpp nativdlg.h resource.h RES nativdlg.rc)
-        #TODO: reenable when sample is fixed
-        #wx_add_sample(mfc mfctest.cpp mfctest.h resource.h stdafx.h RES mfctest.rc)
         wx_add_sample(taskbarbutton DEPENDS wxUSE_TASKBARBUTTON)
+
+        # only check if MFC is available when the mfc sample is enabled
+        if(wxBUILD_SAMPLES STREQUAL "ALL")
+            find_package(MFC QUIET)
+            if(MFC_FOUND)
+                wx_add_sample(mfc mfctest.cpp mfctest.h resource.h stdafx.h RES mfctest.rc)
+            endif()
+        endif()
     endif()
 endif()

@@ -93,6 +93,7 @@ protected:
 
 #ifndef DPI_ENUMS_DECLARED
     #define MDT_EFFECTIVE_DPI 0
+    #define MDT_RAW_DPI 2
 #endif
 
 namespace
@@ -131,6 +132,7 @@ public:
     virtual wxRect GetClientArea() const override;
     virtual int GetDepth() const override;
     virtual wxSize GetPPI() const override;
+    virtual wxSize GetRawPPI() const override;
     virtual double GetScaleFactor() const override;
 
     virtual wxString GetName() const override;
@@ -139,6 +141,10 @@ public:
     virtual wxVideoMode GetCurrentMode() const override;
     virtual wxArrayVideoModes GetModes(const wxVideoMode& mode) const override;
     virtual bool ChangeMode(const wxVideoMode& mode) override;
+
+    // Check if this display is still found in the given vector and update both
+    // its properties and the index to the new values if it is.
+    bool DoRefreshOnDisplayChange(const wxVector<wxDisplayInfo>& displays);
 
 protected:
     // convert a DEVMODE to our wxVideoMode
@@ -156,6 +162,12 @@ protected:
     wxDisplayInfo m_info;
 
 private:
+    // Wrapper around GetDpiForMonitor() call: check if it's available and for
+    // its success.
+    //
+    // Return wxSize(0, 0) on failure.
+    wxSize CallGetDpiForMonitor(int type) const;
+
     wxDECLARE_NO_COPY_CLASS(wxDisplayMSW);
 };
 
@@ -183,10 +195,21 @@ public:
     virtual int GetFromRect(const wxRect& rect) override;
     virtual int GetFromWindow(const wxWindow *window) override;
 
-    void InvalidateCache() override
+    void UpdateOnDisplayChange() override
     {
-        wxDisplayFactory::InvalidateCache();
+        // Update m_displays first, before calling the base class version which
+        // will call our RefreshOnDisplayChange() that uses it.
         DoRefreshMonitors();
+        wxDisplayFactory::UpdateOnDisplayChange();
+    }
+
+    virtual bool RefreshOnDisplayChange(wxDisplayImpl& impl) const override
+    {
+        // All wxDisplayImpl in a program using this factory are of type
+        // wxDisplayMSW, so the cast is safe.
+        auto& implMSW = static_cast<wxDisplayMSW&>(impl);
+
+        return implMSW.DoRefreshOnDisplayChange(m_displays);
     }
 
     // Declare the second argument as int to avoid problems with older SDKs not
@@ -306,7 +329,7 @@ int wxDisplayMSW::GetDepth() const
     return m_info.depth;
 }
 
-wxSize wxDisplayMSW::GetPPI() const
+wxSize wxDisplayMSW::CallGetDpiForMonitor(int type) const
 {
     if ( const wxDisplayFactoryMSW::GetDpiForMonitor_t
             getFunc = wxDisplayFactoryMSW::GetDpiForMonitorPtr() )
@@ -314,14 +337,32 @@ wxSize wxDisplayMSW::GetPPI() const
         UINT dpiX = 0,
              dpiY = 0;
         const HRESULT
-            hr = (*getFunc)(m_info.hmon, MDT_EFFECTIVE_DPI, &dpiX, &dpiY);
+            hr = (*getFunc)(m_info.hmon, type, &dpiX, &dpiY);
         if ( SUCCEEDED(hr) )
             return wxSize(dpiX, dpiY);
 
         wxLogApiError("GetDpiForMonitor", hr);
     }
 
-    return IsPrimary() ? wxDisplayImplSingleMSW().GetPPI() : wxSize(0, 0);
+    return wxSize();
+}
+
+wxSize wxDisplayMSW::GetPPI() const
+{
+    wxSize ppi = CallGetDpiForMonitor(MDT_EFFECTIVE_DPI);
+    if ( ppi.IsEmpty() && IsPrimary() )
+        ppi = wxDisplayImplSingleMSW().GetPPI();
+
+    return ppi;
+}
+
+wxSize wxDisplayMSW::GetRawPPI() const
+{
+    wxSize ppi = CallGetDpiForMonitor(MDT_RAW_DPI);
+    if ( ppi.IsEmpty() && IsPrimary() )
+        ppi = wxDisplayImplSingleMSW().GetRawPPI();
+
+    return ppi;
 }
 
 double wxDisplayMSW::GetScaleFactor() const
@@ -487,6 +528,30 @@ bool wxDisplayMSW::ChangeMode(const wxVideoMode& mode)
     return false;
 }
 
+bool
+wxDisplayMSW::DoRefreshOnDisplayChange(const wxVector<wxDisplayInfo>& displays)
+{
+    // Try to find this display in the list of the currently available ones.
+    for ( size_t n = 0; n < displays.size(); ++n )
+    {
+        if ( m_info.hmon == displays[n].hmon )
+        {
+            // We did find it, update it just in case its characteristics have
+            // changed.
+            m_info = displays[n];
+
+            // And, importantly, also update its index which could have changed
+            // due to a previous monitor disconnection.
+            m_index = n;
+
+            return true;
+        }
+    }
+
+    // This display is not connected any more, so mark it as such.
+    Disconnect();
+    return false;
+}
 
 // ----------------------------------------------------------------------------
 // wxDisplayFactoryMSW implementation

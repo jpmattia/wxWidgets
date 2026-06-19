@@ -94,8 +94,6 @@ protected :
     bool m_editable;
 } ;
 
-NSString* column1 = @"1";
-
 class wxListWidgetCocoaImpl : public wxWidgetCocoaImpl, public wxListWidgetImpl
 {
 public :
@@ -199,9 +197,9 @@ public :
     {
         value = [[(NSString*)v retain] autorelease];
     }
-    virtual void Set( const wxString& value ) override
+    virtual void Set( const wxString& v ) override
     {
-        Set( (CFStringRef) wxCFStringRef( value ) );
+        Set( (CFStringRef) wxCFStringRef( v ) );
     }
     virtual void Set( int v ) override
     {
@@ -442,7 +440,7 @@ wxListWidgetColumn* wxListWidgetCocoaImpl::InsertCheckColumn( unsigned pos , con
 
         [[col1 dataCell] setControlSize:size];
         // although there is no text, it may help to get the correct vertical layout
-        [[col1 dataCell] setFont:list->GetFont().OSXGetNSFont()];        
+        [[col1 dataCell] setFont:list->GetFont().OSXGetNSFont()];
     }
 
     [checkbox release];
@@ -516,10 +514,10 @@ void wxListWidgetCocoaImpl::ListDelete( unsigned int n )
         int maxWidth = 0;
         for ( NSNumber *number in m_widths )
         {
-            int n = [number intValue];
+            int nn = [number intValue];
 
-            if ( n > maxWidth )
-                maxWidth = n;
+            if ( nn > maxWidth )
+                maxWidth = nn;
         }
 
         if ( maxWidth < m_maxWidth )
@@ -673,6 +671,7 @@ wxWidgetImplType* wxWidgetImpl::CreateListBox( wxWindowMac* wxpeer,
     [tableview release];
 
     wxListWidgetCocoaImpl* c = new wxListWidgetCocoaImpl( wxpeer, scrollview, tableview, ds );
+    c->ApplyScrollViewBorderType();
 
     // temporary hook for dnd
  //   [tableview registerForDraggedTypes:[NSArray arrayWithObjects:

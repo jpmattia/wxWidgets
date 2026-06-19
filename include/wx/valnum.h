@@ -32,7 +32,9 @@ enum wxNumValidatorStyle
     wxNUM_VAL_DEFAULT               = 0x0,
     wxNUM_VAL_THOUSANDS_SEPARATOR   = 0x1,
     wxNUM_VAL_ZERO_AS_BLANK         = 0x2,
-    wxNUM_VAL_NO_TRAILING_ZEROES    = 0x4
+    wxNUM_VAL_NO_TRAILING_ZEROES    = 0x4,
+    wxNUM_VAL_SIGN_PLUS             = 0x8,
+    wxNUM_VAL_SIGN_SPACE           = 0x10,
 };
 
 // ----------------------------------------------------------------------------
@@ -75,7 +77,8 @@ protected:
     // still test the return value for safety.
     wxTextEntry *GetTextEntry() const;
 
-    // Convert wxNUM_VAL_THOUSANDS_SEPARATOR and wxNUM_VAL_NO_TRAILING_ZEROES
+    // Convert wxNUM_VAL_THOUSANDS_SEPARATOR, wxNUM_VAL_NO_TRAILING_ZEROES,
+    // wxNUM_VAL_SIGN_PLUS, and wxNUM_VAL_SIGN_SPACE
     // bits of our style to the corresponding wxNumberFormatter::Style values.
     int GetFormatFlags() const;
 
@@ -239,6 +242,11 @@ protected:
     // both integer and floating point numbers.
     virtual wxString NormalizeString(const wxString& s) const override
     {
+        // If empty value is handled as zero, just return it as is for
+        // consistency with TransferFromWindow() and NormalizeValue().
+        if ( s.empty() && BaseValidator::HasFlag(wxNUM_VAL_ZERO_AS_BLANK) )
+            return wxString();
+
         LongestValueType value;
         if ( !BaseValidator::FromString(s, &value) )
         {
@@ -307,19 +315,17 @@ protected:
     // Define the type we use here, it should be the maximal-sized integer type
     // we support to make it possible to base wxIntegerValidator<> for any type
     // on it.
-#ifdef wxLongLong_t
     typedef wxLongLong_t LongestValueType;
     typedef wxULongLong_t ULongestValueType;
-#else
-    typedef long LongestValueType;
-    typedef unsigned long ULongestValueType;
-#endif
 
     wxIntegerValidatorBase(int style)
         : wxNumValidatorBase(style)
     {
         wxASSERT_MSG( !(style & wxNUM_VAL_NO_TRAILING_ZEROES),
                       "This style doesn't make sense for integers." );
+        wxASSERT_MSG(!(style & wxNUM_VAL_SIGN_PLUS) ||
+                        !(style & wxNUM_VAL_SIGN_SPACE),
+                        "Sign prefix conflict.");
     }
 
     // Default copy ctor is ok.
@@ -385,7 +391,7 @@ public:
     this->SetMax(max);
   }
 
-    virtual wxObject *Clone() const override { return new wxIntegerValidator(*this); }
+    wxNODISCARD virtual wxObject *Clone() const override { return new wxIntegerValidator(*this); }
 
     virtual bool IsInRange(LongestValueType value) const override
     {
@@ -525,7 +531,7 @@ public:
         this->SetPrecision(precision);
     }
 
-    virtual wxObject *Clone() const override
+    wxNODISCARD virtual wxObject *Clone() const override
     {
         return new wxFloatingPointValidator(*this);
     }

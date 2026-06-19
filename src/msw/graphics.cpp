@@ -15,7 +15,7 @@
 #if wxUSE_GRAPHICS_GDIPLUS
 
 #ifndef WX_PRECOMP
-    #include "wx/msw/wrapcdlg.h"
+    #include "wx/msw/private.h"
     #include "wx/image.h"
     #include "wx/window.h"
     #include "wx/utils.h"
@@ -42,11 +42,6 @@
 #include "wx/dcgraph.h"
 #include "wx/rawbmp.h"
 
-#include "wx/msw/private.h" // needs to be before #include <commdlg.h>
-
-#if wxUSE_COMMON_DIALOGS
-#include <commdlg.h>
-#endif
 #include <float.h> // for FLT_MAX, FLT_MIN
 
 #ifdef _MSC_VER
@@ -97,7 +92,7 @@ StringFormat* gs_drawTextStringFormat = nullptr;
 // Get the string format used for the text drawing and measuring functions:
 // notice that it must be the same one for all of them, otherwise the drawn
 // text might be of different size than what measuring it returned.
-inline StringFormat* GetDrawTextStringFormat()
+inline StringFormat* GetDrawTextStringFormat(DWORD layoutDir = 0)
 {
     if ( !gs_drawTextStringFormat )
     {
@@ -105,11 +100,13 @@ inline StringFormat* GetDrawTextStringFormat()
 
         // This doesn't make any difference for DrawText() actually but we want
         // this behaviour when measuring text.
-        gs_drawTextStringFormat->SetFormatFlags
-        (
-            gs_drawTextStringFormat->GetFormatFlags()
-                | StringFormatFlagsMeasureTrailingSpaces
-        );
+        auto flags = gs_drawTextStringFormat->GetFormatFlags()
+                   | StringFormatFlagsMeasureTrailingSpaces;
+
+        if ( (layoutDir & LAYOUT_RTL) != 0 )
+            flags |= StringFormatFlagsDirectionRightToLeft;
+
+        gs_drawTextStringFormat->SetFormatFlags(flags);
     }
 
     return gs_drawTextStringFormat;
@@ -121,7 +118,7 @@ inline StringFormat* GetDrawTextStringFormat()
 // device context implementation
 //
 // more and more of the dc functionality should be implemented by calling
-// the appropricate wxGDIPlusContext, but we will have to do that step by step
+// the appropriate wxGDIPlusContext, but we will have to do that step by step
 // also coordinate conversions should be moved to native matrix ops
 //-----------------------------------------------------------------------------
 
@@ -486,6 +483,8 @@ public:
 
     Graphics* GetGraphics() const { return m_context; }
 
+    bool IsRTL() const { return (m_layoutDir & LAYOUT_RTL) != 0; }
+
     virtual WXHDC GetNativeHDC() override;
     virtual void ReleaseNativeHDC(WXHDC hdc) override;
 
@@ -506,6 +505,7 @@ private:
     GraphicsState m_state2;
     Matrix* m_internalTransform;
     Matrix* m_internalTransformInv;
+    DWORD m_layoutDir = 0;
 
     wxDECLARE_NO_COPY_CLASS(wxGDIPlusContext);
 };
@@ -569,6 +569,36 @@ public:
     wxGDIPlusPrintingContext( wxGraphicsRenderer* renderer, const wxDC& dc );
 
     void GetDPI(wxDouble* dpiX, wxDouble* dpiY) const override;
+};
+
+// Helper class to disable mirroring the DC in RTL layout for correct
+// rendering, e.g. text shouldn't be mirrored.
+class wxDCMirrorDisabler
+{
+public:
+    wxDCMirrorDisabler(wxGDIPlusContext* ctx, wxDouble x)
+        : m_ctx(ctx)
+    {
+        if ( m_ctx->IsRTL() )
+        {
+            m_ctx->PushState();
+            m_ctx->Translate(2*x, 0);
+            m_ctx->Scale(-1, 1);
+        }
+    }
+
+    ~wxDCMirrorDisabler()
+    {
+        if ( m_ctx->IsRTL() )
+        {
+            m_ctx->PopState();
+        }
+    }
+
+private:
+    wxGDIPlusContext* const m_ctx;
+
+    wxDECLARE_NO_COPY_CLASS(wxDCMirrorDisabler);
 };
 
 //-----------------------------------------------------------------------------
@@ -800,7 +830,7 @@ wxGDIPlusPenBrushBaseData::CreateRadialGradientBrush(
     int count = 1;
     brush->SetSurroundColors(&col, &count);
 
-    // TODO: There doesn't seem to be an equivallent for SetWrapMode, so
+    // TODO: There doesn't seem to be an equivalent for SetWrapMode, so
     // the area outside of the gradient's radius is not getting painted.
 
     // Apply the matrix if there is one
@@ -1873,14 +1903,39 @@ public :
 
 wxGDIPlusContext::wxGDIPlusContext( wxGraphicsRenderer* renderer, HDC hdc, wxDouble width, wxDouble height   )
     : wxGraphicsContext(renderer)
+    , m_layoutDir(::GetLayout(hdc))
 {
+    if ( IsRTL() )
+    {
+        // Mixing GDI+ with pure GDI calls on the same drawing may have
+        // unexpected results in RTL layout. i.e.: The final drawing may
+        // not be correctly mirrored on the destination DC. So we always
+        // perform drawing operations on an LTR HDC and a transformation
+        // matrix will be applied to this context to achieve the necessary
+        // mirroring effects.
+        ::SetLayout(hdc, 0);
+    }
+
     Init(new Graphics(hdc), width, height);
 }
 
 wxGDIPlusContext::wxGDIPlusContext( wxGraphicsRenderer* renderer, const wxDC& dc )
     : wxGraphicsContext(renderer, dc.GetWindow())
+    , m_layoutDir(::GetLayout((HDC)dc.GetHandle()))
 {
     HDC hdc = (HDC) dc.GetHDC();
+
+    if ( IsRTL() )
+    {
+        // Mixing GDI+ with pure GDI calls on the same drawing may have
+        // unexpected results in RTL layout. i.e.: The final drawing may
+        // not be correctly mirrored on the destination DC. So we always
+        // perform drawing operations on an LTR HDC and a transformation
+        // matrix will be applied to this context to achieve the necessary
+        // mirroring effects.
+        ::SetLayout(hdc, 0);
+    }
+
     wxSize sz = dc.GetSize();
 
     // We don't set HDC origin at MSW level in wxDC because this limits it to
@@ -1906,6 +1961,11 @@ wxGDIPlusContext::wxGDIPlusContext( wxGraphicsRenderer* renderer,
                                     wxWindow* window )
     : wxGraphicsContext(renderer, window)
 {
+    if ( (::GetWindowLong(hwnd, GWL_EXSTYLE) & WS_EX_LAYOUTRTL) != 0 )
+    {
+        m_layoutDir = LAYOUT_RTL;
+    }
+
     RECT rect = wxGetWindowRect(hwnd);
     Init(new Graphics(hwnd), rect.right - rect.left, rect.bottom - rect.top);
     m_enableOffset = true;
@@ -1934,6 +1994,12 @@ void wxGDIPlusContext::Init(Graphics* graphics, int width, int height, const Mat
     m_height = height;
     m_internalTransform = new Matrix();
 
+    if ( IsRTL() )
+    {
+        m_context->ScaleTransform(-1, 1);
+        m_context->TranslateTransform(-width, 0);
+    }
+
     m_context->SetTextRenderingHint(TextRenderingHintSystemDefault);
     m_context->SetPixelOffsetMode(PixelOffsetModeHalf);
     m_context->SetSmoothingMode(SmoothingModeHighQuality);
@@ -1955,6 +2021,13 @@ void wxGDIPlusContext::Init(Graphics* graphics, int width, int height, const Mat
 
 wxGDIPlusContext::~wxGDIPlusContext()
 {
+    if ( IsRTL() )
+    {
+        WXHDC hdc = GetNativeHDC();
+        ::SetLayout((HDC)hdc, m_layoutDir);
+        ReleaseNativeHDC(hdc);
+    }
+
     delete m_internalTransform;
     delete m_internalTransformInv;
     if ( m_context )
@@ -2358,13 +2431,17 @@ void wxGDIPlusContext::DoDrawText(const wxString& str,
     wxGDIPlusFontData * const
         fontData = (wxGDIPlusFontData *)m_font.GetRefData();
 
+
+    // Text is not mirrored in RTL layout
+    wxDCMirrorDisabler disableMirror(this, x);
+
     m_context->DrawString
                (
                     str.wc_str(),           // string to draw, always Unicode
                     -1,                     // length: string is NUL-terminated
                     fontData->GetGDIPlusFont(),
                     PointF(x, y),
-                    GetDrawTextStringFormat(),
+                    GetDrawTextStringFormat(m_layoutDir),
                     fontData->GetGDIPlusBrush()
                );
 }
@@ -2429,7 +2506,8 @@ void wxGDIPlusContext::GetTextExtent( const wxString &str, wxDouble *width, wxDo
         RectF layoutRect(0,0, 100000.0f, 100000.0f);
 
         RectF bounds ;
-        m_context->MeasureString((const wchar_t *) s , wcslen(s) , f, layoutRect, GetDrawTextStringFormat(), &bounds ) ;
+        m_context->MeasureString((const wchar_t *) s , wcslen(s) , f, layoutRect,
+            GetDrawTextStringFormat(m_layoutDir), &bounds ) ;
         if ( width )
             *width = bounds.Width;
         if ( height )
@@ -2453,7 +2531,7 @@ void wxGDIPlusContext::GetPartialTextExtents(const wxString& text, wxArrayDouble
     wxASSERT_MSG(text.length() == len , wxT("GetPartialTextExtents not yet implemented for multichar situations"));
 
     RectF layoutRect(0,0, 100000.0f, 100000.0f);
-    StringFormat strFormat( GetDrawTextStringFormat() );
+    StringFormat strFormat( GetDrawTextStringFormat(m_layoutDir) );
 
     size_t startPosition = 0;
     size_t remainder = len;

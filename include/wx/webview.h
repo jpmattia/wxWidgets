@@ -34,6 +34,7 @@
 
 class wxFSFile;
 class wxFileSystem;
+class wxPrintData;
 class wxWebView;
 
 enum wxWebViewZoom
@@ -92,6 +93,21 @@ enum wxWebViewUserScriptInjectionTime
 {
     wxWEBVIEW_INJECT_AT_DOCUMENT_START,
     wxWEBVIEW_INJECT_AT_DOCUMENT_END
+};
+
+enum wxWebViewBrowsingDataTypes
+{
+    wxWEBVIEW_BROWSING_DATA_COOKIES     = 0x01,
+    wxWEBVIEW_BROWSING_DATA_CACHE       = 0x02,
+    wxWEBVIEW_BROWSING_DATA_DOM_STORAGE = 0x04,
+    wxWEBVIEW_BROWSING_DATA_OTHER       = 0x08,
+    wxWEBVIEW_BROWSING_DATA_ALL         = 0x0f
+};
+
+enum wxWebViewPrintFlags
+{
+    wxWEBVIEW_PRINT_DEFAULT            = 0,
+    wxWEBVIEW_PRINT_HIDE_HEADER_FOOTER = 0x0001
 };
 
 class WXDLLIMPEXP_WEBVIEW wxWebViewHandlerRequest
@@ -171,6 +187,7 @@ extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendDefault[];
 extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendIE[];
 extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendEdge[];
 extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendWebKit[];
+extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendChromium[];
 
 class WXDLLIMPEXP_WEBVIEW wxWebViewFactory : public wxObject
 {
@@ -190,7 +207,7 @@ public:
     {
         return wxVersionInfo();
     }
-    virtual wxWebViewConfiguration CreateConfiguration();
+    virtual wxWebViewConfiguration CreateConfiguration() = 0;
 };
 
 using wxStringWebViewFactoryMap = std::unordered_map<wxString, wxSharedPtr<wxWebViewFactory>>;
@@ -256,11 +273,17 @@ public:
     virtual bool IsEditable() const = 0;
     virtual void LoadURL(const wxString& url) = 0;
     virtual void Print() = 0;
+#if wxUSE_PRINTING_ARCHITECTURE
+    virtual void Print(const wxPrintData& printData, int flags = wxWEBVIEW_PRINT_DEFAULT);
+#endif
     virtual void RegisterHandler(wxSharedPtr<wxWebViewHandler> handler) = 0;
     virtual void Reload(wxWebViewReloadFlags flags = wxWEBVIEW_RELOAD_DEFAULT) = 0;
     virtual bool SetUserAgent(const wxString& userAgent) { wxUnusedVar(userAgent); return false; }
     virtual wxString GetUserAgent() const;
     virtual bool SetProxy(const wxString& proxy) { wxUnusedVar(proxy); return false; }
+    virtual bool ClearBrowsingData(int types = wxWEBVIEW_BROWSING_DATA_ALL,
+                                   wxDateTime since = {})
+    { wxUnusedVar(types); wxUnusedVar(since); return false; }
 
     // Script
     virtual bool RunScript(const wxString& javascript, wxString* output = nullptr) const;
@@ -414,7 +437,7 @@ public:
     const wxString& GetMessageHandler() const { return m_messageHandler; }
     wxWebViewWindowFeatures* GetTargetWindowFeatures() const { return (wxWebViewWindowFeatures*)m_clientData; }
 
-    virtual wxEvent* Clone() const override { return new wxWebViewEvent(*this); }
+    wxNODISCARD virtual wxEvent* Clone() const override { return new wxWebViewEvent(*this); }
 private:
     wxString m_url;
     wxString m_target;
@@ -436,6 +459,7 @@ wxDECLARE_EXPORTED_EVENT( WXDLLIMPEXP_WEBVIEW, wxEVT_WEBVIEW_TITLE_CHANGED, wxWe
 wxDECLARE_EXPORTED_EVENT( WXDLLIMPEXP_WEBVIEW, wxEVT_WEBVIEW_FULLSCREEN_CHANGED, wxWebViewEvent);
 wxDECLARE_EXPORTED_EVENT( WXDLLIMPEXP_WEBVIEW, wxEVT_WEBVIEW_SCRIPT_MESSAGE_RECEIVED, wxWebViewEvent);
 wxDECLARE_EXPORTED_EVENT( WXDLLIMPEXP_WEBVIEW, wxEVT_WEBVIEW_SCRIPT_RESULT, wxWebViewEvent);
+wxDECLARE_EXPORTED_EVENT( WXDLLIMPEXP_WEBVIEW, wxEVT_WEBVIEW_BROWSING_DATA_CLEARED, wxWebViewEvent);
 
 typedef void (wxEvtHandler::*wxWebViewEventFunction)
              (wxWebViewEvent&);

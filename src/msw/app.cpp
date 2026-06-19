@@ -65,6 +65,7 @@
 #if wxUSE_OLE
     #include <ole2.h>
 #endif
+#include <shobjidl.h>
 
 #include <string.h>
 #include <ctype.h>
@@ -325,15 +326,8 @@ namespace
 /*
     Helper class to manipulate console from a GUI app.
 
-    Notice that console output is available in the GUI app only if:
-    - AttachConsole() returns TRUE
-    - we have a valid STD_ERROR_HANDLE
-    - command history hasn't been changed since our startup
-
-    To check if all these conditions are verified, you need to simple call
-    IsOkToUse(). It will check the first two conditions above the first time it
-    is called (and if this fails, the subsequent calls will return immediately)
-    and also recheck the last one every time it is called.
+    It checks if can successfully attach to the console when either IsOkToUse()
+    or Write() is called for the first time.
  */
 class wxConsoleStderr
 {
@@ -342,9 +336,6 @@ public:
     wxConsoleStderr()
     {
         m_hStderr = INVALID_HANDLE_VALUE;
-        m_historyLen =
-        m_dataLen =
-        m_dataLine = 0;
 
         m_ok = -1;
     }
@@ -368,13 +359,9 @@ public:
         {
             wxConsoleStderr * const self = const_cast<wxConsoleStderr *>(this);
             self->m_ok = self->DoInit();
-
-            // no need to call IsHistoryUnchanged() as we just initialized
-            // m_history anyhow
-            return m_ok == 1;
         }
 
-        return m_ok && IsHistoryUnchanged();
+        return m_ok == 1;
     }
 
 
@@ -385,147 +372,35 @@ private:
     // called by Init() once only to do the real initialization
     bool DoInit();
 
-    // retrieve the command line history into the provided buffer and return
-    // its length
-    int GetCommandHistory(wxWCharBuffer& buf) const;
-
-    // check if the console history has changed
-    bool IsHistoryUnchanged() const;
-
     int m_ok;                   // initially -1, set to true or false by Init()
-
-    wxDynamicLibrary m_dllKernel32;
 
     HANDLE m_hStderr;           // console handle, if it's valid we must call
                                 // FreeConsole() (even if m_ok != 1)
-
-    wxWCharBuffer m_history;    // command history on startup
-    int m_historyLen;           // length command history buffer
-
-    wxCharBuffer m_data;        // data between empty line and cursor position
-    int m_dataLen;              // length data buffer
-    int m_dataLine;             // line offset
-
-    typedef DWORD (WINAPI *GetConsoleCommandHistory_t)(LPTSTR sCommands,
-                                                       DWORD nBufferLength,
-                                                       LPCTSTR sExeName);
-    typedef DWORD (WINAPI *GetConsoleCommandHistoryLength_t)(LPCTSTR sExeName);
-
-    GetConsoleCommandHistory_t m_pfnGetConsoleCommandHistory;
-    GetConsoleCommandHistoryLength_t m_pfnGetConsoleCommandHistoryLength;
 
     wxDECLARE_NO_COPY_CLASS(wxConsoleStderr);
 };
 
 bool wxConsoleStderr::DoInit()
 {
+    if ( !::AttachConsole(ATTACH_PARENT_PROCESS) )
+        return false;
+
     HANDLE hStderr = ::GetStdHandle(STD_ERROR_HANDLE);
 
     if ( hStderr == INVALID_HANDLE_VALUE || !hStderr )
         return false;
 
-    if ( !m_dllKernel32.Load(wxT("kernel32.dll")) )
-        return false;
-
-    if ( !::AttachConsole(ATTACH_PARENT_PROCESS) )
-        return false;
-
-    // console attached, set m_hStderr now to ensure that we free it in the
-    // dtor
+    // console attached, set m_hStderr now to ensure that we free it in the dtor
     m_hStderr = hStderr;
 
-    wxDL_INIT_FUNC_AW(m_pfn, GetConsoleCommandHistory, m_dllKernel32);
-    if ( !m_pfnGetConsoleCommandHistory )
-        return false;
-
-    wxDL_INIT_FUNC_AW(m_pfn, GetConsoleCommandHistoryLength, m_dllKernel32);
-    if ( !m_pfnGetConsoleCommandHistoryLength )
-        return false;
-
-    // remember the current command history to be able to compare with it later
-    // in IsHistoryUnchanged()
-    m_historyLen = GetCommandHistory(m_history);
-    if ( !m_history )
-        return false;
-
-
-    // now find the first blank line above the current position
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
-
-    if ( !::GetConsoleScreenBufferInfo(m_hStderr, &csbi) )
-    {
-        wxLogLastError(wxT("GetConsoleScreenBufferInfo"));
-        return false;
-    }
-
-    COORD pos;
-    pos.X = 0;
-    pos.Y = csbi.dwCursorPosition.Y + 1;
-
-    // we decide that a line is empty if first 4 characters are spaces
-    DWORD ret;
-    char buf[4];
-    do
-    {
-        pos.Y--;
-        if ( !::ReadConsoleOutputCharacterA(m_hStderr, buf, WXSIZEOF(buf),
-                                            pos, &ret) )
-        {
-            wxLogLastError(wxT("ReadConsoleOutputCharacterA"));
-            return false;
-        }
-    } while ( wxStrncmp("    ", buf, WXSIZEOF(buf)) != 0 );
-
-    // calculate line offset and length of data
-    m_dataLine = csbi.dwCursorPosition.Y - pos.Y;
-    m_dataLen = m_dataLine*csbi.dwMaximumWindowSize.X + csbi.dwCursorPosition.X;
-
-    if ( m_dataLen > 0 )
-    {
-        m_data.extend(m_dataLen);
-        if ( !::ReadConsoleOutputCharacterA(m_hStderr, m_data.data(), m_dataLen,
-                                            pos, &ret) )
-        {
-            wxLogLastError(wxT("ReadConsoleOutputCharacterA"));
-            return false;
-        }
-    }
+    // also associate standard streams with this console: this may not work
+    // with all compilers, but it can't make things worse as by default none of
+    // these streams does anything useful in a GUI app anyhow
+    freopen("CONIN$", "r", stdin);
+    freopen("CONOUT$", "w", stdout);
+    freopen("CONOUT$", "w", stderr);
 
     return true;
-}
-
-int wxConsoleStderr::GetCommandHistory(wxWCharBuffer& buf) const
-{
-    // these functions are internal and may only be called by cmd.exe
-    static const wxChar *CMD_EXE = wxT("cmd.exe");
-
-    const int len = m_pfnGetConsoleCommandHistoryLength(CMD_EXE);
-    if ( len )
-    {
-        buf.extend(len);
-
-        int len2 = m_pfnGetConsoleCommandHistory(buf.data(), len, CMD_EXE);
-
-        if ( len2 != len )
-        {
-            wxFAIL_MSG( wxT("failed getting history?") );
-        }
-    }
-
-    return len;
-}
-
-bool wxConsoleStderr::IsHistoryUnchanged() const
-{
-    wxASSERT_MSG( m_ok == 1, wxT("shouldn't be called if not initialized") );
-
-    // get (possibly changed) command history
-    wxWCharBuffer history;
-    const int historyLen = GetCommandHistory(history);
-
-    // and compare it with the original one
-    return historyLen == m_historyLen && history &&
-                memcmp(m_history, history, historyLen) == 0;
 }
 
 bool wxConsoleStderr::Write(const wxString& text)
@@ -533,41 +408,17 @@ bool wxConsoleStderr::Write(const wxString& text)
     wxASSERT_MSG( m_hStderr != INVALID_HANDLE_VALUE,
                     wxT("should only be called if Init() returned true") );
 
-    // get current position
-    CONSOLE_SCREEN_BUFFER_INFO csbi;
-    if ( !::GetConsoleScreenBufferInfo(m_hStderr, &csbi) )
-    {
-        wxLogLastError(wxT("GetConsoleScreenBufferInfo"));
-        return false;
-    }
-
-    // and calculate new position (where is empty line)
-    csbi.dwCursorPosition.X = 0;
-    csbi.dwCursorPosition.Y -= m_dataLine;
-
-    if ( !::SetConsoleCursorPosition(m_hStderr, csbi.dwCursorPosition) )
-    {
-        wxLogLastError(wxT("SetConsoleCursorPosition"));
-        return false;
-    }
-
+    // Try directly console access first.
     DWORD ret;
-    if ( !::FillConsoleOutputCharacter(m_hStderr, wxT(' '), m_dataLen,
-                                       csbi.dwCursorPosition, &ret) )
-    {
-        wxLogLastError(wxT("FillConsoleOutputCharacter"));
-        return false;
-    }
+    if ( ::WriteConsole(m_hStderr, text.t_str(), text.length(), &ret, nullptr) )
+        return true;
 
-    if ( !::WriteConsole(m_hStderr, text.t_str(), text.length(), &ret, nullptr) )
-    {
-        wxLogLastError(wxT("WriteConsole"));
-        return false;
-    }
+    // This fails, for not very clear reasons, when running under a Cygwin
+    // shell, so try to use the standard output functions as a fallback.
+    if ( fwprintf(stderr, L"%s", static_cast<const wchar_t*>(text.t_str())) != -1 )
+        return true;
 
-    WriteConsoleA(m_hStderr, m_data, m_dataLen, &ret, 0);
-
-    return true;
+    return false;
 }
 
 wxConsoleStderr s_consoleStderr;
@@ -644,6 +495,14 @@ bool wxApp::Initialize(int& argc_, wxChar **argv_)
     }
 
     callBaseCleanup.Dismiss();
+
+    // We need to set the app user model ID before doing anything UI-related if
+    // it is specified.
+    const wxString className(wxTheApp->GetClassName());
+    if ( !className.empty() )
+    {
+        SetCurrentProcessExplicitAppUserModelID(className.wc_str());
+    }
 
     if ( !wxSystemOptions::GetOptionInt("msw.no-manifest-check") )
     {
@@ -861,7 +720,12 @@ void wxApp::MSWProcessPendingEventsIfNeeded()
     // both console and GUI applications.
     wxMSWEventLoopBase * const evtLoop =
         static_cast<wxMSWEventLoopBase *>(wxEventLoop::GetActive());
-    if ( evtLoop && evtLoop->MSWIsWakeUpRequested() )
+
+    // We don't want to do anything if we have an event loop which hadn't been
+    // woken up, but we need to do it if we don't have any event loop at all
+    // (which is uncommon but may happen), as otherwise pending events would
+    // just accumulate forever, without ever being processed.
+    if ( !evtLoop || evtLoop->MSWIsWakeUpRequested() )
         ProcessPendingEvents();
 }
 
@@ -875,20 +739,14 @@ void wxApp::OnEndSession(wxCloseEvent& WXUNUSED(event))
     // WM_ENDSESSION handler or when we delete our last window, so make sure we
     // at least execute our cleanup code before
 
-    // prevent the window from being destroyed when the corresponding wxTLW is
-    // destroyed: this will result in a leak of a HWND, of course, but who
-    // cares when the process is being killed anyhow
-    if ( !wxTopLevelWindows.empty() )
-        wxTopLevelWindows[0]->SetHWND(0);
+    // Note that we survive after this call only because we don't delete any
+    // windows at MSW level, see gs_gotEndSession check in wxWindow dtor, even
+    // though CallOnExit() deletes all C++ top level window objects.
+    const int rc = CallOnExit();
 
-    // Destroy all the remaining TLWs before calling OnExit() to have the same
-    // sequence of events in this case as in case of the normal shutdown,
-    // otherwise we could have many problems due to wxApp being already
-    // destroyed when window cleanup code (in close event handlers or dtor) is
-    // executed.
-    DeleteAllTLWs();
-
-    const int rc = OnExit();
+    // Skip unregistering windows classes: this is not really necessary and
+    // would result in an error because we may still have an open window.
+    gs_regClassesInfo.clear();
 
     wxEntryCleanup();
 
@@ -902,10 +760,20 @@ void wxApp::OnEndSession(wxCloseEvent& WXUNUSED(event))
 // user can veto the close, and therefore the end session.
 void wxApp::OnQueryEndSession(wxCloseEvent& event)
 {
-    if (GetTopWindow())
+    // Make a copy to avoid problems due to iterator invalidation if any
+    // windows get destroyed (rather than just closed) during the loop.
+    const auto tlws = wxTopLevelWindows;
+    for ( auto* tlw : tlws )
     {
-        if (!GetTopWindow()->Close(!event.CanVeto()))
-            event.Veto(true);
+        // If it's not in the list any more it could have been destroyed.
+        if ( !wxTopLevelWindows.Member(tlw) )
+            continue;
+
+        if ( !tlw->Close(!event.CanVeto()) )
+        {
+            event.Veto();
+            return;
+        }
     }
 }
 

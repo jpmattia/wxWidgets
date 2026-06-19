@@ -368,7 +368,7 @@ public:
             See @ref propgrid_iterator_flags.
     */
     void GetPropertiesWithFlag( wxArrayPGProperty* targetArr,
-                                wxPGPropertyFlags flags,
+                                wxPGFlags flags,
                                 bool inverse = false,
                                 int iterFlags = (wxPG_ITERATE_PROPERTIES|wxPG_ITERATE_HIDDEN|wxPG_ITERATE_CATEGORIES) ) const;
 
@@ -1026,7 +1026,7 @@ public:
         @remarks Bitmap will be scaled to a size returned by
                 wxPropertyGrid::GetImageSize();
     */
-    void SetPropertyImage( wxPGPropArg id, wxBitmapBundle& bmp );
+    void SetPropertyImage( wxPGPropArg id, const wxBitmapBundle& bmp );
 
     /**
         Sets maximum length of text in property text editor.

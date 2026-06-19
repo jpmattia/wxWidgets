@@ -39,7 +39,7 @@
 #   endif
 #endif
 
-#if ( !wxUSE_GUI && !wxOSX_USE_IPHONE ) || wxOSX_USE_COCOA_OR_CARBON
+#if ( !wxUSE_GUI && !defined(__WXOSX_IPHONE__) ) || defined(__WXOSX_COCOA__)
 
 // Carbon functions are currently still used in wxOSX/Cocoa too (including
 // wxBase part of it).
@@ -66,10 +66,28 @@ WXDLLIMPEXP_BASE NSString* wxNSStringWithWxString(const wxString &wxstring);
 
 WXDLLIMPEXP_BASE CFURLRef wxOSXCreateURLFromFileSystemPath( const wxString& path);
 
-#if wxUSE_GUI
+#if wxUSE_GUI && defined(__WXOSX__)
 
-#if !wxOSX_USE_IPHONE
+#if !defined(__WXOSX_IPHONE__)
 #include <ApplicationServices/ApplicationServices.h>
+
+#if __MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_12
+    #define NSCompositingOperationClear             NSCompositeClear
+    #define NSCompositingOperationCopy              NSCompositeCopy
+    #define NSCompositingOperationSourceOver        NSCompositeSourceOver
+    #define NSCompositingOperationSourceIn          NSCompositeSourceIn
+    #define NSCompositingOperationSourceOut         NSCompositeSourceOut
+    #define NSCompositingOperationSourceAtop        NSCompositeSourceAtop
+    #define NSCompositingOperationDestinationOver   NSCompositeDestinationOver
+    #define NSCompositingOperationDestinationIn     NSCompositeDestinationIn
+    #define NSCompositingOperationDestinationOut    NSCompositeDestinationOut
+    #define NSCompositingOperationDestinationAtop   NSCompositeDestinationAtop
+    #define NSCompositingOperationExclusion         NSCompositeExclusion
+    #define NSCompositingOperationPlusLighter       NSCompositePlusLighter
+    #define NSCompositingOperationDifference        NSCompositeDifference
+    #define NSCompositingOperationSourceOver        NSCompositeSourceOver
+#endif
+
 #endif
 
 #include "wx/bmpbndl.h"
@@ -77,6 +95,8 @@ WXDLLIMPEXP_BASE CFURLRef wxOSXCreateURLFromFileSystemPath( const wxString& path
 #include "wx/toplevel.h"
 
 class wxTextProofOptions;
+struct wxTextSearchResult;
+struct wxTextSearch;
 
 class WXDLLIMPEXP_CORE wxMacCGContextStateSaver
 {
@@ -122,13 +142,20 @@ WXDLLIMPEXP_CORE double wxOSXGetMainScreenContentScaleFactor();
 
 // UI
 
+WXColor WXDLLIMPEXP_CORE wxOSXGetWXColorFromCGColor(CGColorRef col);
+WXImage WXDLLIMPEXP_CORE wxOSXGetWXImageFromCGColor(CGColorRef col);
+
 CGSize WXDLLIMPEXP_CORE wxOSXGetImageSize(WXImage image);
 CGImageRef WXDLLIMPEXP_CORE wxOSXCreateCGImageFromImage( WXImage nsimage, double *scale = nullptr );
 CGImageRef WXDLLIMPEXP_CORE wxOSXGetCGImageFromImage( WXImage nsimage, CGRect* r, CGContextRef cg);
 CGContextRef WXDLLIMPEXP_CORE wxOSXCreateBitmapContextFromImage( WXImage nsimage, bool *isTemplate = nullptr);
 WXImage WXDLLIMPEXP_CORE wxOSXGetImageFromCGImage( CGImageRef image, double scale = 1.0, bool isTemplate = false);
 double WXDLLIMPEXP_CORE wxOSXGetImageScaleFactor(WXImage image);
-
+wxBitmapBundle WXDLLIMPEXP_CORE wxOSXCreateSystemBitmapBundle(const wxString& name, const wxSize& size);
+WXImage WXDLLIMPEXP_CORE wxOSXGetSystemImage(const wxString& name);
+wxBitmapBundle WXDLLIMPEXP_CORE wxOSXCreateSystemBitmapBundle(const wxString& id, const wxString &client, const wxSize& size);
+void WXDLLIMPEXP_CORE wxOSXDrawImage(CGContextRef inContext, const CGRect* inBounds, WXImage inImage, wxCompositionMode composition) ;
+bool WXDLLIMPEXP_CORE wxOSXGetCGBlendMode(wxCompositionMode op, wxInt32& mode);
 
 class wxWindowMac;
 // to
@@ -159,7 +186,7 @@ public :
     }
 
     virtual ~wxMenuItemImpl() ;
-    virtual void SetBitmap( const wxBitmap& bitmap ) = 0;
+    virtual void SetBitmap( const wxBitmapBundle& bitmap ) = 0;
     virtual void Enable( bool enable ) = 0;
     virtual void Check( bool check ) = 0;
     virtual void SetLabel( const wxString& text, wxAcceleratorEntry *entry ) = 0;
@@ -280,6 +307,11 @@ public :
     virtual bool        SetBackgroundStyle(wxBackgroundStyle style) = 0;
     virtual void        SetForegroundColour( const wxColour& col ) = 0;
 
+    virtual void        SetDeviceLocalOrigin( wxPoint origin )
+        { m_deviceLocalOrigin = origin; }
+    virtual wxPoint     GetDeviceLocalOrigin() const
+        { return m_deviceLocalOrigin; }
+
     // all coordinates in native parent widget relative coordinates
     virtual void        GetContentArea( int &left , int &top , int &width , int &height ) const = 0;
     virtual void        Move(int x, int y, int width, int height) = 0;
@@ -297,6 +329,8 @@ public :
     {
         left = top = right = bottom = 0;
     }
+
+    virtual void        InvalidateLayoutInset() const {}
 
     // native view coordinates are topleft to bottom right (flipped regarding CoreGraphics origin)
     virtual bool        IsFlipped() const { return true; }
@@ -352,6 +386,11 @@ public :
     virtual int         GetIncrement() const = 0;
     virtual void        PulseGauge() = 0;
     virtual void        SetScrollThumb( wxInt32 value, wxInt32 thumbSize ) = 0;
+    virtual void        SetScrollbar( int WXUNUSED(orient), int WXUNUSED(pos), int WXUNUSED(thumb),
+                                      int WXUNUSED(range), bool WXUNUSED(refresh) ) {}
+    virtual int         GetScrollPos(int WXUNUSED(orient)) const { return 0; }
+    virtual void        SetScrollPos(int WXUNUSED(orient), int WXUNUSED(pos)) {}
+    virtual void 	    ScrollWindow (int WXUNUSED(dx), int WXUNUSED(dy), const wxRect *WXUNUSED(rect) = nullptr) {}
 
     virtual void        SetFont(const wxFont & font) = 0;
 
@@ -365,6 +404,8 @@ public :
 
     virtual bool        EnableTouchEvents(int eventsMask) = 0;
 
+    virtual void        ClipsToBounds(bool clip);
+
     // scrolling views need a clip subview that acts as parent for native children
     // (except for the scollbars) which are children of the view itself
     virtual void        AdjustClippingView(wxScrollBar* horizontal, wxScrollBar* vertical);
@@ -372,6 +413,9 @@ public :
 
     // returns native view which acts as a parent for native children
     virtual WXWidget    GetContainer() const;
+
+    // should be called to enable appropriate borders for native controls with scrollview superviews
+    virtual void        ApplyScrollViewBorderType() { }
 
     // Mechanism used to keep track of whether a change should send an event
     // Do SendEvents(false) when starting actions that would trigger programmatic events
@@ -612,6 +656,7 @@ protected :
     wxWindowMac*        m_wxPeer;
     bool                m_needsFrame;
     bool                m_shouldSendEvents;
+    wxPoint             m_deviceLocalOrigin;
 
     wxDECLARE_ABSTRACT_CLASS(wxWidgetImpl);
 };
@@ -706,6 +751,8 @@ public :
     wxTextEntry *GetTextEntry() const { return m_entry; }
 
     virtual bool CanFocus() const { return true; }
+
+    virtual wxTextSearchResult SearchText(const wxTextSearch &search) const = 0;
 
     virtual wxString GetStringValue() const = 0 ;
     virtual void SetStringValue( const wxString &val ) = 0 ;
@@ -1023,15 +1070,19 @@ protected :
     wxDECLARE_ABSTRACT_CLASS(wxNonOwnedWindowImpl);
 };
 
-#endif // wxUSE_GUI
+#endif // __WXOSX__
 
 //---------------------------------------------------------------------------
 // cocoa bridging utilities
 //---------------------------------------------------------------------------
 
-bool wxMacInitCocoa();
+#ifdef __WXDARWIN_OSX__
 
-class WXDLLIMPEXP_CORE wxMacAutoreleasePool
+bool WXDLLIMPEXP_BASE wxMacInitCocoa();
+
+#endif // __WXDARWIN_OSX__
+
+class WXDLLIMPEXP_BASE wxMacAutoreleasePool
 {
 public :
     wxMacAutoreleasePool();
@@ -1042,9 +1093,9 @@ private :
 
 // NSObject
 
-void wxMacCocoaRelease( void* obj );
-void wxMacCocoaAutorelease( void* obj );
-void* wxMacCocoaRetain( void* obj );
+void WXDLLIMPEXP_BASE wxMacCocoaRelease( void* obj );
+void WXDLLIMPEXP_BASE wxMacCocoaAutorelease( void* obj );
+void* WXDLLIMPEXP_BASE wxMacCocoaRetain( void* obj );
 
 // shared_ptr like API for NSObject and subclasses
 template <class T>
@@ -1078,7 +1129,7 @@ public:
         }
         return *this;
     }
-    
+
     wxNSObjRef& operator=( T ptr )
     {
         if (get() != ptr)

@@ -2303,6 +2303,10 @@ protected:
 #endif
 #endif // !__WXUNIVERSAL__
 
+#if wxUSE_ACCESSIBILITY
+    virtual wxAccessible *CreateAccessible() override;
+#endif
+
 // Overrides
 protected:
 
@@ -2643,7 +2647,7 @@ public:
     */
     void SetOldContainer(wxRichTextParagraphLayoutBox* container) { m_oldContainer = container; }
 
-    virtual wxEvent *Clone() const override { return new wxRichTextEvent(*this); }
+    wxNODISCARD virtual wxEvent *Clone() const override { return new wxRichTextEvent(*this); }
 
 protected:
     int                             m_flags;

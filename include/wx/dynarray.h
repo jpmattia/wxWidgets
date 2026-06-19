@@ -122,6 +122,18 @@ public:
     bool IsEmpty() const { return this->empty(); }
     size_t Count() const { return this->size(); }
 
+    T& operator[](size_t uiIndex)
+    {
+        wxASSERT( uiIndex < this->size() );
+        return base_vec::operator[](uiIndex);
+    }
+
+    const T& operator[](size_t uiIndex) const
+    {
+        wxASSERT( uiIndex < this->size() );
+        return base_vec::operator[](uiIndex);
+    }
+
     T& Item(size_t uiIndex) const
     {
         wxASSERT( uiIndex < this->size() );
@@ -276,7 +288,7 @@ template <typename T>
 class wxDefaultBaseObjectArrayTraits
 {
 public:
-    static T* Clone(const T& value) { return new T{value}; }
+    wxNODISCARD static T* Clone(const T& value) { return new T{value}; }
     static void Free(T* p) { delete p; }
 };
 
@@ -694,7 +706,7 @@ private:
     classdecl wxObjectArrayTraitsFor##name                                    \
     {                                                                         \
     public:                                                                   \
-        static T* Clone(T const& item);                                       \
+        wxNODISCARD static T* Clone(T const& item);                           \
         static void Free(T* p);                                               \
     };                                                                        \
     typedef wxBaseObjectArray<T, wxObjectArrayTraitsFor##name>                \

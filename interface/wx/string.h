@@ -341,21 +341,21 @@
     @section string_index Index of the member groups
 
     Links for quick access to the various categories of wxString functions:
-    - @ref_member_group{ctor, Constructors and assignment operators}
-    - @ref_member_group{length, Length functions}
-    - @ref_member_group{ch_access, Character access functions}
-    - @ref_member_group{conv, Conversions functions}
-    - @ref_member_group{concat, Concatenation functions}
-    - @ref_member_group{cmp, Comparison functions}
-    - @ref_member_group{substring, Substring extraction functions}
-    - @ref_member_group{caseconv, Case conversion functions}
-    - @ref_member_group{search, Searching and replacing functions}
-    - @ref_member_group{numconv, Conversion to numbers functions}
-    - @ref_member_group{fmt, Formatting and printing functions}
-    - @ref_member_group{mem, Memory management functions}
-    - @ref_member_group{misc, Miscellaneous functions}
-    - @ref_member_group{iter, Iterator interface functions}
-    - @ref_member_group{stl, STL interface functions}
+    - @ref_member_group{string_ctor, Constructors and assignment operators}
+    - @ref_member_group{string_length, Length functions}
+    - @ref_member_group{string_ch_access, Character access functions}
+    - @ref_member_group{string_convs, Conversions functions}
+    - @ref_member_group{string_concat, Concatenation functions}
+    - @ref_member_group{string_cmp, Comparison functions}
+    - @ref_member_group{string_substring, Substring extraction functions}
+    - @ref_member_group{string_caseconv, Case conversion functions}
+    - @ref_member_group{string_search, Searching and replacing functions}
+    - @ref_member_group{string_numconv, Conversion to numbers functions}
+    - @ref_member_group{string_fmt, Formatting and printing functions}
+    - @ref_member_group{string_mem, Memory management functions}
+    - @ref_member_group{string_misc, Miscellaneous functions}
+    - @ref_member_group{string_iter, Iterator interface functions}
+    - @ref_member_group{string_stl, STL interface functions}
 
 
     @library{wxbase}
@@ -388,7 +388,7 @@ public:
 
 
     /**
-        @member_group_name{ctor, Constructors and assignment operators}
+        @member_group_name{string_ctor, Constructors and assignment operators}
 
         A string may be constructed either from a C string, (some number of copies of)
         a single character or a wide (Unicode) string. For all constructors (except the
@@ -527,12 +527,40 @@ public:
     */
     wxString operator =(wxUniChar c);
 
+    /**
+        Assignment from UTF-8 string.
+
+        Calling `s.AssignFromUTF8(utf8, len)` is equivalent to doing
+        `s = wxString::FromUTF8(utf8, len)` but may be more efficient as it can
+        reuse the existing string buffer instead of always having to allocate a
+        new one.
+
+        This function can be useful in performance-sensitive loops or with
+        static variables (retaining their buffer between calls) in often called
+        functions.
+
+        @since 3.3.2
+     */
+    void AssignFromUTF8(const char *utf8, size_t len = npos);
+
+    /**
+        Assignment from UTF-8 string.
+
+        This function is the same as AssignFromUTF8() but doesn't check that
+        @a utf8 is a valid pointer to a valid UTF-8 string. It must not be
+        called if @a utf8 is @NULL or its contents is not already known to be
+        correct UTF-8.
+
+        @since 3.3.2
+     */
+    void AssignFromUTF8Unchecked(const char *utf8, size_t len = npos);
+
     ///@}
 
 
 
     /**
-        @member_group_name{length, String length}
+        @member_group_name{string_length, String length}
 
         These functions return the string length and/or check whether the string
         is empty.
@@ -579,7 +607,7 @@ public:
 
 
     /**
-        @member_group_name{ch_access, Character access}
+        @member_group_name{string_ch_access, Character access}
 
         Many functions below take a character index in the string.
         As with C strings and arrays, the indices start from 0, so the first character
@@ -640,7 +668,7 @@ public:
 
 
     /**
-        @member_group_name{conv, Conversions}
+        @member_group_name{string_convs, Conversions}
 
         This section contains both implicit and explicit conversions to C style
         strings. Although implicit conversion is quite convenient, you are advised
@@ -861,7 +889,7 @@ public:
 
 
     /**
-        @member_group_name{concat, Concatenation}
+        @member_group_name{string_concat, Concatenation}
 
         Almost anything may be concatenated (appended to) with a string!
 
@@ -951,7 +979,7 @@ public:
 
 
     /**
-        @member_group_name{cmp, Comparison}
+        @member_group_name{string_cmp, Comparison}
 
         The default comparison function Cmp() is case-sensitive and so is the default
         version of IsSameAs(). For case insensitive comparisons you should use CmpNoCase()
@@ -1091,7 +1119,7 @@ public:
 
 
     /**
-        @member_group_name{substring, Substring extraction}
+        @member_group_name{string_substring, Substring extraction}
 
         These functions allow you to extract a substring from the string. The
         original string is not modified and the function returns the extracted
@@ -1153,7 +1181,9 @@ public:
             is returned by AfterFirst() but it is more efficient to use this
             output parameter if both the "before" and "after" parts are needed
             than calling both functions one after the other. This parameter is
-            available in wxWidgets version 2.9.2 and later only.
+            available in wxWidgets version 2.9.2 and later only. Since
+            wxWidgets 3.3.0, this parameter can be equal to the string on which
+            this function is called.
         @return Part of the string before the first occurrence of @a ch.
     */
     wxString BeforeFirst(wxUniChar ch, wxString *rest = nullptr) const;
@@ -1177,7 +1207,7 @@ public:
 
 
     /**
-        @member_group_name{caseconv, Case conversion}
+        @member_group_name{string_caseconv, Case conversion}
 
         The MakeXXX() variants modify the string in place, while the other functions
         return a new string which contains the original text converted to the upper or
@@ -1254,7 +1284,7 @@ public:
 
 
     /**
-        @member_group_name{search, Searching and replacing}
+        @member_group_name{string_search, Searching and replacing}
 
         These functions replace the standard @c strchr() and @c strstr()
         functions.
@@ -1312,7 +1342,7 @@ public:
 
 
     /**
-        @member_group_name{numconv, Conversion to numbers}
+        @member_group_name{string_numconv, Conversion to numbers}
 
         The string provides functions for conversion to signed and unsigned integer and
         floating point numbers.
@@ -1491,7 +1521,7 @@ public:
 
 
     /**
-        @member_group_name{fmt, Formatting and printing}
+        @member_group_name{string_fmt, Formatting and printing}
 
         Both formatted versions (Printf/() and stream-like insertion operators
         exist (for basic types only).
@@ -1534,7 +1564,7 @@ public:
 
 
     /**
-        @member_group_name{mem, Memory management}
+        @member_group_name{string_mem, Memory management}
 
         The following are "advanced" functions and they will be needed rarely.
         Alloc() and Shrink() are only interesting for optimization purposes.
@@ -1625,7 +1655,7 @@ public:
 
 
     /**
-        @member_group_name{misc, Miscellaneous}
+        @member_group_name{string_misc, Miscellaneous}
 
         Miscellaneous other string functions.
     */
@@ -1733,7 +1763,7 @@ public:
 
 
     /**
-        @member_group_name{iter, Iterator interface}
+        @member_group_name{string_iter, Iterator interface}
 
         These methods return iterators to the beginning or end of the string.
 
@@ -1761,7 +1791,7 @@ public:
 
 
     /**
-        @member_group_name{stl, STL interface}
+        @member_group_name{string_stl, STL interface}
 
         The supported STL functions are listed here.
 
@@ -2016,6 +2046,8 @@ public:
         The overload taking @c std::string_view is only available starting with
         wxWidgets 3.3.0 and requires the consumer application to use C++17.
 
+        @see AssignFromUTF8()
+
         @since 2.8.4
     */
     static wxString FromUTF8(const char* s);
@@ -2043,6 +2075,8 @@ public:
 
         The overload taking @c std::string_view is only available starting with
         wxWidgets 3.3.0 and requires the consumer application to use C++17.
+
+        @see AssignFromUTF8Unchecked()
 
         @since 2.8.9
     */

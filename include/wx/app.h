@@ -307,6 +307,9 @@ public:
     // OnExceptionInMainLoop()
     virtual void OnUnhandledException();
 
+    // Call OnUnhandledException() on the current wxTheApp object if it exists.
+    static void CallOnUnhandledException();
+
     // Function called if an uncaught exception is caught inside the main
     // event loop: it may return true to continue running the event loop or
     // false to stop it. If this function rethrows the exception, as it does by
@@ -336,7 +339,11 @@ public:
     // The default version does nothing when using C++98 and uses
     // std::rethrow_exception() in C++11.
     virtual void RethrowStoredException();
-#endif // wxUSE_EXCEPTIONS
+#else // !wxUSE_EXCEPTIONS
+    // For convenience, still define this to allow the code using it to avoid
+    // checking for wxUSE_EXCEPTIONS.
+    static void CallOnUnhandledException() { }
+#endif // wxUSE_EXCEPTIONS/!wxUSE_EXCEPTIONS
 
 
     // pending events
@@ -475,6 +482,10 @@ public:
     // returns true for GUI wxApp subclasses
     virtual bool IsGUI() const { return false; }
 
+    // Perform the always needed cleanup before and after calling possibly
+    // overridden OnExit().
+    int CallOnExit();
+
 
     // command line arguments (public for backwards compatibility)
     int argc;
@@ -494,6 +505,13 @@ protected:
     //
     // called from ProcessPendingEvents()
     void DeletePendingObjects();
+
+    // Perform all delayed cleanup, including deleting the pending objects and
+    // anything else, e.g. the GUI version uses it to delete any remaining
+    // windows too.
+    //
+    // This function is safe to call multiple times.
+    virtual void DoDelayedCleanup();
 
     // the function which creates the traits object when GetTraits() needs it
     // for the first time
@@ -744,6 +762,9 @@ public:
     }
 
 protected:
+    // Override base class method to do the GUI-specific cleanup too.
+    virtual void DoDelayedCleanup() override;
+
     // override base class method to use GUI traits
     virtual wxAppTraits *CreateTraits() override;
 
@@ -901,7 +922,7 @@ public:
     #define wxIMPLEMENT_WXWIN_MAIN          wxIMPLEMENT_WXWIN_MAIN_CONSOLE
 #endif // defined(wxIMPLEMENT_WXWIN_MAIN)
 
-#ifdef __WXUNIVERSAL__
+#if defined(__WXUNIVERSAL__) && wxUSE_GUI
     #include "wx/univ/theme.h"
 
     #ifdef wxUNIV_DEFAULT_THEME

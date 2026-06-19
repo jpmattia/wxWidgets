@@ -235,7 +235,6 @@ static void BuildListFromNN(wxArrayString& list, NETRESOURCE* pResSrc,
                             unsigned flagsSet, unsigned flagsUnset)
 {
     HANDLE hEnum;
-    int rc;
 
     //-----------------------------------------------
     // Scope may be all drives or all mounted drives.
@@ -249,13 +248,14 @@ static void BuildListFromNN(wxArrayString& list, NETRESOURCE* pResSrc,
     // Containers cause a recursive call to this function for their own
     // enumeration.
     //----------------------------------------------------------------------
-    if (rc = s_pWNetOpenEnum(scope, RESOURCETYPE_DISK, 0, pResSrc, &hEnum), rc == NO_ERROR)
+    if (s_pWNetOpenEnum(scope, RESOURCETYPE_DISK, 0, pResSrc, &hEnum) == NO_ERROR)
     {
         DWORD count = 1;
         DWORD size = 256;
         NETRESOURCE* pRes = (NETRESOURCE*)malloc(size);
         memset(pRes, 0, sizeof(NETRESOURCE));
-        while (rc = s_pWNetEnumResource(hEnum, &count, pRes, &size), rc == NO_ERROR || rc == ERROR_MORE_DATA)
+        int rc;
+        while ((rc = s_pWNetEnumResource(hEnum, &count, pRes, &size)) == NO_ERROR || rc == ERROR_MORE_DATA)
         {
             if (s_cancelSearch)
                 break;
@@ -323,7 +323,7 @@ static int CompareFcn(const wxString& first, const wxString& second)
 //=============================================================================
 // Function: BuildRemoteList
 // Purpose: Append Network Neighborhood items to the list.
-// Notes: - Mounted gets transalated into Connected.  FilteredAdd is told
+// Notes: - Mounted gets translated into Connected.  FilteredAdd is told
 //          to ignore the Mounted flag since we need to handle it in a weird
 //          way manually.
 //        - The resulting list is sorted alphabetically.
@@ -365,15 +365,11 @@ static bool BuildRemoteList(wxArrayString& list, NETRESOURCE* pResSrc,
         for (ssize_t iMounted = mounted.GetCount()-1; iMounted >= 0 && iList >= 0; iMounted--)
         {
             int compare;
-            wxString all(list[iList]);
-            wxString mount(mounted[iMounted]);
 
-            while (compare =
-                     wxStricmp(list[iList].c_str(), mounted[iMounted].c_str()),
-                   compare > 0 && iList >= 0)
+            while ((compare = wxStricmp(list[iList].c_str(), mounted[iMounted].c_str())) > 0
+                   && iList >= 0)
             {
                 iList--;
-                all = list[iList];
             }
 
 
@@ -450,7 +446,7 @@ wxArrayString wxFSVolumeBase::GetVolumes(int flagsSet, int flagsUnset)
         // The returned list will be sorted alphabetically.  We don't pass
         // our in since we don't want to change to order of the local drives.
         wxArrayString nn;
-        if (BuildRemoteList(nn, 0, flagsSet, flagsUnset))
+        if (BuildRemoteList(nn, nullptr, flagsSet, flagsUnset))
         {
             for (size_t idx = 0; idx < nn.GetCount(); idx++)
                 list.Add(nn[idx]);
@@ -569,11 +565,6 @@ int wxFSVolumeBase::GetFlags() const
 
 #if wxUSE_GUI
 
-void wxFSVolume::InitIcons()
-{
-    m_icons.resize(wxFS_VOL_ICO_MAX);
-}
-
 //=============================================================================
 // Function: GetIcon
 // Purpose: return the requested icon.
@@ -581,6 +572,14 @@ void wxFSVolume::InitIcons()
 
 wxIcon wxFSVolume::GetIcon(wxFSIconType type) const
 {
+    auto* const self = const_cast<wxFSVolume*>(this);
+
+    if ( m_icons.empty() )
+    {
+        // Allocate on first access.
+        self->m_icons.resize(wxFS_VOL_ICO_MAX);
+    }
+
     wxCHECK_MSG( type >= 0 && (size_t)type < m_icons.size(), wxNullIcon,
                  wxT("wxFSIconType::GetIcon(): invalid icon index") );
 
@@ -620,7 +619,7 @@ wxIcon wxFSVolume::GetIcon(wxFSIconType type) const
         }
         else
         {
-            const_cast<wxIcon&>(m_icons[type]).CreateFromHICON((WXHICON)fi.hIcon);
+            self->m_icons[type].CreateFromHICON((WXHICON)fi.hIcon);
         }
     }
 

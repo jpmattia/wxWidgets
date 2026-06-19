@@ -18,6 +18,7 @@
     #include "wx/module.h"
 #endif
 
+#include "wx/display.h"
 #include "wx/fontutil.h"
 #include "wx/fontenum.h"
 
@@ -29,10 +30,11 @@
 
 #ifdef __WXGTK3__
     #include "wx/gtk/private/appearance.h"
+    #include "wx/gtk/private/glibptr.h"
     #include "wx/gtk/private/variant.h"
 #endif
 
-bool wxGetFrameExtents(GdkWindow* window, int* left, int* right, int* top, int* bottom);
+bool wxGetFrameExtents(GdkWindow* window, wxTopLevelWindow::DecorSize* decorSize);
 
 // ----------------------------------------------------------------------------
 // wxSystemSettings implementation
@@ -256,10 +258,10 @@ void DoUpdateColorScheme(wxGTKImpl::ColorScheme colorScheme)
         return;
     }
 
-    char* themeName = nullptr;
+    wxGlibPtr<char> themeName;
     gboolean preferDarkPrev = FALSE;
     g_object_get(settings,
-        "gtk-theme-name", &themeName,
+        "gtk-theme-name", themeName.Out(),
         "gtk-application-prefer-dark-theme", &preferDarkPrev, nullptr);
 
     // This is not supposed to happen neither, but don't crash if it does.
@@ -269,10 +271,9 @@ void DoUpdateColorScheme(wxGTKImpl::ColorScheme colorScheme)
         return;
     }
 
-    wxLogTrace(TRACE_DARKMODE, "Current GTK theme is \"%s\"", themeName);
-
     const wxString theme = wxString::FromUTF8(themeName);
-    g_free(themeName);
+
+    wxLogTrace(TRACE_DARKMODE, "Current GTK theme is \"%s\"", theme);
 
     // Check if the current theme is a dark variant.
     constexpr const char* darkVariant = "-dark";
@@ -601,12 +602,12 @@ wxGtkStyleContext& wxGtkStyleContext::AddWindow(const char* className2)
     return Add(GTK_TYPE_WINDOW, "window", "background", className2, nullptr);
 }
 
-void wxGtkStyleContext::Bg(wxColour& color, int state) const
+static void bg(GtkStyleContext* sc, wxColour& color, int state)
 {
     GdkRGBA* rgba;
     cairo_pattern_t* pattern = nullptr;
-    gtk_style_context_set_state(m_context, GtkStateFlags(state));
-    gtk_style_context_get(m_context, GtkStateFlags(state),
+    gtk_style_context_set_state(sc, GtkStateFlags(state));
+    gtk_style_context_get(sc, GtkStateFlags(state),
         "background-color", &rgba, "background-image", &pattern, nullptr);
     color = wxColour(*rgba);
     gdk_rgba_free(rgba);
@@ -679,12 +680,26 @@ void wxGtkStyleContext::Bg(wxColour& color, int state) const
         }
         cairo_pattern_destroy(pattern);
     }
+}
 
-    if (color.Alpha() == 0)
+void wxGtkStyleContext::Bg(wxColour& color, int state) const
+{
+    for (GtkStyleContext* sc = m_context; sc; )
     {
-        // Try TLW as last resort, but not if we're already doing it
-        if (gtk_widget_path_length(m_path) > 1)
-            wxGtkStyleContext().AddWindow().Bg(color, state);
+        bg(sc, color, state);
+        if (color.Alpha())
+            break;
+#if GTK_CHECK_VERSION(3,4,0)
+        if (gtk_check_version(3,4,0) == nullptr)
+            sc = gtk_style_context_get_parent(sc);
+        else
+#endif
+        {
+            // Try TLW as last resort, but not if we're already doing it
+            if (gtk_widget_path_length(m_path) > 1)
+                wxGtkStyleContext().AddWindow().Bg(color, state);
+            break;
+        }
     }
 }
 
@@ -749,6 +764,7 @@ wxColour wxSystemSettingsNative::GetColour(wxSystemColour index)
         }
         wxFALLTHROUGH;
 #endif
+    case wxSYS_COLOUR_GRIDLINES:
     case wxSYS_COLOUR_3DLIGHT:
     case wxSYS_COLOUR_ACTIVEBORDER:
     case wxSYS_COLOUR_BTNFACE:
@@ -830,6 +846,9 @@ wxColour wxSystemSettingsNative::GetColour(wxSystemColour index)
     case wxSYS_COLOUR_LISTBOXHIGHLIGHTTEXT:
         sc.AddTreeview().Fg(color, GTK_STATE_FLAG_SELECTED | GTK_STATE_FLAG_FOCUSED);
         break;
+    case wxSYS_COLOUR_LISTBOXHIGHLIGHT:
+        sc.AddTreeview().Bg(color, GTK_STATE_FLAG_SELECTED | GTK_STATE_FLAG_FOCUSED);
+        break;
     case wxSYS_COLOUR_LISTBOXTEXT:
         sc.AddTreeview().Fg(color);
         break;
@@ -906,6 +925,7 @@ wxColour wxSystemSettingsNative::GetColour( wxSystemColour index )
         case wxSYS_COLOUR_ACTIVEBORDER:
         case wxSYS_COLOUR_INACTIVEBORDER:
         case wxSYS_COLOUR_BTNFACE:
+        case wxSYS_COLOUR_GRIDLINES:
         //case wxSYS_COLOUR_3DFACE:
         case wxSYS_COLOUR_3DLIGHT:
             color = wxColor(ButtonStyle()->bg[GTK_STATE_NORMAL]);
@@ -944,6 +964,10 @@ wxColour wxSystemSettingsNative::GetColour( wxSystemColour index )
 
         case wxSYS_COLOUR_HIGHLIGHT:
             color = wxColor(ButtonStyle()->bg[GTK_STATE_SELECTED]);
+            break;
+
+        case wxSYS_COLOUR_LISTBOXHIGHLIGHT:
+            color = wxColor(ListStyle()->bg[GTK_STATE_SELECTED]);
             break;
 
         case wxSYS_COLOUR_LISTBOX:
@@ -1203,17 +1227,17 @@ int wxSystemSettingsNative::GetMetric( wxSystemMetric index, const wxWindow* win
                     // Get the frame extents from the windowmanager.
                     // In most cases the top extent is the titlebar, so we use the bottom extent
                     // for the heights.
-                    int right, bottom;
-                    if (wxGetFrameExtents(window, nullptr, &right, nullptr, &bottom))
+                    wxTopLevelWindow::DecorSize decorSize;
+                    if (wxGetFrameExtents(window, &decorSize))
                     {
                         switch (index)
                         {
                             case wxSYS_BORDER_X:
                             case wxSYS_EDGE_X:
                             case wxSYS_FRAMESIZE_X:
-                                return right; // width of right extent
+                                return decorSize.right;
                             default:
-                                return bottom; // height of bottom extent
+                                return decorSize.bottom;
                         }
                     }
                 }
@@ -1223,9 +1247,17 @@ int wxSystemSettingsNative::GetMetric( wxSystemMetric index, const wxWindow* win
 
         case wxSYS_CURSOR_X:
         case wxSYS_CURSOR_Y:
+            {
+                gint cursor_size = 0;
+                g_object_get(GetSettingsForWindowScreen(window),
+                                "gtk-cursor-theme-size", &cursor_size, nullptr);
+                if (cursor_size)
+                    return cursor_size;
+
                 return gdk_display_get_default_cursor_size(
                             window ? gdk_window_get_display(window)
                                    : gdk_display_get_default());
+            }
 
         case wxSYS_DCLICK_X:
         case wxSYS_DCLICK_Y:
@@ -1343,10 +1375,10 @@ int wxSystemSettingsNative::GetMetric( wxSystemMetric index, const wxWindow* win
             // titlebar is, but this might lead to interesting behaviours in used code.
             // Reconsider when we have a way to report to the user on which side it is.
             {
-                int top;
-                if (wxGetFrameExtents(window, nullptr, nullptr, &top, nullptr))
+                wxTopLevelWindow::DecorSize decorSize;
+                if (wxGetFrameExtents(window, &decorSize))
                 {
-                    return top; // top frame extent
+                    return decorSize.top;
                 }
             }
 

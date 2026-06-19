@@ -16,9 +16,11 @@
 #include "wx/sharedptr.h"
 #include "wx/withimages.h"
 
+#include "wx/qt/private/compat.h"
 #include "wx/qt/private/winevent.h"
 #include "wx/qt/private/treeitemdelegate.h"
 
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QTreeWidget>
 #include <QtWidgets/QHeaderView>
 #include <QtWidgets/QScrollBar>
@@ -34,12 +36,14 @@ struct TreeItemDataQt
 
     explicit TreeItemDataQt(wxTreeItemData* data) : data(data)
     {
+#if QT_VERSION_MAJOR < 6
         static bool s_registered = false;
         if ( !s_registered )
         {
             qRegisterMetaTypeStreamOperators<TreeItemDataQt>("TreeItemDataQt");
             s_registered = true;
         }
+#endif
     }
 
     wxTreeItemData *getData() const
@@ -136,7 +140,7 @@ public:
     {}
 
     virtual void
-    select(const QItemSelection &selection, QItemSelectionModel::SelectionFlags command)
+    select(const QItemSelection& selection, QItemSelectionModel::SelectionFlags command) override
     {
         if ( m_isSelectionChangeAllowed )
         {
@@ -172,9 +176,11 @@ private:
 
 class wxQTreeWidget : public wxQtEventSignalHandler<QTreeWidget, wxTreeCtrl>
 {
+    using BaseClass = wxQtEventSignalHandler<QTreeWidget, wxTreeCtrl>;
+
 public:
     wxQTreeWidget(wxWindow *parent, wxTreeCtrl *handler) :
-        wxQtEventSignalHandler<QTreeWidget, wxTreeCtrl>(parent, handler),
+        BaseClass(parent, handler),
         m_item_delegate(handler),
         m_closing_editor(0)
     {
@@ -201,18 +207,17 @@ public:
         setSelectionModel(selection_model);
 
         // These signals must be reconnected if the model or selection model is reset or changed.
-        connect(selectionModel(), SIGNAL(currentChanged(QModelIndex, QModelIndex)),
-                this, SLOT(_q_emitCurrentItemChanged(QModelIndex, QModelIndex)));
-        connect(selectionModel(), SIGNAL(selectionChanged(QItemSelection, QItemSelection)),
-                this, SLOT(_q_selectionChanged(QItemSelection, QItemSelection)));
-    }
-
-    virtual void paintEvent (QPaintEvent * event)
-    {
-        //QT generates warnings if we try to paint to a QTreeWidget
-        //(perhaps because it's a compound widget) so we've disabled
-        //wx paint and erase background events
-        QTreeWidget::paintEvent(event);
+        connect(selectionModel(), &QItemSelectionModel::currentChanged,
+                [this](const QModelIndex& current, const QModelIndex& previous)
+                {
+                    emit currentItemChanged(itemFromIndex(current), itemFromIndex(previous));
+                });
+        connect(selectionModel(), &QItemSelectionModel::selectionChanged,
+                [this](const QItemSelection& selected, const QItemSelection& deselected)
+                {
+                    selectionChanged(selected, deselected);
+                    emit itemSelectionChanged();
+                });
     }
 
     virtual void mouseReleaseEvent(QMouseEvent * event) override
@@ -254,7 +259,7 @@ public:
                 }
         }
 
-        return wxQtEventSignalHandler<QTreeWidget, wxTreeCtrl>::mouseReleaseEvent(event);
+        return BaseClass::mouseReleaseEvent(event);
     }
 
     wxTextCtrl *GetEditControl()
@@ -325,8 +330,10 @@ protected:
             const wxImageList *imageList = GetHandler()->GetImageList();
             const wxBitmap bitmap = imageList->GetBitmap(imageIndex);
             const QRect rect = visualRect(index);
-            const int offset = (rect.height() / 2) - (bitmap.GetHeight() / 2);
-            painter->drawPixmap(rect.topLeft() + QPoint(0,offset), *bitmap.GetHandle());
+            const int dy = (rect.height() / 2) - (bitmap.GetHeight() / 2);
+            const int dx = layoutDirection() == Qt::RightToLeft
+                         ? rect.width() - bitmap.GetWidth() : 0;
+            painter->drawPixmap(rect.topLeft() + QPoint(dx,dy), *bitmap.GetHandle());
         }
     }
 
@@ -345,6 +352,48 @@ protected:
         QTreeView::selectionChanged(selected, deselected);
     }
 
+    // Helper class which tries to close any open editor as early as possible
+    // when the application is shutting down to avoid a crash if closeEditor()
+    // pops up any message box. IOW, showing a message/dialog box (using exec())
+    // while the application is closing down is dangerous.
+    // See note in the Qt documentation of QDialog::exec()
+    class SafeEditorCloser : public QObject
+    {
+    public:
+        explicit SafeEditorCloser(wxQTreeWidget* qTreeWidget)
+            : m_qTreeWidget(qTreeWidget)
+        {
+            qApp->installEventFilter(this);
+        }
+
+        ~SafeEditorCloser()
+        {
+            qApp->removeEventFilter(this);
+        }
+
+    protected:
+        bool eventFilter(QObject* obj, QEvent* event) override
+        {
+            if ( event->type() == QEvent::Close )
+            {
+                // Don't try to close the editor if there is any active popup window
+                // (e.g. selecting Quit from the menu) because the application would
+                // hang if closeEditor() pops up any message box.
+                if ( !QApplication::activePopupWidget() )
+                {
+                    // This will close any currently opened editor.
+                    m_qTreeWidget->setCurrentItem(nullptr);
+                }
+            }
+
+            return QObject::eventFilter(obj, event);
+        }
+
+        wxQTreeWidget* const m_qTreeWidget;
+    };
+
+    std::unique_ptr<SafeEditorCloser> m_editorCloser;
+
     bool edit(const QModelIndex &index, EditTrigger trigger, QEvent *event) override
     {
         // AllEditTriggers means that editor is about to open, not waiting for double click
@@ -357,6 +406,8 @@ protected:
                 return true;
             }
 
+            m_startEditorText = wxQtConvertString(itemFromIndex(index)->text(0));
+
             // Allow event handlers to veto opening the editor
             wxTreeEvent wx_event(
                 wxEVT_TREE_BEGIN_LABEL_EDIT,
@@ -366,7 +417,15 @@ protected:
             if (GetHandler()->HandleWindowEvent(wx_event) && !wx_event.IsAllowed())
                 return false;
         }
-        return QTreeWidget::edit(index, trigger, event);
+
+        if ( QTreeWidget::edit(index, trigger, event) )
+        {
+            m_editorCloser.reset(new SafeEditorCloser(this));
+
+            return true;
+        }
+
+        return false;
     }
 
     void closeEditor(QWidget *editor, QAbstractItemDelegate::EndEditHint hint) override
@@ -378,6 +437,15 @@ protected:
         if (guard.IsInside())
             return;
 
+        m_editorCloser.reset(nullptr);
+
+        if (!GetHandler())
+        {
+            // The handler may have already been destroyed, when quitting
+            // the application using Ctrl+Q for example.
+            return;
+        }
+
         // There can be multiple calls to close editor when the item loses focus
         const QModelIndex current_index = m_item_delegate.GetCurrentModelIndex();
         if (!current_index.isValid())
@@ -388,7 +456,10 @@ protected:
             GetHandler(),
             wxQtConvertTreeItem(itemFromIndex(current_index))
             );
-        if (hint == QAbstractItemDelegate::RevertModelCache)
+
+        const wxString editor_text = m_item_delegate.GetEditControl()->GetLineText(0);
+
+        if (hint == QAbstractItemDelegate::RevertModelCache || editor_text == m_startEditorText)
         {
             event.SetEditCanceled(true);
             EmitEvent(event);
@@ -396,7 +467,6 @@ protected:
         else
         {
             // Allow event handlers to decide whether to accept edited text
-            const wxString editor_text = m_item_delegate.GetEditControl()->GetLineText(0);
             event.SetLabel(editor_text);
             if (!GetHandler()->HandleWindowEvent(event) || event.IsAllowed())
                 m_item_delegate.AcceptModelData(editor, model(), current_index);
@@ -427,6 +497,7 @@ protected:
     wxTreeItemId m_currentItem;
     wxTreeItemId m_previousItem;
 
+    friend class wxTreeCtrl;
     friend class wxQItemSelectionModel;
     using QTreeWidget::itemFromIndex; // wxQItemSelectionModel needs this function
 
@@ -453,7 +524,7 @@ private:
         // QT doesn't update the selection until this signal has been processed.
         // Deferring this event ensures that wxTreeCtrl::GetSelections() returns
         // the new selection in the wx event handler.
-        GetHandler()->CallAfter([=]()
+        GetHandler()->CallAfter([this]()
             {
                 EmitSelectChangeEvent(wxEVT_TREE_SEL_CHANGED);
             });
@@ -573,7 +644,7 @@ private:
 
     virtual void dropEvent(QDropEvent* event) override
     {
-        endDrag(event->pos());
+        endDrag(wxQtGetEventPosition(event));
 
         // We don't want Qt to actually do the drop.
         event->ignore();
@@ -582,7 +653,7 @@ private:
     virtual void mouseMoveEvent(QMouseEvent *event) override
     {
         const bool wasDragging = state() == DraggingState;
-        wxQtEventSignalHandler<QTreeWidget, wxTreeCtrl>::mouseMoveEvent(event);
+        BaseClass::mouseMoveEvent(event);
 
         const bool nowDragging = state() == DraggingState;
         if ( !wasDragging && nowDragging )
@@ -629,6 +700,8 @@ private:
 
     typedef std::map<QTreeWidgetItem*,ImageState> ImageStateMap;
     ImageStateMap m_imageStates;
+
+    wxString m_startEditorText;
 
     // Place holder image to reserve enough space in a row
     // for us to draw our icon
@@ -684,8 +757,6 @@ bool wxTreeCtrl::Create(wxWindow *parent, wxWindowID id,
 
 wxTreeCtrl::~wxTreeCtrl()
 {
-    if ( GetQTreeWidget() )
-        GetQTreeWidget()->deleteLater();
 }
 
 wxQTreeWidget* wxTreeCtrl::GetQTreeWidget() const
@@ -934,7 +1005,8 @@ bool wxTreeCtrl::IsSelected(const wxTreeItemId& item) const
     wxCHECK_MSG(item.IsOk(), false, "invalid tree item");
 
     const QTreeWidgetItem *qTreeItem = wxQtConvertTreeItem(item);
-    return qTreeItem->isSelected();
+    const QModelIndex& index = GetQTreeWidget()->indexFromItem(qTreeItem);
+    return GetQTreeWidget()->selectionModel()->isSelected(index);
 }
 
 bool wxTreeCtrl::IsBold(const wxTreeItemId& item) const
@@ -1131,15 +1203,10 @@ wxTreeItemId wxTreeCtrl::GetNextVisible(const wxTreeItemId& item) const
     wxASSERT_MSG(IsVisible(item), "this item itself should be visible");
 
     wxTreeItemId id = item;
-    if ( id.IsOk() )
-    {
-        while ( id = GetNext(id), id.IsOk() )
-        {
-            if ( IsVisible(id) )
-                return id;
-        }
-    }
-    return wxTreeItemId();
+    do
+        id = GetNext(id);
+    while (id.IsOk() && !IsVisible(id));
+    return id;
 }
 
 wxTreeItemId wxTreeCtrl::GetPrevVisible(const wxTreeItemId& item) const

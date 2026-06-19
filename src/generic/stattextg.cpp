@@ -56,7 +56,10 @@ void wxGenericStaticText::DoDrawLabel(wxDC& dc, const wxRect& rect)
 {
 #if wxUSE_MARKUP
     if ( m_markupText )
-        m_markupText->Render(dc, rect, wxMarkupText::Render_ShowAccels);
+    {
+        m_markupText->Render(dc, rect, wxMarkupText::Render_ShowAccels,
+                             GetAlignment());
+    }
     else
 #endif // wxUSE_MARKUP
         dc.DrawLabel(m_label, rect, GetAlignment(), m_mnemonic);
@@ -124,10 +127,11 @@ bool wxGenericStaticText::DoSetLabelMarkup(const wxString& markup)
     if ( !wxStaticTextBase::DoSetLabelMarkup(markup) )
         return false;
 
+    if ( m_markupText && !m_markupText->SetMarkup(markup) )
+        return true;
+
     if ( !m_markupText )
         m_markupText = new wxMarkupText(markup);
-    else
-        m_markupText->SetMarkup(markup);
 
     AutoResizeIfNecessary();
 

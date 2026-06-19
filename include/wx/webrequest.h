@@ -26,6 +26,8 @@ public:
     {
     }
 
+    bool IsOk() const { return !m_user.empty(); }
+
     const wxString& GetUser() const { return m_user; }
     const wxSecretValue& GetPassword() const { return m_password; }
 
@@ -104,6 +106,8 @@ public:
 
     wxString GetHeader(const wxString& name) const;
 
+    std::vector<wxString> GetAllHeaderValues(const wxString& name) const;
+
     wxString GetMimeType() const;
 
     wxString GetContentType() const;
@@ -129,6 +133,37 @@ protected:
     explicit wxWebResponse(const wxWebResponseImplPtr& impl);
 
     wxWebResponseImplPtr m_impl;
+};
+
+// Base class for logging debug information from web requests.
+class wxWebRequestDebugLogger
+{
+public:
+    wxWebRequestDebugLogger() = default;
+    virtual ~wxWebRequestDebugLogger() = default;
+
+    // Informational message not directly corresponding to any data sent or
+    // received.
+    virtual void OnInfo(const wxString& info) = 0;
+
+    // Request sent to the server, e.g.  "GET /index.html HTTP/1.1".
+    virtual void OnRequestSent(const wxString& line) = 0;
+
+    // Response received from the server, e.g. "HTTP/1.1 200 OK".
+    virtual void OnResponseReceived(const wxString& line) = 0;
+
+    // Header sent to the server.
+    virtual void OnHeaderSent(const wxString& name, const wxString& value) = 0;
+
+    // Header received from the server.
+    virtual void OnHeaderReceived(const wxString& name, const wxString& value) = 0;
+
+    // Data sent to the server. This data may be binary and encrypted when
+    // using HTTPS, so it is typically not human-readable.
+    virtual void OnDataSent(const void* data, size_t size) = 0;
+
+    // Data received from the server. Same remarks as for OnDataSent() apply.
+    virtual void OnDataReceived(const void* data, size_t size) = 0;
 };
 
 class WXDLLIMPEXP_NET wxWebRequestBase
@@ -192,6 +227,12 @@ public:
         wxString error;
     };
 
+    enum Timeout
+    {
+        Timeout_Default = -1,
+        Timeout_Infinite = 0
+    };
+
     bool IsOk() const { return m_impl.get() != nullptr; }
 
     void SetHeader(const wxString& name, const wxString& value);
@@ -208,6 +249,10 @@ public:
     }
 
     void SetStorage(Storage storage);
+
+    void SetTimeouts(long connectionTimeoutMs, long dataTimeoutMs);
+
+    void UseBasicAuth(const wxWebCredentials& cred);
 
     Storage GetStorage() const;
 
@@ -381,6 +426,8 @@ public:
 
     bool EnablePersistentStorage(bool enable = true);
 
+    void SetDebugLogger(std::unique_ptr<wxWebRequestDebugLogger> logger);
+
     wxWebSessionHandle GetNativeHandle() const;
 
 private:
@@ -490,7 +537,7 @@ public:
 
     void SetDataBuffer(const wxMemoryBuffer& dataBuf) { m_dataBuf = dataBuf; }
 
-    wxEvent* Clone() const override { return new wxWebRequestEvent(*this); }
+    wxNODISCARD wxEvent* Clone() const override { return new wxWebRequestEvent(*this); }
 
 private:
     wxWebRequest::State m_state;

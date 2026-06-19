@@ -134,6 +134,12 @@ bool wxSpinButton::Create(wxWindow *parent,
     SubclassWin(m_hWnd);
 
     Bind(wxEVT_PAINT, &wxSpinButton::OnPaint, this);
+    Bind(wxEVT_ERASE_BACKGROUND, [](wxEraseEvent& event)
+    {
+        // Do nothing in dark mode, the background will be erased in OnPaint().
+        if ( !wxMSWDarkMode::IsActive() )
+            event.Skip();
+    });
 
     SetInitialSize(size);
 
@@ -176,7 +182,7 @@ void wxSpinButton::OnPaint(wxPaintEvent& event)
         const RECT rc = wxGetClientRect(GetHwnd());
         const wxSize size{rc.right - rc.left, rc.bottom - rc.top};
 
-        if ( size == wxSize() )
+        if ( size.IsEmpty() )
             return;
 
         wxBitmap bmp(size);
@@ -246,20 +252,12 @@ void wxSpinButton::OnPaint(wxPaintEvent& event)
         bmp = wxBitmap(image);
 #endif // wxUSE_IMAGE
 
-        PAINTSTRUCT ps;
-        wxDCTemp dc(::BeginPaint(GetHwnd(), &ps), size);
+        wxPaintDC dc(this);
         dc.DrawBitmap(bmp, 0, 0);
-        ::EndPaint(GetHwnd(), &ps);
     }
     else
     {
-        // We need to always paint this control explicitly instead of letting
-        // DefWndProc() do it, as this avoids whichever optimization the latter
-        // function does when WS_EX_COMPOSITED is on that result in not drawing
-        // parts of the control at all (see #23656).
-        wxPaintDC dc(this);
-
-        wxSpinButtonBase::OnPaint(event);
+        event.Skip();
     }
 }
 
@@ -358,7 +356,7 @@ bool wxSpinButton::MSWOnNotify(int WXUNUSED(idCtrl), WXLPARAM lParam, WXLPARAM *
     NM_UPDOWN *lpnmud = (NM_UPDOWN *)lParam;
 
     if ( lpnmud->hdr.hwndFrom != GetHwnd() || // make sure it is the right control
-         lpnmud->hdr.code != UDN_DELTAPOS )   // and the right notification 
+         lpnmud->hdr.code != UDN_DELTAPOS )   // and the right notification
         return false;
 
     int newVal = lpnmud->iPos + lpnmud->iDelta;

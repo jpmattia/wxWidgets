@@ -72,13 +72,14 @@ wxUSE_GUI                 | BOOL   | ON      | Build the UI libraries
 wxBUILD_COMPATIBILITY     | STRING | 3.2     | Enable API compatibility with 3.0, 3.2 or neither ("NONE")
 wxBUILD_PRECOMP           | BOOL   | ON      | Use precompiled headers
 wxBUILD_MONOLITHIC        | BOOL   | OFF     | Build a single library
+wxBUILD_DEBUG_LEVEL       | STRING | 1       | 0, 1, or 2 (corresponds to wxDEBUG_LEVEL)
 
 Note that on macOS, the option `CMAKE_OSX_ARCHITECTURES` is used to specify which architecture(s) to build.
 For example, the following will build a "universal binary 2" (i.e., ARM64 and Intel x86_64) library.
 ~~~{.sh}
     cmake ~/Downloads/wxWidgets_3.1 \
       -DCMAKE_INSTALL_PREFIX=~/wx_install \
-      -DwxBUILD_SHARED=OFF
+      -DwxBUILD_SHARED=OFF \
       -D"CMAKE_OSX_ARCHITECTURES:STRING=arm64;x86_64"
     cmake --build . --target install
 ~~~
@@ -134,8 +135,8 @@ target_link_libraries(myapp ${wxWidgets_LIBRARIES})
 Using a sub directory                  {#cmake_subdir}
 ---------------------
 You can use wxWidgets as a subdirectory in your application's build tree
-e.g. as a git submodule. This way the wxWidgets libraries will be part
-of your applications build process.
+(e.g., as a git submodule). This way the wxWidgets libraries will be part
+of your application's build process.
 
 Your *CMakeLists.txt* would look like this:
 ~~~
@@ -153,6 +154,36 @@ set(wxBUILD_SHARED OFF)
 ~~~~
 to your *CMakeLists.txt* if you want to always use static wxWidgets libraries.
 
+Using an out-of-tree directory         {#cmake_outerdir}
+---------------------
+Likewise, wxWidgets can also be outside of your project, but still be part
+of your application's build process. To do this, you will need to provide a
+build directory argument to `add_subdirectory()`.
+This will tell CMake where to place wxWidget's build files.
+
+For example, if wxWidgets is one folder up from your project:
+~~~
+...
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../wxWidgets"
+                 "${CMAKE_CURRENT_SOURCE_DIR}/wxWidgets_lib")
+add_executable(myapp myapp.cpp)
+target_link_libraries(myapp wx::net wx::core wx::base)
+~~~
+
+This can be useful if you have multiple projects using wxWidgets.
+This way, you can place wxWidgets side-by-side with your other projects and
+have their CMake scripts all point to the same wxWidgets folder.
+
+Cached CMake variables
+----------------------
+
+If building wxWidgets statically into your program, these values will
+be available:
+
+Name               | Description
+------------------ | -----------  |
+wxVERSION          | wxWidgets's version number
+wxCOPYRIGHT        | The copyright string
 
 Using XRC
 ---------

@@ -32,6 +32,8 @@
 #include "wx/html/htmlfilt.h"
 #include "wx/filename.h"
 
+#include "wx/private/make_unique.h"
+
 #include "wx/arrimpl.cpp"
 WX_DEFINE_OBJARRAY(wxHtmlBookRecArray)
 WX_DEFINE_OBJARRAY(wxHtmlHelpDataItems)
@@ -276,7 +278,6 @@ bool wxHtmlHelpData::LoadMSProject(wxHtmlBookRecord *book, wxFileSystem& fsys,
     wxFSFile *f;
     wxHtmlFilterHTML filter;
     wxString buf;
-    wxString string;
 
     HP_Parser parser;
     HP_TagHandler *handler = new HP_TagHandler(book);
@@ -388,15 +389,24 @@ bool wxHtmlHelpData::LoadCachedBook(wxHtmlBookRecord *book, wxInputStream *f)
     m_index.Alloc(newsize);
     for (i = st; i < newsize; i++)
     {
-        wxHtmlHelpDataItem *item = new wxHtmlHelpDataItem;
+        auto item = std::make_unique<wxHtmlHelpDataItem>();
         item->name = CacheReadString(f);
         item->page = CacheReadString(f);
         item->level = CacheReadInt32(f);
         item->book = book;
         int parentShift = CacheReadInt32(f);
         if (parentShift != 0)
+        {
+            // parentShift is a back-reference into the index entries loaded so
+            // far; it comes straight from the (possibly malicious) .cached file
+            // so an out-of-range value would make the subtraction below wrap
+            // around and leave item->parent pointing outside m_index, which is
+            // later dereferenced when the index is sorted.
+            if (parentShift < 0 || (size_t)parentShift > m_index.size())
+                return false;
             item->parent = &m_index[m_index.size() - parentShift];
-        m_index.Add(item);
+        }
+        m_index.Add(item.release());
     }
     return true;
 }
@@ -642,7 +652,6 @@ bool wxHtmlHelpData::AddBook(const wxString& book)
     wxFileSystem fsys;
 
     wxString title = _("noname"),
-             safetitle,
              start,
              contents,
              index,
@@ -889,7 +898,7 @@ void wxHtmlSearchEngine::LookFor(const wxString& keyword, bool case_sensitive, b
 }
 
 
-static inline bool WHITESPACE(wxChar c)
+static inline bool WHITESPACE(wxUniChar c)
 {
     return c == wxT(' ') || c == wxT('\n') || c == wxT('\r') || c == wxT('\t');
 }
@@ -901,9 +910,8 @@ static inline wxString CompressSpaces(const wxString & str)
     buf.reserve( str.size() );
 
     bool space_counted = false;
-    for( const wxChar * pstr = str.c_str(); *pstr; ++pstr )
+    for ( wxUniChar ch: str )
     {
-        wxChar ch = *pstr;
         if( WHITESPACE( ch ) )
         {
             if( space_counted )

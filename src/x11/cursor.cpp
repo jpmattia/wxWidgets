@@ -69,6 +69,12 @@ wxCursor::wxCursor()
 
 }
 
+wxCursor::wxCursor(const wxBitmap& WXUNUSED(bitmap),
+                   int WXUNUSED(hotSpotX), int WXUNUSED(hotSpotY))
+{
+    wxFAIL_MSG( "wxCursor creation from bitmaps not implemented" );
+}
+
 void wxCursor::InitFromStock( wxStockCursor cursorId )
 {
     m_refData = new wxCursorRefData();
@@ -173,16 +179,6 @@ WXCursor wxCursor::GetCursor() const
 static wxCursor  gs_savedCursor;
 static int       gs_busyCount = 0;
 
-const wxCursor &wxBusyCursor::GetStoredCursor()
-{
-    return gs_savedCursor;
-}
-
-const wxCursor wxBusyCursor::GetBusyCursor()
-{
-    return wxCursor(wxCURSOR_WATCH);
-}
-
 void wxEndBusyCursor()
 {
     if (--gs_busyCount > 0)
@@ -216,7 +212,7 @@ bool wxIsBusy()
     return gs_busyCount > 0;
 }
 
-void wxSetCursor( const wxCursor& cursor )
+void wxSetCursor( const wxCursorBundle& cursors )
 {
-    g_globalCursor = cursor;
+    g_globalCursor = cursors.GetCursorForMainWindow();
 }

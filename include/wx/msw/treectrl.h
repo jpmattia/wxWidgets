@@ -204,6 +204,8 @@ public:
     virtual bool IsDoubleBuffered() const override;
     virtual void SetDoubleBuffered(bool on) override;
 
+    virtual WXDWORD MSWGetStyle(long style, WXDWORD *exstyle) const override;
+
 protected:
     // Implement "update locking" in a custom way for this control.
     virtual void DoFreeze() override;
@@ -289,6 +291,9 @@ private:
 
     void DeleteTextCtrl();
 
+    unsigned int DoGetIndent() const;
+    void DoSetIndent();
+
     // return true if the item is the hidden root one (i.e. it's the root item
     // and the tree has wxTR_HIDE_ROOT style)
     bool IsHiddenRoot(const wxTreeItemId& item) const;
@@ -304,6 +309,12 @@ private:
     // Delete the given item from the native control.
     bool MSWDeleteItem(const wxTreeItemId& item);
 
+    void OnDPIChanged(wxDPIChangedEvent& event);
+    void OnSysColourChanged(wxSysColourChangedEvent& event);
+
+    // Set the native control's text and background colours to the
+    // current foreground and background colours.
+    void UpdateNativeColours();
 
     // Return guaranteed non-null non-owning pointer to the attribute for the
     // given item.
@@ -320,8 +331,8 @@ private:
     // Virtual root item, if wxTR_HIDE_ROOT is set.
     void* m_pVirtualRoot;
 
-    // Item to call EnsureVisible() on when the tree is thawed, if necessary.
-    wxTreeItemId m_htEnsureVisibleOnThaw;
+    // Items to call EnsureVisible() on when the tree is thawed, if necessary.
+    std::vector<wxTreeItemId> m_htEnsureVisibleOnThaw;
 
     // the starting item for selection with Shift
     wxTreeItemId m_htSelStart, m_htClickedItem;
@@ -345,6 +356,9 @@ private:
 
     friend class wxTreeItemIndirectData;
     friend class wxTreeSortHelper;
+
+    // indentation in DIP
+    unsigned int m_indent;
 
     wxDECLARE_DYNAMIC_CLASS(wxTreeCtrl);
     wxDECLARE_NO_COPY_CLASS(wxTreeCtrl);

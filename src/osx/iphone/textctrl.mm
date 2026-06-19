@@ -123,7 +123,7 @@ protected :
 
 @end
 
-#if 0 
+#if 0
 @implementation wxUITextFieldEditor
 
 - (void) keyDown:(NSEvent*) event
@@ -302,7 +302,7 @@ protected :
 // wxUITextViewControl
 //
 
-wxUITextViewControl::wxUITextViewControl( wxTextCtrl *wxPeer, UITextView* v) : 
+wxUITextViewControl::wxUITextViewControl( wxTextCtrl *wxPeer, UITextView* v) :
     wxWidgetIPhoneImpl(wxPeer, v),
     wxTextWidgetImpl(wxPeer)
 {
@@ -357,6 +357,11 @@ wxString wxUITextViewControl::GetRTFValue() const
 void wxUITextViewControl::SetRTFValue(const wxString &str)
 {
     wxFAIL_MSG("SetRTFValue() should only be used with multiline controls.");
+}
+
+wxTextSearchResult wxUITextViewControl::SearchText(const wxTextSearch &search) const
+{
+    wxFAIL_MSG("SearchText() should only be used with multiline controls.");
 }
 
 void wxUITextViewControl::Copy()
@@ -442,7 +447,7 @@ void wxUITextViewControl::SetFont(const wxFont & font)
 bool wxUITextViewControl::GetStyle(long position, wxTextAttr& style)
 {
     if (m_textView && position >=0)
-    {   
+    {
         // UIFont* font = nullptr;
         // NSColor* bgcolor = nullptr;
         // NSColor* fgcolor = nullptr;
@@ -450,7 +455,7 @@ bool wxUITextViewControl::GetStyle(long position, wxTextAttr& style)
         // but that UITextStorage does not accept length as a valid position.
         // Therefore we return the default control style in that case.
         /*
-        if (position < [[m_textView string] length]) 
+        if (position < [[m_textView string] length])
         {
             UITextStorage* storage = [m_textView textStorage];
             font = [[storage attribute:NSFontAttributeName atIndex:position effectiveRange:nullptr] autorelease];
@@ -538,7 +543,7 @@ wxSize wxUITextViewControl::GetBestSize() const
 // wxUITextFieldControl
 //
 
-wxUITextFieldControl::wxUITextFieldControl( wxTextCtrl *wxPeer, UITextField* w ) : 
+wxUITextFieldControl::wxUITextFieldControl( wxTextCtrl *wxPeer, UITextField* w ) :
     wxWidgetIPhoneImpl(wxPeer, w),
     wxTextWidgetImpl(wxPeer)
 {
@@ -576,6 +581,12 @@ void wxUITextFieldControl::SetRTFValue(const wxString &str)
 {
     wxFAIL_MSG("SetRTFValue() should only be used with multiline controls.");
 }
+
+wxTextSearchResult wxUITextFieldControl::SearchText(const wxTextSearch &search) const
+{
+    wxFAIL_MSG("SearchText() should only be used with multiline controls.");
+}
+
 
 wxSize wxUITextFieldControl::GetBestSize() const
 {

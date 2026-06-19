@@ -36,8 +36,6 @@ wxMenuItem::wxMenuItem(wxMenu *pParentMenu,
                        wxMenu *pSubMenu)
            :wxMenuItemBase(pParentMenu, id, t, strHelp, kind, pSubMenu)
 {
-    wxASSERT_MSG( id != 0 || pSubMenu != nullptr , wxT("A MenuItem ID of Zero does not work under Mac") ) ;
-
     // In other languages there is no difference in naming the Exit/Quit menu item between MacOS and Windows guidelines
     // therefore these item must not be translated
     if (pParentMenu != nullptr && !pParentMenu->GetNoEventsMode())
@@ -152,23 +150,22 @@ void wxMenuItem::SetItemLabel(const wxString& text)
     UpdateItemText() ;
 }
 
+void wxMenuItem::SetBitmap(const wxBitmapBundle& bitmap)
+{
+    wxMenuItemBase::SetBitmap(bitmap);
+    UpdateItemBitmap();
+}
 
 void wxMenuItem::UpdateItemBitmap()
 {
-    if ( !m_parentMenu )
-        return;
-
     if ( m_bitmap.IsOk() )
     {
-        GetPeer()->SetBitmap(GetBitmap());
+        GetPeer()->SetBitmap(m_bitmap);
     }
 }
 
 void wxMenuItem::UpdateItemStatus()
 {
-    if ( !m_parentMenu )
-        return ;
-
     if ( IsSeparator() )
         return ;
 
@@ -182,9 +179,6 @@ void wxMenuItem::UpdateItemStatus()
 
 void wxMenuItem::UpdateItemText()
 {
-    if ( !m_parentMenu )
-        return ;
-
     wxString text = wxStripMenuCodes(m_text, m_parentMenu != nullptr && m_parentMenu->GetNoEventsMode() ? wxStrip_Accel : wxStrip_Menu);
     if (text.IsEmpty() && !IsSeparator())
     {

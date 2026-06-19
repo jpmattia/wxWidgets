@@ -69,8 +69,6 @@ public:
     // returns true if the platform should explicitly apply a theme border
     virtual bool CanApplyThemeBorder() const override { return false; }
 
-    virtual void MSWOnDisabledComposited() override;
-
 protected:
     virtual wxSize DoGetBestSize() const override;
 
@@ -79,8 +77,6 @@ public:
 
 protected:
     virtual wxWindowList GetCompositeWindowParts() const override;
-
-    virtual bool MSWGetDarkModeSupport(MSWDarkModeSupport& support) const override;
 
     // return the region with all the windows inside this static box excluded
     WXHRGN MSWGetRegionWithoutChildren();

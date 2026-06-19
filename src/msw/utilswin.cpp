@@ -14,11 +14,26 @@
     #include "wx/utils.h"
 #endif //WX_PRECOMP
 
+#include "wx/filefn.h"
 #include "wx/private/launchbrowser.h"
 #include "wx/msw/private.h"     // includes <windows.h>
+#include "wx/msw/private/dpiaware.h"
+
 #include "wx/msw/registry.h"
+
 #include <shellapi.h> // needed for SHELLEXECUTEINFO
 #include <wchar.h>
+
+namespace wxMSWImpl
+{
+
+AutoSystemDpiAware::SetThreadDpiAwarenessContext_t
+AutoSystemDpiAware::ms_pfnSetThreadDpiAwarenessContext =
+    (AutoSystemDpiAware::SetThreadDpiAwarenessContext_t)-1;
+
+} // namespace wxMSWImpl
+
+#ifndef __WXQT__
 
 // ----------------------------------------------------------------------------
 // Launch document with default app
@@ -65,7 +80,7 @@ bool wxLaunchDefaultApplication(const wxString& document, int flags)
 
 bool wxDoLaunchDefaultBrowser(const wxLaunchBrowserParams& params)
 {
-#if wxUSE_IPC
+#if wxUSE_IPC && wxUSE_REGKEY
     if ( params.flags & wxBROWSER_NEW_WINDOW )
     {
         // ShellExecuteEx() opens the URL in an existing window by default so
@@ -131,7 +146,7 @@ bool wxDoLaunchDefaultBrowser(const wxLaunchBrowserParams& params)
             }
         }
     }
-#endif // wxUSE_IPC
+#endif // wxUSE_IPC && wxUSE_REGKEY
 
     WinStruct<SHELLEXECUTEINFO> sei;
     sei.lpFile = params.GetPathOrURL().t_str();
@@ -144,6 +159,8 @@ bool wxDoLaunchDefaultBrowser(const wxLaunchBrowserParams& params)
 
     return false;
 }
+
+#endif // !__WXQT__
 
 bool wxMSWIsOnSecureScreen()
 {
@@ -161,4 +178,33 @@ bool wxMSWIsOnSecureScreen()
     // that is used for UAC prompts and sign-in screens and running at system
     // level.
     return wcscmp(name, L"Winlogon") == 0;
+}
+
+bool wxMoveToTrash(const wxString& path)
+{
+    // SHFileOperation needs double null termination string
+    // but without separator at the end of the path
+    wxString pathStr(path);
+    if ( pathStr.Last() == wxFILE_SEP_PATH )
+        pathStr.RemoveLast();
+    pathStr += wxT('\0');
+
+    SHFILEOPSTRUCT fileop;
+    wxZeroMemory(fileop);
+    fileop.wFunc = FO_DELETE;
+    fileop.pFrom = pathStr.t_str();
+    fileop.fFlags = FOF_ALLOWUNDO | FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI;
+
+    const int ret = SHFileOperation(&fileop);
+    if ( ret != 0 || fileop.fAnyOperationsAborted )
+    {
+        // Note that the return value from SHFileOperation() is not a standard
+        // Win32 error code, so we can't use wxLogSysError() here.
+        wxLogError(_("'%s' couldn't be moved to trash: error 0x%08x"),
+                   path,
+                   ret);
+        return false;
+    }
+
+    return true;
 }

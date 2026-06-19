@@ -96,9 +96,11 @@ static const int MARGIN_AROUND_CHECKBOX = 5;
 // ----------------------------------------------------------------------------
 
 wxListItemData::wxListItemData(wxListItemData&& other)
+              : m_image(other.m_image),
+                m_data(other.m_data),
+                m_owner(other.m_owner),
+                m_text(std::move(other.m_text))
 {
-    m_owner = other.m_owner;
-
     // Take ownership of the pointers from the other object and reset them.
     std::swap(m_attr, other.m_attr);
     std::swap(m_rect, other.m_rect);
@@ -109,6 +111,7 @@ wxListItemData& wxListItemData::operator=(wxListItemData&& other)
     m_image = other.m_image;
     m_data = other.m_data;
     m_owner = other.m_owner;
+    m_text = std::move(other.m_text);
 
     // Swap them to let our pointers be deleted by the other object if necessary.
     std::swap(m_attr, other.m_attr);
@@ -457,7 +460,7 @@ void wxListLineData::CalculateSize( wxReadOnlyDC *dc, int spacing )
             if (item->HasImage())
             {
                 int w, h;
-                m_owner->GetImageSize( item->GetImage(), w, h );
+                m_owner->GetImageSize( w, h );
                 m_gi->m_rectIcon.width = w + 8;
                 m_gi->m_rectIcon.height = h + 8;
 
@@ -495,7 +498,7 @@ void wxListLineData::CalculateSize( wxReadOnlyDC *dc, int spacing )
             if (item->HasImage())
             {
                 int w, h;
-                m_owner->GetImageSize( item->GetImage(), w, h );
+                m_owner->GetImageSize( w, h );
                 m_gi->m_rectIcon.width = w;
                 m_gi->m_rectIcon.height = h;
 
@@ -655,10 +658,7 @@ void wxListLineData::ApplyAttributes(wxDC *dc,
         else
             colText = *wxBLACK;
 #else
-        if ( hasFocus )
-            colText = wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHTTEXT);
-        else
-            colText = wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOXHIGHLIGHTTEXT);
+        colText = wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOXHIGHLIGHTTEXT);
 #endif
     }
     else if ( attr && attr->HasTextColour() )
@@ -748,8 +748,8 @@ void wxListLineData::DrawInReportMode( wxDC *dc,
 
     ApplyAttributes(dc, rectHL, highlighted, current);
 
-    wxCoord x = rect.x + HEADER_OFFSET_X + ICON_OFFSET_X,
-            yMid = rect.y + rect.height/2;
+    wxCoord x = rect.x;
+    wxCoord yMid = rect.y + rect.height/2;
 
     if ( m_owner->HasCheckBoxes() )
     {
@@ -765,6 +765,8 @@ void wxListLineData::DrawInReportMode( wxDC *dc,
 
         x += cbSize.GetWidth() + (2 * MARGIN_AROUND_CHECKBOX);
     }
+
+    x += ICON_OFFSET_X;
 
     size_t col = 0;
     for ( const auto& item : m_items )
@@ -782,7 +784,7 @@ void wxListLineData::DrawInReportMode( wxDC *dc,
         if ( item.HasImage() )
         {
             int ix, iy;
-            m_owner->GetImageSize( item.GetImage(), ix, iy );
+            m_owner->GetImageSize( ix, iy );
             m_owner->DrawImage( item.GetImage(), dc, xOld, yMid - iy/2 );
 
             ix += IMAGE_MARGIN_IN_REPORT_MODE;
@@ -903,6 +905,7 @@ void wxListLineData::ReverseHighlight( void )
 wxBEGIN_EVENT_TABLE(wxListHeaderWindow,wxWindow)
     EVT_PAINT         (wxListHeaderWindow::OnPaint)
     EVT_MOUSE_EVENTS  (wxListHeaderWindow::OnMouse)
+    EVT_SYS_COLOUR_CHANGED(wxListHeaderWindow::OnSysColourChanged)
 wxEND_EVENT_TABLE()
 
 void wxListHeaderWindow::Init()
@@ -1005,15 +1008,12 @@ void wxListHeaderWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
 
     AdjustDC( dc );
 
-    dc.SetFont( GetFont() );
-
     // width and height of the entire header window
     int w, h;
     GetClientSize( &w, &h );
     parent->CalcUnscrolledPosition(w, 0, &w, nullptr);
 
     dc.SetBackgroundMode(wxBRUSHSTYLE_TRANSPARENT);
-    dc.SetTextForeground(GetForegroundColour());
 
     int x = HEADER_OFFSET_X;
     int numColumns = m_owner->GetColumnCount();
@@ -1052,13 +1052,17 @@ void wxListHeaderWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
         if (i == 0)
            flags |= wxCONTROL_SPECIAL; // mark as first column
 
+        wxHeaderButtonParams headerBtnParams;
+        headerBtnParams.m_arrowColour = GetForegroundColour();
+
         wxRendererNative::Get().DrawHeaderButton
                                 (
                                     this,
                                     dc,
                                     wxRect(x, HEADER_OFFSET_Y, cw, ch),
                                     flags,
-                                    sortArrow
+                                    sortArrow,
+                                    &headerBtnParams
                                 );
 
         // see if we have enough space for the column label
@@ -1078,7 +1082,7 @@ void wxListHeaderWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
             smallImages = m_owner->GetSmallImages();
             if ( smallImages )
             {
-                smallImages->GetImageLogicalSize(this, image, ix, iy);
+                smallImages->GetImageLogicalSize(this, ix, iy);
                 wLabel += ix + HEADER_IMAGE_MARGIN_IN_REPORT_MODE;
             }
         }
@@ -1307,6 +1311,16 @@ void wxListHeaderWindow::OnMouse( wxMouseEvent &event )
     }
 }
 
+void wxListHeaderWindow::OnSysColourChanged(wxSysColourChangedEvent &event)
+{
+    SetOwnForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT));
+    SetOwnBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE));
+
+    Refresh();
+
+    event.Skip();
+}
+
 bool wxListHeaderWindow::SendListEvent(wxEventType type, const wxPoint& pos)
 {
     wxWindow *parent = GetParent();
@@ -1516,6 +1530,7 @@ wxBEGIN_EVENT_TABLE(wxListMainWindow, wxWindow)
   EVT_KILL_FOCUS     (wxListMainWindow::OnKillFocus)
   EVT_SCROLLWIN      (wxListMainWindow::OnScroll)
   EVT_CHILD_FOCUS    (wxListMainWindow::OnChildFocus)
+  EVT_SYS_COLOUR_CHANGED(wxListMainWindow::OnSysColourChanged)
 wxEND_EVENT_TABLE()
 
 void wxListMainWindow::Init()
@@ -1680,7 +1695,6 @@ wxCoord wxListMainWindow::GetLineHeight() const
         wxListMainWindow *self = wxConstCast(this, wxListMainWindow);
 
         wxInfoDC dc( self );
-        dc.SetFont( GetFont() );
 
         wxCoord y;
         dc.GetTextExtent(wxT("H"), nullptr, &y);
@@ -1688,7 +1702,7 @@ wxCoord wxListMainWindow::GetLineHeight() const
         if ( m_small_images && m_small_images->GetImageCount() )
         {
             int iw = 0, ih = 0;
-            m_small_images->GetImageLogicalSize(this, 0, iw, ih);
+            m_small_images->GetImageLogicalSize(this, iw, ih);
             y = wxMax(y, ih);
         }
 
@@ -1733,7 +1747,7 @@ wxRect wxListMainWindow::GetLineLabelRect(size_t line) const
         if ( item->HasImage() )
         {
             int ix, iy;
-            GetImageSize( item->GetImage(), ix, iy );
+            GetImageSize( ix, iy );
             image_x = 3 + ix + IMAGE_MARGIN_IN_REPORT_MODE;
         }
     }
@@ -1752,13 +1766,21 @@ wxRect wxListMainWindow::GetLineIconRect(size_t line) const
     if ( !InReportView() )
         return GetLine(line)->m_gi->m_rectIcon;
 
-    wxListLineData *ld = GetLine(line);
-    wxASSERT_MSG( ld->HasImage(), wxT("should have an image") );
+    wxASSERT_MSG( GetLine(line)->HasImage(), wxT("should have an image") );
 
-    wxRect rect;
-    rect.x = HEADER_OFFSET_X;
-    rect.y = GetLineY(line);
-    GetImageSize(ld->GetImage(), rect.width, rect.height);
+    wxRect rect = GetLineRect(line);
+    rect.x += ICON_OFFSET_X;
+
+    if ( HasCheckBoxes() )
+    {
+        wxSize cbSize = wxRendererNative::Get().GetCheckBoxSize(const_cast<wxListMainWindow*>(this));
+        rect.x += cbSize.GetWidth() + (2 * MARGIN_AROUND_CHECKBOX);
+    }
+
+    // use full height of the line, same as win32 listctrl
+    int ix, iy;
+    GetImageSize(ix, iy);
+    rect.width = ix;
 
     return rect;
 }
@@ -1772,6 +1794,9 @@ wxRect wxListMainWindow::GetLineHighlightRect(size_t line) const
 long wxListMainWindow::HitTestLine(size_t line, int x, int y) const
 {
     wxASSERT_MSG( line < GetItemCount(), wxT("invalid line in HitTestLine") );
+
+    if ( IsInsideCheckBox(line, x, y) )
+        return wxLIST_HITTEST_ONITEMSTATEICON;
 
     wxListLineData *ld = GetLine(line);
 
@@ -2028,8 +2053,6 @@ void wxListMainWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
     int dev_x, dev_y;
     GetListCtrl()->CalcScrolledPosition( 0, 0, &dev_x, &dev_y );
 
-    dc.SetFont( GetFont() );
-
     if ( InReportView() )
     {
         int lineHeight = GetLineHeight();
@@ -2183,6 +2206,26 @@ void wxListMainWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
             DrawFocusRect(this, dc, GetLineHighlightRect(m_current), flags);
     }
 #endif // !__WXMAC__
+}
+
+void wxListMainWindow::OnSysColourChanged( wxSysColourChangedEvent &event )
+{
+    SetOwnForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOXTEXT));
+    SetOwnBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOX));
+
+    if ( m_highlightBrush )
+    {
+        m_highlightBrush->SetColour(wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHT));
+    }
+
+    if ( m_highlightUnfocusedBrush )
+    {
+        m_highlightUnfocusedBrush->SetColour(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNSHADOW));
+    }
+
+    Refresh();
+
+    event.Skip();
 }
 
 void wxListMainWindow::HighlightAll( bool on )
@@ -3274,15 +3317,15 @@ void wxListMainWindow::DrawImage( int index, wxDC *dc, int x, int y )
     }
 }
 
-void wxListMainWindow::GetImageSize( int index, int &width, int &height ) const
+void wxListMainWindow::GetImageSize( int &width, int &height ) const
 {
     if ( HasFlag(wxLC_ICON) && m_normal_images )
     {
-        m_normal_images->GetImageLogicalSize(this, index, width, height);
+        m_normal_images->GetImageLogicalSize(this, width, height);
     }
     else if ( HasFlag(wxLC_SMALL_ICON | wxLC_LIST | wxLC_REPORT) && m_small_images )
     {
-        m_small_images->GetImageLogicalSize(this, index, width, height);
+        m_small_images->GetImageLogicalSize(this, width, height);
     }
     else
     {
@@ -3302,7 +3345,7 @@ void wxListMainWindow::SetImages( wxWithImages *images, const int which )
     if ((images) && (images->HasImages()) )
     {
         int height;
-        images->GetImageLogicalSize(this, 0, width, height);
+        images->GetImageLogicalSize(this, width, height);
     }
 
     if (which == wxIMAGE_LIST_NORMAL)
@@ -3353,7 +3396,7 @@ wxListMainWindow::ComputeMinHeaderWidth(const wxListHeaderData* column) const
         if ( m_small_images )
         {
             int ix = 0, iy = 0;
-            m_small_images->GetImageLogicalSize(this, image, ix, iy);
+            m_small_images->GetImageLogicalSize(this, ix, iy);
             width += ix + HEADER_IMAGE_MARGIN_IN_REPORT_MODE;
         }
     }
@@ -3861,18 +3904,19 @@ wxListMainWindow::GetSubItemRect(long item, long subItem, wxRect& rect,
                     if ( subItem == 0 && line->HasImage() )
                     {
                         int ix, iy;
-                        GetImageSize(line->GetImage(), ix, iy);
-
-                        const int iconWidth = ix + IMAGE_MARGIN_IN_REPORT_MODE;
+                        GetImageSize(ix, iy);
 
                         if ( code == wxLIST_RECT_ICON )
                         {
-                            rect.width = iconWidth;
+                            rect.y += (rect.height - iy) / 2;
+                            rect.width = ix;
+                            rect.height = iy;
                         }
                         else // wxLIST_RECT_LABEL
                         {
-                            rect.x += iconWidth;
-                            rect.width -= iconWidth;
+                            // this includes the margin between icon and label (IMAGE_MARGIN_IN_REPORT_MODE)
+                            rect.x += ix;
+                            rect.width -= ix;
                         }
                     }
                     else // No icon
@@ -3959,14 +4003,14 @@ bool wxListMainWindow::IsItemChecked(long item) const
     }
 }
 
-bool wxListMainWindow::IsInsideCheckBox(long item, int x, int y)
+bool wxListMainWindow::IsInsideCheckBox(long item, int x, int y) const
 {
     if ( HasCheckBoxes() )
     {
         wxRect lineRect = GetLineRect(item);
-        wxSize cbSize = wxRendererNative::Get().GetCheckBoxSize(this);
+        wxSize cbSize = wxRendererNative::Get().GetCheckBoxSize(const_cast<wxListMainWindow*>(this));
         int yOffset = (lineRect.height - cbSize.GetHeight()) / 2;
-        wxRect rr(wxPoint(MARGIN_AROUND_CHECKBOX, lineRect.y + yOffset), cbSize);
+        wxRect rr(wxPoint(lineRect.x + MARGIN_AROUND_CHECKBOX, lineRect.y + yOffset), cbSize);
 
         return rr.Contains(wxPoint(x, y));
     }
@@ -3983,7 +4027,6 @@ void wxListMainWindow::RecalculatePositions()
     const int lineHeight = GetLineHeight();
 
     wxInfoDC dc( this );
-    dc.SetFont( GetFont() );
 
     const size_t count = GetItemCount();
 
@@ -4580,7 +4623,7 @@ void wxListMainWindow::InsertItem( wxListItem &item )
         if ( m_small_images && image != -1 && InReportView() )
         {
             int imageWidth, imageHeight;
-            m_small_images->GetImageLogicalSize(this, image, imageWidth, imageHeight);
+            m_small_images->GetImageLogicalSize(this, imageWidth, imageHeight);
 
             if ( imageHeight > m_lineHeight )
                 m_lineHeight = 0;
@@ -4653,12 +4696,10 @@ int wxListMainWindow::GetItemWidthWithImage(wxListItem * item)
     int width = 0;
     wxInfoDC dc(this);
 
-    dc.SetFont( GetFont() );
-
     if (item->GetImage() != -1)
     {
         int ix, iy;
-        GetImageSize( item->GetImage(), ix, iy );
+        GetImageSize( ix, iy );
         width += ix + IMAGE_MARGIN_IN_REPORT_MODE;
     }
 
@@ -5491,9 +5532,26 @@ long wxGenericListCtrl::FindItem( long WXUNUSED(start), const wxPoint& pt,
 
 long wxGenericListCtrl::HitTest(const wxPoint& point, int& flags, long *col) const
 {
-    // TODO: sub item hit testing
     if ( col )
+    {
         *col = -1;
+        if ( InReportView() )
+        {
+            const wxPoint unscrolled = CalcUnscrolledPosition( point );
+
+            for ( int c = 0, wsum = 0, cols = GetColumnCount();
+                  c < cols;
+                  ++c )
+            {
+                wsum += GetColumnWidth(c);
+                if ( wsum > unscrolled.x )
+                {
+                    *col = c;
+                    break;
+                }
+            }
+        }
+    }
 
     return m_mainWin->HitTest( (int)point.x, (int)point.y, flags );
 }

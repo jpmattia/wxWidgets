@@ -2759,6 +2759,21 @@ void wxGridWindow::ScrollWindow( int dx, int dy, const wxRect *rect )
 
 void wxGrid::ScrollWindow( int dx, int dy, const wxRect *rect )
 {
+    if ( UsesOverlaySelection() && IsSelection() )
+    {
+        wxRect r; // dummy renderExtent
+        wxRect oldSel = m_selection->GetSelectionShape(r).GetBoundingBox();
+        if ( !oldSel.IsEmpty() )
+        {
+            // Refresh the previous selection shape before invalidating it,
+            // because otherwise some areas might not be updated while
+            // drag-selecting the grid.
+            RefreshRect(&oldSel);
+        }
+
+        m_selection->InvalidateSelectionShape();
+    }
+
     // We must explicitly call wxWindow version to avoid infinite recursion as
     // wxGridWindow::ScrollWindow() calls this method back.
     m_gridWin->wxWindow::ScrollWindow( dx, dy, rect );
@@ -2770,8 +2785,6 @@ void wxGrid::ScrollWindow( int dx, int dy, const wxRect *rect )
 
     m_rowLabelWin->ScrollWindow( 0, dy, rect );
     m_colLabelWin->ScrollWindow( dx, 0, rect );
-
-    InvalidateOverlaySelection();
 }
 
 void wxGridWindow::OnMouseEvent( wxMouseEvent& event )
@@ -3135,7 +3148,12 @@ wxGrid::SetTable(wxGridTableBase *table,
 
     InvalidateBestSize();
 
-    UpdateCurrentCellOnRedim();
+    // If we already have a valid current cell, ensure that it is in valid
+    // range for the new table with a possibly different number of rows/columns
+    // but don't do anything if the current cell is invalid, setting the table
+    // shouldn't automatically select the cell at (0, 0).
+    if ( m_currentCellCoords != wxGridNoCellCoords )
+        UpdateCurrentCellOnRedim();
 
     return m_created;
 }
@@ -3201,7 +3219,7 @@ void wxGrid::Init()
     m_minAcceptableColWidth  =
     m_minAcceptableRowHeight = 0;
 
-    m_gridLineColour = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE);
+    m_gridLineColour = wxSystemSettings::GetColour(wxSYS_COLOUR_GRIDLINES);
     m_gridLinesEnabled = true;
     m_gridLinesClipHorz =
     m_gridLinesClipVert = true;
@@ -6207,14 +6225,16 @@ void wxGrid::OnDPIChanged(wxDPIChangedEvent& event)
         {
             int height = m_rowHeights[i];
 
-            // Skip hidden rows.
-            if ( height <= 0 )
-                continue;
-
+            // Note that even hidden rows heights must be scaled to ensure that
+            // they appear in the expected size if they are shown again.
             height = event.ScaleY(height);
-            total += height;
 
             m_rowHeights[i] = height;
+
+            // But don't count hidden rows for the total height.
+            if ( height > 0 )
+                total += height;
+
             m_rowBottoms[i] = total;
         }
     }
@@ -6231,13 +6251,13 @@ void wxGrid::OnDPIChanged(wxDPIChangedEvent& event)
         {
             int width = m_colWidths[i];
 
-            if ( width <= 0 )
-                continue;
-
             width = event.ScaleX(width);
-            total += width;
 
             m_colWidths[i] = width;
+
+            if ( width > 0 )
+                total += width;
+
             m_colRights[i] = total;
 
             if ( colHeader )
@@ -7302,7 +7322,7 @@ wxGrid::DoDrawGridLines(wxDC& dc,
         int i = GetColAt( colPos );
 
         int colRight = GetColRight(i);
-#if defined(__WXGTK__) || defined(__WXQT__)
+#if defined(__WXGTK__)
         if (GetLayoutDirection() != wxLayout_RightToLeft)
 #endif
             colRight--;
@@ -7700,6 +7720,7 @@ void wxGrid::DrawTextRectangle(wxDC& dc,
             break;
 
         case wxALIGN_CENTRE:
+        case wxALIGN_CENTRE_VERTICAL:
             if ( textOrientation == wxHORIZONTAL )
                 y = rect.y + ((rect.height - textHeight) / 2);
             else
@@ -7741,6 +7762,7 @@ void wxGrid::DrawTextRectangle(wxDC& dc,
                 break;
 
             case wxALIGN_CENTRE:
+            case wxALIGN_CENTRE_HORIZONTAL:
                 if ( textOrientation == wxHORIZONTAL )
                     x = rect.x + ((rect.width - lineWidth) / 2);
                 else
@@ -11920,7 +11942,7 @@ void wxGrid::SetName(const wxString &name)
 
 bool wxGrid::Reparent(wxWindowBase *newParent)
 {
-    bool changed = wxWindowBase::Reparent(newParent);
+    bool changed = wxScrolledCanvas::Reparent(newParent);
     if ( changed )
     {
         wxAccessible::NotifyEvent(wxACC_EVENT_OBJECT_PARENTCHANGE, this, wxOBJID_CLIENT, wxACC_SELF);

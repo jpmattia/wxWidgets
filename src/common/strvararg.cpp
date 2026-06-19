@@ -428,7 +428,7 @@ class wxPrintfFormatConverterWchar : public wxFormatConverterBase<wchar_t>
 {
     virtual void HandleString(CharType WXUNUSED(conv),
                               SizeModifier WXUNUSED(size),
-                              CharType& outConv, SizeModifier& outSize)
+                              CharType& outConv, SizeModifier& outSize) override
     {
         outConv = 's';
         outSize = Size_Default;
@@ -436,7 +436,7 @@ class wxPrintfFormatConverterWchar : public wxFormatConverterBase<wchar_t>
 
     virtual void HandleChar(CharType WXUNUSED(conv),
                             SizeModifier WXUNUSED(size),
-                            CharType& outConv, SizeModifier& outSize)
+                            CharType& outConv, SizeModifier& outSize) override
     {
         outConv = 'c';
         outSize = Size_Default;
@@ -478,7 +478,14 @@ class wxPrintfFormatConverterUtf8 : public wxFormatConverterBase<char>
                               CharType& outConv, SizeModifier& outSize) override
     {
         outConv = 's';
+#if wxUSE_WXVSNPRINTFA
+        // When using wx's own vsnprintf implementation, plain %s is
+        // interpreted as wchar_t*. We need %hs to indicate char* args,
+        // which is what we actually pass in UTF-8 builds.
+        outSize = Size_Short;
+#else
         outSize = Size_Default;
+#endif
     }
 
     virtual void HandleChar(CharType WXUNUSED(conv),
@@ -669,10 +676,8 @@ wxFormatString::ArgumentType ArgTypeFromParamType(wxPrintfArgType type)
             return wxFormatString::Arg_Int;
         case wxPAT_LONGINT:
             return wxFormatString::Arg_LongInt;
-#ifdef wxLongLong_t
         case wxPAT_LONGLONGINT:
             return wxFormatString::Arg_LongLongInt;
-#endif
         case wxPAT_SIZET:
             return wxFormatString::Arg_Size_t;
 

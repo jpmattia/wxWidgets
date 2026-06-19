@@ -379,6 +379,11 @@ public:
                                     WXWPARAM wParam,
                                     WXLPARAM lParam) override;
 
+    // This function is only used by the implementation and is not part of the
+    // public API.
+    wxItemAttr* MSWGetItemColumnAttr(long item, long column) const
+        { return DoGetItemColumnAttr(item, column); }
+
 protected:
     // common part of all ctors
     void Init();
@@ -396,7 +401,7 @@ protected:
 
     virtual void MSWUpdateFontOnDPIChange(const wxSize& newDPI) override;
 
-    virtual bool MSWGetDarkModeSupport(MSWDarkModeSupport& support) const override;
+    virtual void MSWSetDarkOrLightMode(SetMode setmode) override;
 
     virtual int MSWGetToolTipMessage() const override;
 
@@ -461,8 +466,20 @@ private:
     // Draw the sort arrow in the header.
     void DrawSortArrow();
 
+    void OnSysColourChanged(wxSysColourChangedEvent& event);
+
+    // Set the native control's text and background colours to the
+    // current foreground and background colours.
+    void UpdateNativeColours();
+
     // Object using for header custom drawing if necessary, may be null.
     wxMSWHeaderCtrlCustomDraw* m_headerCustomDraw;
+
+    // Non-zero while we're handling WM_SIZE. This is a counter and not a bool
+    // to account for the possibility of nested WM_SIZE messages, as it looks
+    // like it might happen if a wxEVT_SIZE handler does something that causes
+    // another WM_SIZE to be generated.
+    int m_inResize = 0;
 
 
     wxDECLARE_DYNAMIC_CLASS(wxListCtrl);

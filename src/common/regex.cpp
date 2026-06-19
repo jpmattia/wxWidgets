@@ -1009,35 +1009,7 @@ bool wxRegExImpl::Compile(wxString expr, int flags)
         {
             // we will alloc the array later (only if really needed) but count
             // the number of sub-expressions in the regex right now
-
-            // there is always one for the whole expression
-            m_nMatches = 1;
-
-            // and some more for bracketed subexperessions
-            for ( const wxChar *cptr = expr.c_str(); *cptr; cptr++ )
-            {
-                if ( *cptr == wxT('\\') )
-                {
-                    // in basic RE syntax groups are inside \(...\)
-                    if ( *++cptr == wxT('(') && (flags & wxRE_BASIC) )
-                    {
-                        m_nMatches++;
-                    }
-                }
-                else if ( *cptr == wxT('(') && !(flags & wxRE_BASIC) )
-                {
-                    // we know that the previous character is not an unquoted
-                    // backslash because it would have been eaten above, so we
-                    // have a bare '(' and this indicates a group start for the
-                    // extended syntax. '(?' is used for extensions by perl-
-                    // like REs (e.g. advanced), and is not valid for POSIX
-                    // extended, so ignore them always.
-                    if ( cptr[1] != wxT('?')
-                        && cptr[1] != wxT('*')
-                            )
-                        m_nMatches++;
-                }
-            }
+            m_nMatches = pcre2_get_ovector_count(m_RegEx.match_data);
         }
 
         m_isCompiled = true;
@@ -1185,6 +1157,13 @@ int wxRegExImpl::Replace(wxString *text,
                         wxChar *end;
                         index = (size_t)wxStrtoul(p, &end, 10);
                         p = end - 1; // -1 to compensate for p++ in the loop
+                    }
+                    else if ( !*p )
+                    {
+                        // trailing backslash: keep it verbatim and stop here so
+                        // the loop's p++ doesn't read past the terminating NUL
+                        textNew += wxT('\\');
+                        break;
                     }
                     //else: backslash used as escape character
                 }
@@ -1362,7 +1341,8 @@ wxVersionInfo wxRegEx::GetLibraryVersionInfo()
     wxRegChar buf[64];
     pcre2_config(PCRE2_CONFIG_VERSION, buf);
 
-    return wxVersionInfo("PCRE2", PCRE2_MAJOR, PCRE2_MINOR, 0, buf);
+    return wxVersionInfo("PCRE2", PCRE2_MAJOR, PCRE2_MINOR, 0,
+                         wxString{ "PCRE2 " } + buf);
 }
 
 #endif // wxUSE_REGEX

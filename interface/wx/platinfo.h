@@ -120,8 +120,7 @@ enum wxEndianness
 };
 
 /**
-    A structure containing information about a Linux distribution as returned
-    by the @c lsb_release utility.
+    A structure containing information about a Linux distribution.
 
     See wxGetLinuxDistributionInfo() or wxPlatformInfo::GetLinuxDistributionInfo()
     for more info.
@@ -270,6 +269,11 @@ public:
     /**
         Returns the global wxPlatformInfo object, initialized with the values
         for the currently running platform.
+
+        Note that this function is thread-safe, i.e. it can be called
+        concurrently from multiple threads without locking (unless wxWidgets
+        was compiled without threads support, i.e. with @c wxUSE_THREADS
+        changed to be 0).
     */
     static const wxPlatformInfo& Get();
 

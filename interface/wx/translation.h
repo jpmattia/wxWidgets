@@ -9,23 +9,30 @@
 /**
     This class allows getting translations for strings.
 
-    In wxWidgets this class manages message catalogs which contain the
-    translations of the strings used to the current language. Unlike wxLocale,
-    it isn't bound to locale. It can be used either independently of, or in
-    conjunction with wxLocale. In the latter case, you should initialize
-    wxLocale (which creates wxTranslations instance) first; in the former, you
-    need to create a wxTranslations object and Set() it manually.
-
+    In wxWidgets, this class manages message catalogs which contain the
+    translations of the strings used for the current language.
     Only one wxTranslations instance is active at a time; it is set with the
     Set() method and obtained using Get().
 
-    Unlike wxLocale, wxTranslations' primary mean of identifying language
+    wxTranslations's primary mean of identifying language
     is by its "canonical name", i.e. ISO 639 code, possibly combined with
     ISO 3166 country code and additional modifiers (examples include
     "fr", "en_GB" or "ca@valencia"; see wxLocale::GetCanonicalName() for
-    more information). This allows apps using wxTranslations API to use even
-    languages not recognized by the operating system or not listed in
+    more information). This allows apps using wxTranslations API to use
+    languages not recognized by the operating system or not listed in the
     wxLanguage enum.
+
+    This class works in conjunction with wxUILocale. While calling
+    wxUILocale::UseDefault() can inform the program of how to format numbers and
+    such (see wxNumberFormatter), wxTranslations offers the ability to load
+    translations separate from the locale. In other words, the program
+    can respect the user's regional formatting while providing them a choice
+    different display languages.
+
+    Note that this class is used by wxLocale internally; the use
+    of wxLocale is, however, no longer recommended. Rather, it is recommended
+    to use wxTranslations and wxUILocale together for managing translations
+    and regional settings.
 
     @since 2.9.1
 
@@ -97,7 +104,7 @@ public:
     /**
         Returns the best available translation for the required language.
 
-        For wxLANGUAGE_DEFAULT, this function returns the available translation
+        For @c wxLANGUAGE_DEFAULT, this function returns the available translation
         best matching one of wxUILocale::GetPreferredUILanguages(). Otherwise
         it simply returns the language set with SetLanguage() if it's available
         or empty string otherwise.
@@ -152,9 +159,17 @@ public:
         Add standard wxWidgets catalogs ("wxstd" and possible port-specific
         catalogs).
 
-        @return @true if a suitable catalog was found, @false otherwise
+        @return @true if a suitable catalog was found, @false otherwise.
 
         @see AddAvailableCatalog()
+
+        @note
+        For client systems that may not have wxWidget message catalogs installed
+        (e.g., Windows), be sure to include your own copy of various "wxstd.mo"
+        files with your distributions. For example, you can do the following for Spanish:
+        - compile "locale/es.po" into a *.mo file
+        - rename it "wxstd.mo"
+        - include it with your program in a folder named "es"
      */
     bool AddStdCatalog();
 
@@ -465,8 +480,10 @@ public:
 ///@{
 
 /**
-    This macro is identical to _() but for the plural variant of
+    This macro is similar to _() but for the plural variant of
     wxGetTranslation().
+
+    The string arguments must be @em string @em literals.
 
     @return A const wxString.
 
@@ -479,6 +496,8 @@ public:
 
     See the description of @c context argument of wxGetTranslation().
 
+    The arguments must be @em string @em literals.
+
     @see wxGETTEXT_IN_CONTEXT_PLURAL()
 
     @since 3.1.1
@@ -487,6 +506,8 @@ public:
 
 /**
     Similar to wxPLURAL() but translates the string in the given context.
+
+    The string arguments must be @em string @em literals.
 
     See the description of @c context argument of wxGetTranslation().
 
@@ -567,7 +588,8 @@ public:
     If @a domain is specified then only that domain/catalog is searched for a
     matching string.  As this function is used very often, an alternative (and
     also common in Unix world) syntax is provided: the _() macro is defined to
-    do the same thing as wxGetTranslation().
+    do nearly the same thing as wxGetTranslation(), with the exception that
+    the argument to _() must be a string literal.
 
     If @a context is not empty (notice that this argument is only available
     starting from wxWidgets 3.1.1), item translation is looked up in the
@@ -581,12 +603,12 @@ public:
 
     This function is thread-safe.
 
-    @note This function is not suitable for literal strings using wxT() macro
-          since this macro is not recognised by @c xgettext, and so such
-          strings are not extracted to the message catalog. Instead, use the
-          _() and wxPLURAL() macro for all literal strings.
+    @note If you want literal strings inside of this function to be translated,
+          you need to use `-kwxGetTranslation` with @c xgettext.
+          Also, don't use wxT() inside of this function with string literals,
+          as @c xgettext won't be able to extract them.
 
-    @see wxGetTranslation(const wxString&, const wxString&, unsigned, const wxString&)
+    @see wxGetTranslation(const wxString&, const wxString&, unsigned, const wxString&, const wxString&)
 
     @header{wx/intl.h}
 */
@@ -596,12 +618,12 @@ const wxString& wxGetTranslation(const wxString& string,
 
 /**
     This is an overloaded version of
-    wxGetTranslation(const wxString&, const wxString&), please see its
+    wxGetTranslation(const wxString&, const wxString&, const wxString&), please see its
     documentation for general information.
 
     This version is used when retrieving translation of string that has
     different singular and plural forms in English or different plural forms in
-    some other language. Like wxGetTranslation(const wxString&,const wxString&),
+    some other language. Like wxGetTranslation(const wxString&,const wxString&, const wxString&),
     the @a string parameter must contain the singular form of the string to be
     converted and is used as the key for the search in the catalog. The
     @a plural parameter is the plural form (in English). The parameter @a n is
@@ -633,7 +655,7 @@ const wxString& wxGetTranslation(const wxString& string,
 
     @header{wx/intl.h}
 */
-const wxString& _(const wxString& string);
+#define _(string)
 
 ///@}
 

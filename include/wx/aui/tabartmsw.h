@@ -10,6 +10,10 @@
 #ifndef _WX_AUI_TABARTMSW_H_
 #define _WX_AUI_TABARTMSW_H_
 
+#include "wx/aui/tabart.h"
+
+#if wxUSE_AUI
+
 class WXDLLIMPEXP_AUI wxAuiMSWTabArt : public wxAuiGenericTabArt
 {
 
@@ -18,7 +22,7 @@ public:
     wxAuiMSWTabArt();
     virtual ~wxAuiMSWTabArt();
 
-    wxAuiTabArt* Clone() override;
+    wxNODISCARD wxAuiTabArt* Clone() override;
 
     void DrawBorder(
         wxDC& dc,
@@ -30,14 +34,10 @@ public:
         wxWindow* wnd,
         const wxRect& rect) override;
 
-    void DrawTab(wxDC& dc,
+    int DrawPageTab(wxDC& dc,
         wxWindow* wnd,
-        const wxAuiNotebookPage& pane,
-        const wxRect& inRect,
-        int closeButtonState,
-        wxRect* outTabRect,
-        wxRect* outButtonRect,
-        int* xExtent) override;
+        wxAuiNotebookPage& page,
+        const wxRect& rect) override;
 
     void DrawButton(
         wxDC& dc,
@@ -56,13 +56,10 @@ public:
     int GetAdditionalBorderSpace(
         wxWindow* wnd) override;
 
-    wxSize GetTabSize(
+    wxSize GetPageTabSize(
         wxReadOnlyDC& dc,
         wxWindow* wnd,
-        const wxString& caption,
-        const wxBitmapBundle& bitmap,
-        bool active,
-        int closeButtonState,
+        const wxAuiNotebookPage& page,
         int* xExtent) override;
 
     int ShowDropDown(
@@ -86,5 +83,7 @@ private:
 
     bool IsThemed() const;
 };
+
+#endif // wxUSE_AUI
 
 #endif // _WX_AUI_TABARTMSW_H_

@@ -18,7 +18,9 @@
 #include "wx/qt/private/utils.h"
 #include "wx/qt/private/winevent.h"
 
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QStyle>
 
 wxButton::wxButton(wxWindow *parent, wxWindowID id,
        const wxString& label,
@@ -38,7 +40,11 @@ bool wxButton::Create(wxWindow *parent, wxWindowID id,
        const wxString& name )
 {
     QtCreate(parent);
-    SetLabel( label.IsEmpty() && wxIsStockID( id ) ? wxGetStockLabel( id ) : label );
+
+    if ( !(style & wxBU_NOTEXT) )
+    {
+        SetLabel( label.IsEmpty() && wxIsStockID( id ) ? wxGetStockLabel( id ) : label );
+    }
 
     return wxButtonBase::Create( parent, id, pos, size, style, validator, name );
 }
@@ -51,6 +57,30 @@ wxWindow *wxButton::SetDefault()
 
     return oldDefault;
 
+}
+
+// ----------------------------------------------------------------------------
+// authentication needed handling
+// ----------------------------------------------------------------------------
+
+bool wxButton::DoGetAuthNeeded() const
+{
+    return m_authNeeded;
+}
+
+void wxButton::DoSetAuthNeeded(bool show)
+{
+    QIcon icon;
+
+    if ( show )
+    {
+        icon = QApplication::style()->standardIcon(QStyle::SP_VistaShield);
+    }
+
+    m_authNeeded = !icon.isNull();
+
+    GetQPushButton()->setIcon(icon);
+    InvalidateBestSize();
 }
 
 /* static */

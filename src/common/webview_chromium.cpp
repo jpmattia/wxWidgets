@@ -13,11 +13,13 @@
 #include "wx/eventfilter.h"
 #include "wx/filename.h"
 #include "wx/filesys.h"
+#include "wx/mstream.h"
 #include "wx/rtti.h"
 #include "wx/stdpaths.h"
 #include "wx/app.h"
 #include "wx/base64.h"
 #include "wx/module.h"
+#include "wx/link.h"
 
 #include "wx/private/init.h"
 #ifdef __WXMSW__
@@ -29,6 +31,10 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 #endif
+
+#include <future>
+#include <map>
+#include <vector>
 
 // With MSVC we are always using debug CEF build in debug wx builds (i.e. when
 // _DEBUG is defined), as otherwise we'd be using incompatible variants of CRT.
@@ -90,8 +96,6 @@ constexpr const char* TRACE_CEF = "cef";
 #define TRACE_CEF_FUNCTION() wxLogTrace(TRACE_CEF, "%s called", __func__)
 
 } // anonymous namespace
-
-extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendChromium[] = "wxWebViewChromium";
 
 bool wxWebViewChromium::ms_cefInitialized = false;
 
@@ -204,7 +208,7 @@ void AppImplData::StartThreadDispatch(GMainContext* threadContext)
     m_wakeupSource = g_source_new(&wakeupSourceVtbl, sizeof(GSource));
 
     // Note that we need to attach it to the main context, not the thread one
-    // (otherwise this source itself would be never used neither).
+    // (otherwise this source itself would be never used either).
     g_source_attach(m_wakeupSource, nullptr /* main context */);
 }
 
@@ -518,10 +522,64 @@ private:
     IMPLEMENT_REFCOUNTING(ClientHandler);
 };
 
+class wxWebViewChromiumHandlerRequest : public wxWebViewHandlerRequest
+{
+public:
+    wxWebViewChromiumHandlerRequest(CefRefPtr<CefRequest> request) : m_request(request)
+    {
+        SetData(m_request->GetPostData());
+    }
+    virtual ~wxWebViewChromiumHandlerRequest() = default;
+    virtual wxString GetRawURI() const override;
+    virtual wxInputStream* GetData() const override;
+    virtual wxString GetMethod() const override;
+    virtual wxString GetHeader(const wxString& name) const override;
+private:
+    void SetData(CefRefPtr<CefPostData> postData);
+    CefRefPtr<CefRequest> m_request;
+    std::vector<uint8_t> m_buffer;
+    wxSharedPtr<wxInputStream> m_data;
+};
+
+class wxWebViewChromiumHandlerResponse : public wxWebViewHandlerResponse
+{
+public:
+    wxWebViewChromiumHandlerResponse(CefRefPtr<CefCallback> callback) : m_callback(callback), m_status(200)
+    {
+        m_futureResult = m_promiseResult.get_future();
+    }
+    virtual ~wxWebViewChromiumHandlerResponse() = default;
+    virtual void SetStatus(int status) override;
+    virtual void SetContentType(const wxString& contentType) override;
+    virtual void SetHeader(const wxString& name, const wxString& value) override;
+    virtual void Finish(wxSharedPtr<wxWebViewHandlerResponseData> data) override;
+    virtual void FinishWithError() override;
+
+    bool GetResult();
+
+    int GetStatus() const;
+    const wxString& GetContentType() const;
+    wxInputStream *GetData() const;
+    int64_t GetLength() const;
+
+    void CopyHeaders(CefRefPtr<CefResponse> response) const;
+
+private:
+    CefRefPtr<CefCallback> m_callback;
+    // Used to store result of StartRequest if finished asynchronously
+    std::promise<bool> m_promiseResult;
+    // Used to retrieve result of StartRequest if finished asynchronously
+    std::future<bool> m_futureResult;
+    int m_status;
+    wxString m_contentType;
+    std::map<wxString, wxString> m_headers;
+    wxSharedPtr<wxWebViewHandlerResponseData> m_data;
+};
+
 class SchemeHandler : public CefResourceHandler
 {
 public:
-    SchemeHandler(const wxSharedPtr<wxWebViewHandler>& handler) : m_handler(handler), m_offset(0) {}
+    SchemeHandler(const wxSharedPtr<wxWebViewHandler>& handler) : m_handler(handler) {}
 
     // CefResourceHandler methods
     virtual bool ProcessRequest(CefRefPtr<CefRequest> request,
@@ -536,10 +594,16 @@ public:
     virtual void Cancel() override {}
 
 private:
+    wxWebViewChromiumHandlerResponse *GetHandlerResponse();
+
     wxSharedPtr<wxWebViewHandler> m_handler;
+
+    // This is passed to StartRequest(), so must be of this type, even though
+    // the stored object is always a derived wxWebViewChromiumHandlerResponse.
+    wxSharedPtr<wxWebViewHandlerResponse> m_handlerResponse;
+
     std::string m_data;
     std::string m_mime_type;
-    size_t m_offset;
 
     IMPLEMENT_REFCOUNTING(SchemeHandler);
     base::Lock m_lock;
@@ -656,9 +720,22 @@ private:
 class wxCefBrowserApp : public CefApp
 {
 public:
-    wxCefBrowserApp()
-        : m_browserProcessHandler(new wxBrowserProcessHandler{})
+    explicit wxCefBrowserApp(bool disableFileAccess)
+        : m_browserProcessHandler(new wxBrowserProcessHandler{}),
+          m_disableFileAccess(disableFileAccess)
     {
+    }
+
+    // Allow browser to load local files.
+    void
+    OnBeforeCommandLineProcessing(const CefString &process_type,
+                                  CefRefPtr<CefCommandLine> command_line) override
+    {
+        if ( process_type.empty() && !m_disableFileAccess )
+        {
+            command_line->AppendSwitch("allow-file-access-from-files");
+            command_line->AppendSwitch("allow-universal-access-from-files");
+        }
     }
 
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override
@@ -668,6 +745,7 @@ public:
 
 private:
     CefRefPtr<CefBrowserProcessHandler> m_browserProcessHandler;
+    bool m_disableFileAccess;
 
     IMPLEMENT_REFCOUNTING(wxCefBrowserApp);
 };
@@ -729,10 +807,6 @@ bool wxWebViewChromium::Create(wxWindow* parent,
     }
     if ( !InitCEF(m_implData->m_config) )
         return false;
-
-#ifdef __WXMSW__
-    MSWDisableComposited();
-#endif // __WXMSW__
 
     m_clientHandler = new ClientHandler{*this};
     m_clientHandler->AddRef();
@@ -986,7 +1060,7 @@ bool CheckCEFLoadOrder()
             if ( foundLibc )
             {
                 wxLogError(
-                    _("Chromium can't be used because libcef.so was't "
+                    _("Chromium can't be used because libcef.so wasn't "
                       "loaded early enough; please relink the application "
                       "or use LD_PRELOAD to load it earlier.")
                 );
@@ -1102,7 +1176,8 @@ bool wxWebViewChromium::InitCEF(const wxWebViewConfiguration& config)
     CefMainArgs args(app->argc, app->argv);
 #endif
 
-    CefRefPtr<CefApp> cefApp{new wxCefBrowserApp{}};
+    CefRefPtr<CefApp> cefApp{new wxCefBrowserApp(
+        configChrome->m_disableFileAccess)};
     if ( !CefInitialize(args, settings, cefApp, nullptr) )
     {
         wxLogError(_("Could not initialize Chromium"));
@@ -1165,7 +1240,7 @@ void* wxWebViewChromium::GetNativeBackend() const
 bool wxWebViewChromium::CanGoForward() const
 {
     if ( m_historyEnabled )
-        return m_historyPosition != static_cast<int>(m_historyList.size()) - 1;
+        return m_historyPosition != wxSsize(m_historyList) - 1;
     else
         return false;
 }
@@ -1187,8 +1262,7 @@ void wxWebViewChromium::LoadHistoryItem(wxSharedPtr<wxWebViewHistoryItem> item)
         if(m_historyList[i].get() == item.get())
             pos = i;
     }
-    wxASSERT_MSG(pos != static_cast<int>(m_historyList.size()),
-                 "invalid history item");
+    wxASSERT_MSG(pos != wxSsize(m_historyList), "invalid history item");
     m_historyLoadingFromList = true;
     LoadURL(item->GetUrl());
     m_historyPosition = pos;
@@ -1211,7 +1285,7 @@ wxVector<wxSharedPtr<wxWebViewHistoryItem> > wxWebViewChromium::GetForwardHistor
     wxVector<wxSharedPtr<wxWebViewHistoryItem> > forwardhist;
     //As we don't have std::copy or an iterator constructor in the wxwidgets
     //native vector we construct it by hand
-    for ( int i = m_historyPosition + 1; i < static_cast<int>(m_historyList.size()); i++ )
+    for ( int i = m_historyPosition + 1; i < wxSsize(m_historyList); i++ )
     {
         forwardhist.push_back(m_historyList[i]);
     }
@@ -1503,7 +1577,8 @@ bool wxWebViewChromium::CanSetZoomType(wxWebViewZoomType type) const
 
 void wxWebViewChromium::RegisterHandler(wxSharedPtr<wxWebViewHandler> handler)
 {
-    CefRegisterSchemeHandlerFactory( handler->GetName().ToStdWstring(), "",
+    CefRegisterSchemeHandlerFactory( handler->GetName().ToStdWstring(),
+                                     handler->GetVirtualHost().ToStdWstring(),
                                      new SchemeHandlerFactory(handler) );
 }
 
@@ -1779,7 +1854,7 @@ void ClientHandler::OnLoadEnd(CefRefPtr<CefBrowser> WXUNUSED(browser),
         {
             //If we are not at the end of the list, then erase everything
             //between us and the end before adding the new page
-            if ( m_webview.m_historyPosition != static_cast<int>(m_webview.m_historyList.size()) - 1 )
+            if ( m_webview.m_historyPosition != wxSsize(m_webview.m_historyList) - 1 )
             {
                 m_webview.m_historyList.erase(m_webview.m_historyList.begin() + m_webview.m_historyPosition + 1,
                                               m_webview.m_historyList.end());
@@ -1891,48 +1966,158 @@ void ClientHandler::CloseDevTools(CefRefPtr<CefBrowser> browser)
     browser->GetHost()->CloseDevTools();
 }
 
+wxString wxWebViewChromiumHandlerRequest::GetRawURI() const
+{
+    return m_request->GetURL().ToString();
+}
+
+wxInputStream* wxWebViewChromiumHandlerRequest::GetData() const
+{
+    return m_data.get();
+}
+
+wxString wxWebViewChromiumHandlerRequest::GetMethod() const
+{
+    return m_request->GetMethod().ToString();
+}
+
+wxString wxWebViewChromiumHandlerRequest::GetHeader(const wxString& name) const
+{
+    CefString value = m_request->GetHeaderByName(name.ToStdString());
+    return value.ToString();
+}
+
+void wxWebViewChromiumHandlerRequest::SetData(CefRefPtr<CefPostData> data)
+{
+    if ( data )
+    {
+        CefPostData::ElementVector elements;
+        int offset = 0;
+        int read_size = 0;
+        int size = 0;
+
+        m_buffer.clear();
+        data->GetElements(elements);
+        for ( const auto& element : elements )
+        {
+            if ( element->GetType() == PDE_TYPE_BYTES )
+            {
+                read_size = element->GetBytesCount();
+                size += read_size;
+                m_buffer.resize(size);
+                element->GetBytes(read_size, m_buffer.data() + offset);
+            }
+        }
+        m_data.reset(new wxMemoryInputStream(m_buffer.data(), m_buffer.size()));
+    }
+    else
+    {
+        m_data.reset();
+    }
+}
+
+void wxWebViewChromiumHandlerResponse::SetStatus(int status)
+{
+    m_status = status;
+}
+
+void wxWebViewChromiumHandlerResponse::SetContentType(const wxString& contentType)
+{
+    m_contentType = contentType;
+}
+
+void wxWebViewChromiumHandlerResponse::SetHeader(const wxString& name,
+                                               const wxString& value)
+{
+    m_headers[name] = value;
+}
+
+void wxWebViewChromiumHandlerResponse::Finish(wxSharedPtr<wxWebViewHandlerResponseData> data)
+{
+    m_data = data;
+    m_callback->Continue();
+    m_promiseResult.set_value(true);
+}
+
+void wxWebViewChromiumHandlerResponse::FinishWithError()
+{
+    m_promiseResult.set_value(false);
+}
+
+bool wxWebViewChromiumHandlerResponse::GetResult()
+{
+    return m_futureResult.get();
+}
+
+int wxWebViewChromiumHandlerResponse::GetStatus() const
+{
+    return m_status;
+}
+
+const wxString& wxWebViewChromiumHandlerResponse::GetContentType() const
+{
+    return m_contentType;
+}
+
+wxInputStream* wxWebViewChromiumHandlerResponse::GetData() const
+{
+    wxInputStream* stream = nullptr;
+    if ( m_data )
+    {
+        stream = m_data->GetStream();
+    }
+    return stream;
+}
+
+int64_t wxWebViewChromiumHandlerResponse::GetLength() const
+{
+    int64_t length = -1;
+    wxInputStream* stream = GetData();
+    wxFileOffset size = 0;
+    if ( stream )
+    {
+        size = stream->GetLength();
+        if ( size != wxInvalidOffset )
+        {
+            length = static_cast<int64_t>(size);
+        }
+    }
+    return length;
+}
+
+void wxWebViewChromiumHandlerResponse::CopyHeaders(CefRefPtr<CefResponse> response) const
+{
+    for ( const auto& header : m_headers )
+    {
+        response->SetHeaderByName(header.first.utf8_string(), header.second.utf8_string(), true);
+    }
+}
+
 bool SchemeHandler::ProcessRequest(CefRefPtr<CefRequest> request,
                                    CefRefPtr<CefCallback> callback)
 {
-    bool handled = false;
-
     base::AutoLock lock_scope(m_lock);
+    wxWebViewChromiumHandlerRequest req(request);
 
-    std::string url = request->GetURL();
-    wxFSFile* file = m_handler->GetFile( url );
-
-    if ( file )
-    {
-        m_mime_type = (file->GetMimeType()).ToStdString();
-
-        size_t size = file->GetStream()->GetLength();
-        char* buf = new char[size];
-        file->GetStream()->Read( buf, size );
-        m_data = std::string( buf, buf+size );
-
-        delete[] buf;
-        handled = true;
-    }
-
-    if ( handled )
-    {
-        // Indicate the headers are available.
-        callback->Continue();
-        return true;
-    }
-    return false;
+    m_handlerResponse.reset(new wxWebViewChromiumHandlerResponse(callback));
+    m_handler->StartRequest(req, m_handlerResponse);
+    return GetHandlerResponse()->GetResult();
 }
 
 void SchemeHandler::GetResponseHeaders(CefRefPtr<CefResponse> response,
                                        int64_t& response_length,
                                        CefString& WXUNUSED(redirectUrl))
 {
-    if ( !m_mime_type.empty() )
-        response->SetMimeType( m_mime_type );
-    response->SetStatus( 200 );
-
+    wxWebViewChromiumHandlerResponse* handlerResponse = GetHandlerResponse();
+    const wxString& mimeType = handlerResponse->GetContentType();
+    if ( !mimeType.empty() )
+    {
+        response->SetMimeType(mimeType.ToStdString());
+    }
+    response->SetStatus( handlerResponse->GetStatus() );
+    handlerResponse->CopyHeaders(response);
     // Set the resulting response length
-    response_length = m_data.length();
+    response_length = handlerResponse->GetLength();
 }
 
 bool SchemeHandler::ReadResponse(void* data_out,
@@ -1940,24 +2125,26 @@ bool SchemeHandler::ReadResponse(void* data_out,
                                  int& bytes_read,
                                  CefRefPtr<CefCallback> WXUNUSED(callback))
 {
-    bool has_data = false;
     bytes_read = 0;
 
     base::AutoLock lock_scope(m_lock);
 
-    if ( m_offset < m_data.length() )
-    {
-        // Copy the next block of data into the buffer.
-        int transfer_size =
-            std::min( bytes_to_read, static_cast<int>( m_data.length() - m_offset ) );
-        memcpy( data_out, m_data.c_str() + m_offset, transfer_size );
-        m_offset += transfer_size;
+    wxWebViewChromiumHandlerResponse* handlerResponse = GetHandlerResponse();
+    wxInputStream* stream = handlerResponse->GetData();
 
-        bytes_read = transfer_size;
-        has_data = true;
+    if ( stream->CanRead() )
+    {
+        stream->Read(data_out, bytes_to_read);
+        bytes_read += stream->LastRead();
     }
 
-    return has_data;
+    return bytes_read > 0;
+}
+
+wxWebViewChromiumHandlerResponse *SchemeHandler::GetHandlerResponse()
+{
+    // The cast is always safe, see comment in m_handlerResponse declaration.
+    return static_cast<wxWebViewChromiumHandlerResponse*>(m_handlerResponse.get());
 }
 
 namespace
@@ -2116,6 +2303,10 @@ private:
 };
 
 wxIMPLEMENT_DYNAMIC_CLASS(wxWebViewChromiumModule, wxModule);
+
+// Allow the user code to use wxFORCE_LINK_MODULE() to ensure that this object
+// file is not discarded by the linker.
+wxFORCE_LINK_THIS_MODULE(WebViewChromium)
 
 // ----------------------------------------------------------------------------
 // wxWebViewChromiumEvent

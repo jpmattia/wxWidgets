@@ -96,14 +96,26 @@ TEST_CASE("StringFormat", "[wxString]")
 
 TEST_CASE("StringFormatUnicode", "[wxString]")
 {
+    // For some completely mysterious reason, the test below sometimes crashes
+    // when run on GitHub Actions with MSVS 2019 in static debug build (see
+    // #25056), so skip it in this case.
+#if defined(_MSC_VER) && defined(_DEBUG) && !defined(WXUSINGDLL)
+    #if _MSC_VER >= 1920 && _MSC_VER < 1930
+        if ( IsAutomaticTest() )
+        {
+            WARN("Skipping test in static debug build with MSVS 2019");
+            return;
+        }
+    #endif // MSVS 2019
+#endif // _MSC_VER
+
+#ifndef __WINDOWS__
     // At least under FreeBSD vsnprintf(), used by wxString::Format(), doesn't
     // work with Unicode strings unless a UTF-8 locale is used, so set it.
     wxLocaleSetter loc("C.UTF-8");
+#endif // !__WINDOWS__
 
-    const char *UNICODE_STR = "Iestat\xC4\xAB %i%i";
-    //const char *UNICODE_STR = "Iestat\xCC\x84 %i%i";
-
-    wxString fmt = wxString::FromUTF8(UNICODE_STR);
+    wxString fmt = wxString::FromUTF8("Iestatī");
     wxString s = wxString::Format(fmt, 1, 1);
     wxString expected(fmt);
     expected.Replace("%i", "1");
@@ -180,6 +192,22 @@ TEST_CASE("StringStaticConstructors", "[wxString]")
     //CHECK( wxString::FromUTF8("", 1).length() == 1 );
 }
 
+TEST_CASE("StringAssignUTF8", "[wxString]")
+{
+    wxString s;
+    s.AssignFromUTF8("Oberfläche");
+    CHECK( s == wxString::FromUTF8("Oberfläche") );
+
+    s.AssignFromUTF8("fläche");
+    CHECK( s == wxString::FromUTF8("fläche") );
+
+    s.AssignFromUTF8("Even longer than Oberfläche");
+    CHECK( s == wxString::FromUTF8("Even longer than Oberfläche") );
+
+    s.AssignFromUTF8(nullptr);
+    CHECK( s == wxString() );
+}
+
 TEST_CASE("StringExtraction", "[wxString]")
 {
     wxString s(wxT("Hello, world!"));
@@ -192,8 +220,7 @@ TEST_CASE("StringExtraction", "[wxString]")
     CHECK( wxStrcmp( s.substr(3, 5).c_str() , wxT("lo, w") ) == 0 );
     CHECK( wxStrcmp( s.substr(3).c_str() , wxT("lo, world!") ) == 0 );
 
-    static const char *germanUTF8 = "Oberfl\303\244che";
-    wxString strUnicode(wxString::FromUTF8(germanUTF8));
+    wxString strUnicode(wxString::FromUTF8("Oberfläche"));
 
     CHECK( strUnicode.Mid(0, 10) == strUnicode );
     CHECK( strUnicode.Mid(7, 2) == "ch" );
@@ -426,6 +453,21 @@ TEST_CASE("StringCompare", "[wxString]")
     CHECK( wxString("!").Cmp("z") < 0 );
 }
 
+#ifdef __cpp_lib_three_way_comparison
+TEST_CASE("StringCompareThreeWay", "[wxString]")
+{
+    // test that operator<=> works and compares by string contents
+
+    wxString a(wxT("bar"));
+    wxString b(wxT("bar"));
+    wxString c(wxT("baz"));
+
+    CHECK((a <=> b) == std::strong_ordering::equal);
+    CHECK((a <=> c) == std::strong_ordering::less);
+    CHECK((c <=> a) == std::strong_ordering::greater);
+}
+#endif // __cpp_lib_three_way_comparison
+
 TEST_CASE("StringCompareNoCase", "[wxString]")
 {
     wxString s1 = wxT("AHH");
@@ -516,18 +558,12 @@ enum
     Number_Int      = 32    // only for int tests
 };
 
-#ifdef wxLongLong_t
-typedef wxLongLong_t TestValue_t;
-#else
-typedef long TestValue_t;
-#endif
-
 wxGCC_WARNING_SUPPRESS(missing-field-initializers)
 
 static const struct ToIntData
 {
     const wxChar *str;
-    TestValue_t value;
+    wxLongLong_t value;
     int flags;
     int base;
 
@@ -544,31 +580,29 @@ static const struct ToIntData
     { wxT("--1"), 0, Number_Invalid },
 
     { wxT("-1"), -1, Number_Signed | Number_Int },
-    { wxT("-1"), (TestValue_t)UINT_MAX, Number_Unsigned | Number_Int | Number_Invalid },
+    { wxT("-1"), (wxLongLong_t)UINT_MAX, Number_Unsigned | Number_Int | Number_Invalid },
 
-    { wxT("2147483647"), (TestValue_t)INT_MAX, Number_Int | Number_Signed },
-    { wxT("2147483648"), (TestValue_t)INT_MAX, Number_Int | Number_Signed | Number_Invalid },
+    { wxT("2147483647"), (wxLongLong_t)INT_MAX, Number_Int | Number_Signed },
+    { wxT("2147483648"), (wxLongLong_t)INT_MAX, Number_Int | Number_Signed | Number_Invalid },
 
-    { wxT("-2147483648"), (TestValue_t)INT_MIN, Number_Int | Number_Signed },
-    { wxT("-2147483649"), (TestValue_t)INT_MIN, Number_Int | Number_Signed | Number_Invalid },
+    { wxT("-2147483648"), (wxLongLong_t)INT_MIN, Number_Int | Number_Signed },
+    { wxT("-2147483649"), (wxLongLong_t)INT_MIN, Number_Int | Number_Signed | Number_Invalid },
 
-    { wxT("4294967295"), (TestValue_t)UINT_MAX, Number_Int | Number_Unsigned },
-    { wxT("4294967296"), (TestValue_t)UINT_MAX, Number_Int | Number_Unsigned | Number_Invalid },
+    { wxT("4294967295"), (wxLongLong_t)UINT_MAX, Number_Int | Number_Unsigned },
+    { wxT("4294967296"), (wxLongLong_t)UINT_MAX, Number_Int | Number_Unsigned | Number_Invalid },
 };
 
 static const struct ToLongData
 {
     const wxChar *str;
-    TestValue_t value;
+    wxLongLong_t value;
     int flags;
     int base;
 
     long LValue() const { return value; }
     unsigned long ULValue() const { return value; }
-#ifdef wxLongLong_t
     wxLongLong_t LLValue() const { return value; }
     wxULongLong_t ULLValue() const { return (wxULongLong_t)value; }
-#endif // wxLongLong_t
 
     bool IsOk() const { return !(flags & Number_Invalid); }
 } longData[] =
@@ -581,21 +615,19 @@ static const struct ToLongData
 
     { wxT("-1"), -1, Number_Signed | Number_Long },
     // this is surprising but consistent with strtoul() behaviour
-    { wxT("-1"), (TestValue_t)ULONG_MAX, Number_Unsigned | Number_Long },
+    { wxT("-1"), (wxLongLong_t)ULONG_MAX, Number_Unsigned | Number_Long },
     // a couple of edge cases
     { wxT(" +1"), 1, Number_Ok },
-    { wxT(" -1"), (TestValue_t)ULONG_MAX, Number_Unsigned | Number_Long },
+    { wxT(" -1"), (wxLongLong_t)ULONG_MAX, Number_Unsigned | Number_Long },
 
     // this must overflow, even with 64 bit long
     { wxT("922337203685477580711"), 0, Number_Invalid },
 
-#ifdef wxLongLong_t
     { wxT("2147483648"), wxLL(2147483648), Number_LongLong },
     { wxT("-2147483648"), wxLL(-2147483648), Number_LongLong | Number_Signed },
     { wxT("9223372036854775808"),
-      TestValue_t(wxULL(9223372036854775808)),
+      (wxLongLong_t)wxULL(9223372036854775808),
       Number_LongLong | Number_Unsigned },
-#endif // wxLongLong_t
 
     // Base tests.
     { wxT("010"),  10, Number_Ok, 10 },
@@ -621,7 +653,7 @@ static const struct ToLongData
 #else
     #error "Unknown sizeof(long)"
 #endif
-      (TestValue_t)ULONG_MAX, Number_Unsigned, 0
+      (wxLongLong_t)ULONG_MAX, Number_Unsigned, 0
     },
 };
 
@@ -748,8 +780,6 @@ TEST_CASE("StringToULong", "[wxString]")
     }
 }
 
-#ifdef wxLongLong_t
-
 TEST_CASE("StringToLongLong", "[wxString]")
 {
     wxLongLong_t l;
@@ -781,8 +811,6 @@ TEST_CASE("StringToULongLong", "[wxString]")
             CHECK( ul == ld.ULLValue() );
     }
 }
-
-#endif // wxLongLong_t
 
 TEST_CASE("StringToDouble", "[wxString]")
 {
@@ -1141,12 +1169,20 @@ TEST_CASE("StringBeforeAndAfter", "[wxString]")
     CHECK( s.BeforeFirst('!', &r) == s );
     CHECK( r == "" );
 
+    const wxString phrase("Two words apart");
+    r = phrase;
+    CHECK( r.BeforeFirst(' ', &r) == "Two" );
+    CHECK( r == "words apart" );
 
     CHECK( s.BeforeLast('=', &r) == FIRST_PART wxT("=") MIDDLE_PART );
     CHECK( r == LAST_PART );
 
     CHECK( s.BeforeLast('!', &r) == "" );
     CHECK( r == s );
+
+    r = phrase;
+    CHECK( r.BeforeLast(' ', &r) == "Two words" );
+    CHECK( r == "apart" );
 
 
     CHECK( s.AfterFirst('=') == MIDDLE_PART wxT("=") LAST_PART );
@@ -1197,6 +1233,9 @@ TEST_CASE("StringScopedBuffers", "[wxString]")
     wxCharBuffer buf5(5);
     buf5.extend(len);
     CHECK( buf5.data()[len] == '\0' );
+
+    const char buf8[8] = { };
+    CHECK( wxCharTypeBuffer<char>(buf8, sizeof(buf8)).length() == 8 );
 }
 
 TEST_CASE("StringSupplementaryUniChar", "[wxString]")

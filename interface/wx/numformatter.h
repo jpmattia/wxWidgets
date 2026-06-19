@@ -37,6 +37,8 @@ public:
         /**
             If this flag is given, thousands separators will be inserted in the
             number string representation as defined by the current UI locale.
+            Thousands separators will be applied according to the grouping rules
+            of the current UI locale.
          */
         Style_WithThousandsSep  = 0x01,
 
@@ -53,7 +55,61 @@ public:
             This flag can't be used with ToString() overload taking the integer
             value.
          */
-        Style_NoTrailingZeroes  = 0x02
+        Style_NoTrailingZeroes  = 0x02,
+
+        /**
+            If this flag is given, a + will prefix the
+            number string representation of non-negative numbers.
+
+            This style cannot be used with Style_SignSpace.
+
+            @since 3.3.1
+         */
+        Style_SignPlus          = 0x04,
+
+        /**
+            If this flag is given, a space will prefix the
+            number string representation of non-negative numbers.
+
+            This style cannot be used with Style_SignPlus.
+
+            @since 3.3.1
+         */
+        Style_SignSpace         = 0x08,
+
+        /**
+            If this flag is given, the number will be interpreted
+            as a currency value and formatted according to the rules
+            of the current UI locale.
+
+            @since 3.3.2
+         */
+        Style_Currency          = 0x10,
+
+        /**
+            If this flag is given, the currency symbol of the current
+            UI locale will be prepended or appended to the currency value
+            according to the rules of the current locale.
+
+            The style will only take effect, if it is combined with Style_Currency.
+            The style should not be combined with Style_CurrencyCode.
+
+            @since 3.3.2
+         */
+        Style_CurrencySymbol    = 0x20,     // Currency with currency symbol
+
+        /**
+            If this flag is given, the ISO 42127 currency code of the current
+            UI locale will be prepended to the currency value. It will be separated
+            from the currency value by a space character.
+
+            The style will only take effect, if it is combined with Style_Currency.
+            The style should not be combined with Style_CurrencySymbol.
+
+            @since 3.3.2
+         */
+        Style_CurrencyCode      = 0x40,     // Currency with ISO 4217 code
+
     };
 
     /**
@@ -148,5 +204,34 @@ public:
             function return value is needed.
      */
     static bool GetThousandsSeparatorIfUsed(wxChar *sep);
+
+    /**
+        Remove trailing zeroes and, if there is nothing left after it, the
+        decimal separator itself from a string representing a floating point
+        number.
+
+        @param[in,out] str The string to remove zeroes from.
+
+        @since 3.3.1
+     */
+    static void RemoveTrailingZeroes(wxString& str);
+
+    /**
+        Remove currency symbol or code, and grouping separators,
+        according to the given style flags.
+
+        @note This function allows to remove the currency symbol or code
+            from a string with a formatted currency value, so that
+            FromString() can be used afterwards to retrieve the numerical value.
+            Additionally, grouping separators are removed, if necessary.
+
+        @param[in] str
+            The string to remove the currency symbol or code or grouping separators from.
+        @param flags
+            Combination of values from the Style enumeration.
+
+        @since 3.3.2
+     */
+    static wxString RemoveCurrencySymbolOrCode(wxString str, int flags);
 
 };

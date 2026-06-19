@@ -144,6 +144,15 @@
 #   define wxSUPPRESS_GCC_PRIVATE_DTOR_WARNING(name)
 #endif
 
+/* Enable some warnings not enabled by default if requested. */
+#ifdef wxENABLE_EXTRA_WARNINGS
+#   ifdef __GNUC__
+#       pragma GCC diagnostic warning "-Wcast-qual"
+#       pragma GCC diagnostic warning "-Wdouble-promotion"
+#       pragma GCC diagnostic warning "-Wextra"
+#   endif
+#endif
+
 /*
    Clang Support
  */
@@ -279,6 +288,17 @@ typedef short int WXTYPE;
     #define wxNODISCARD
 #endif
 
+/* wxWARN_UNUSED is used as an attribute to a class, stating that unused instances
+   should be warned about (in case such warnings are enabled in the first place) */
+
+#ifdef __has_attribute /* __has_cpp_attribute(warn_unused) would return false with Clang, */
+    #if __has_attribute(warn_unused) /* so use __has_attribute instead */
+        #define wxWARN_UNUSED __attribute__((warn_unused))
+    #endif
+#endif
+#ifndef wxWARN_UNUSED
+    #define wxWARN_UNUSED
+#endif
 
 /* these macros are obsolete, use the standard C++ casts directly now */
 #define wx_static_cast(t, x) static_cast<t>(x)
@@ -334,6 +354,13 @@ typedef short int WXTYPE;
 
 /* for consistency with wxStatic/DynamicCast defined in wx/object.h */
 #define wxConstCast(obj, className) const_cast<className *>(obj)
+
+/* Poor man's version of C++20 std::ssize(). */
+template <class C>
+int wxSsize(const C& c)
+{
+    return static_cast<int>(c.size());
+}
 
 #endif /* __cplusplus */
 
@@ -468,7 +495,7 @@ typedef short int WXTYPE;
 #   endif
 #endif
 
-#if defined(__GNUC__)
+#if defined(__GNUC__) || defined(__clang__)
     #define WX_ATTRIBUTE_UNUSED __attribute__ ((unused))
 #else
     #define WX_ATTRIBUTE_UNUSED
@@ -967,55 +994,15 @@ typedef double wxFloat64;
 
 typedef double wxDouble;
 
-/*
-    Some (non standard) compilers typedef wchar_t as an existing type instead
-    of treating it as a real fundamental type, set wxWCHAR_T_IS_REAL_TYPE to 0
-    for them and to 1 for all the others.
- */
-#ifndef wxWCHAR_T_IS_REAL_TYPE
-    /*
-        VC++ typedefs wchar_t as unsigned short by default until VC8, that is
-        unless /Za or /Zc:wchar_t option is used in which case _WCHAR_T_DEFINED
-        is defined.
-     */
-#   if defined(__VISUALC__) && !defined(_NATIVE_WCHAR_T_DEFINED)
-#       define wxWCHAR_T_IS_REAL_TYPE 0
-#   else /* compiler having standard-conforming wchar_t */
-#       define wxWCHAR_T_IS_REAL_TYPE 1
-#   endif
-#endif /* !defined(wxWCHAR_T_IS_REAL_TYPE) */
-
-/* Helper macro for doing something dependent on whether wchar_t is or isn't a
-   typedef inside another macro. */
-#if wxWCHAR_T_IS_REAL_TYPE
-    #define wxIF_WCHAR_T_TYPE(x) x
-#else /* !wxWCHAR_T_IS_REAL_TYPE */
-    #define wxIF_WCHAR_T_TYPE(x)
-#endif /* wxWCHAR_T_IS_REAL_TYPE/!wxWCHAR_T_IS_REAL_TYPE */
+/* Macros not used by wx any more but still defined here for compatibility. */
+#define wxWCHAR_T_IS_REAL_TYPE 1
+#define wxIF_WCHAR_T_TYPE(x) x
 
 /*
    Deprecated constant existing only for compatibility, use nullptr directly in
    the new code.
  */
 #define wxNullPtr nullptr
-
-
-/* Define wxChar16 and wxChar32                                              */
-
-#if SIZEOF_WCHAR_T == 2
-    #define wxWCHAR_T_IS_WXCHAR16
-    typedef wchar_t wxChar16;
-#else
-    typedef wxUint16 wxChar16;
-#endif
-
-#if SIZEOF_WCHAR_T == 4
-    #define wxWCHAR_T_IS_WXCHAR32
-    typedef wchar_t wxChar32;
-#else
-    typedef wxUint32 wxChar32;
-#endif
-
 
 /*
     Helper macro expanding into the given "m" macro invoked with each of the
@@ -1031,7 +1018,7 @@ typedef double wxDouble;
     m(unsigned long) \
     wxIF_LONG_LONG_TYPE( m(wxLongLong_t) ) \
     wxIF_LONG_LONG_TYPE( m(wxULongLong_t) ) \
-    wxIF_WCHAR_T_TYPE( m(wchar_t) )
+    m(wchar_t)
 
 /*
     Same as wxDO_FOR_INT_TYPES() but does include char and unsigned char.
@@ -1061,7 +1048,7 @@ typedef double wxDouble;
     m(unsigned long, arg) \
     wxIF_LONG_LONG_TYPE( m(wxLongLong_t, arg) ) \
     wxIF_LONG_LONG_TYPE( m(wxULongLong_t, arg) ) \
-    wxIF_WCHAR_T_TYPE( m(wchar_t, arg) )
+    m(wchar_t, arg)
 
 /*
     Combination of wxDO_FOR_CHAR_INT_TYPES() and wxDO_FOR_INT_TYPES_1():
@@ -1117,51 +1104,27 @@ typedef double wxDouble;
     (((wxUint32) (val) & (wxUint32) 0xff000000U) >> 24)))
 /*  machine specific byte swapping */
 
-#ifdef wxLongLong_t
-    #define wxUINT64_SWAP_ALWAYS(val) \
-       ((wxUint64) ( \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x00000000000000ff)) << 56) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x000000000000ff00)) << 40) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x0000000000ff0000)) << 24) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x00000000ff000000)) <<  8) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x000000ff00000000)) >>  8) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x0000ff0000000000)) >> 24) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x00ff000000000000)) >> 40) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0xff00000000000000)) >> 56)))
+#define wxUINT64_SWAP_ALWAYS(val) \
+   ((wxUint64) ( \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x00000000000000ff)) << 56) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x000000000000ff00)) << 40) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x0000000000ff0000)) << 24) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x00000000ff000000)) <<  8) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x000000ff00000000)) >>  8) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x0000ff0000000000)) >> 24) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x00ff000000000000)) >> 40) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0xff00000000000000)) >> 56)))
 
-    #define wxINT64_SWAP_ALWAYS(val) \
-       ((wxInt64) ( \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x00000000000000ff)) << 56) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x000000000000ff00)) << 40) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x0000000000ff0000)) << 24) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x00000000ff000000)) <<  8) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x000000ff00000000)) >>  8) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x0000ff0000000000)) >> 24) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0x00ff000000000000)) >> 40) | \
-        (((wxUint64) (val) & (wxUint64) wxULL(0xff00000000000000)) >> 56)))
-#elif wxUSE_LONGLONG /*  !wxLongLong_t */
-    #define wxUINT64_SWAP_ALWAYS(val) \
-       ((wxUint64) ( \
-        ((wxULongLong(val) & wxULongLong(0L, 0x000000ffU)) << 56) | \
-        ((wxULongLong(val) & wxULongLong(0L, 0x0000ff00U)) << 40) | \
-        ((wxULongLong(val) & wxULongLong(0L, 0x00ff0000U)) << 24) | \
-        ((wxULongLong(val) & wxULongLong(0L, 0xff000000U)) <<  8) | \
-        ((wxULongLong(val) & wxULongLong(0x000000ffL, 0U)) >>  8) | \
-        ((wxULongLong(val) & wxULongLong(0x0000ff00L, 0U)) >> 24) | \
-        ((wxULongLong(val) & wxULongLong(0x00ff0000L, 0U)) >> 40) | \
-        ((wxULongLong(val) & wxULongLong(0xff000000L, 0U)) >> 56)))
-
-    #define wxINT64_SWAP_ALWAYS(val) \
-       ((wxInt64) ( \
-        ((wxLongLong(val) & wxLongLong(0L, 0x000000ffU)) << 56) | \
-        ((wxLongLong(val) & wxLongLong(0L, 0x0000ff00U)) << 40) | \
-        ((wxLongLong(val) & wxLongLong(0L, 0x00ff0000U)) << 24) | \
-        ((wxLongLong(val) & wxLongLong(0L, 0xff000000U)) <<  8) | \
-        ((wxLongLong(val) & wxLongLong(0x000000ffL, 0U)) >>  8) | \
-        ((wxLongLong(val) & wxLongLong(0x0000ff00L, 0U)) >> 24) | \
-        ((wxLongLong(val) & wxLongLong(0x00ff0000L, 0U)) >> 40) | \
-        ((wxLongLong(val) & wxLongLong(0xff000000L, 0U)) >> 56)))
-#endif /*  wxLongLong_t/!wxLongLong_t */
+#define wxINT64_SWAP_ALWAYS(val) \
+   ((wxInt64) ( \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x00000000000000ff)) << 56) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x000000000000ff00)) << 40) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x0000000000ff0000)) << 24) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x00000000ff000000)) <<  8) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x000000ff00000000)) >>  8) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x0000ff0000000000)) >> 24) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0x00ff000000000000)) >> 40) | \
+    (((wxUint64) (val) & (wxUint64) wxULL(0xff00000000000000)) >> 56)))
 
 #ifdef WORDS_BIGENDIAN
     #define wxUINT16_SWAP_ON_BE(val)  wxUINT16_SWAP_ALWAYS(val)
@@ -1172,17 +1135,16 @@ typedef double wxDouble;
     #define wxINT32_SWAP_ON_BE(val)   wxINT32_SWAP_ALWAYS(val)
     #define wxUINT32_SWAP_ON_LE(val)  (val)
     #define wxINT32_SWAP_ON_LE(val)   (val)
-    #if wxHAS_INT64
-        #define wxUINT64_SWAP_ON_BE(val)  wxUINT64_SWAP_ALWAYS(val)
-        #define wxUINT64_SWAP_ON_LE(val)  (val)
-        #define wxINT64_SWAP_ON_BE(val)  wxINT64_SWAP_ALWAYS(val)
-        #define wxINT64_SWAP_ON_LE(val)  (val)
 
-        #define wxUINT64_SWAP_ON_BE_IN_PLACE(val)   val = wxUINT64_SWAP_ALWAYS(val)
-        #define wxINT64_SWAP_ON_BE_IN_PLACE(val)   val = wxINT64_SWAP_ALWAYS(val)
-        #define wxUINT64_SWAP_ON_LE_IN_PLACE(val)
-        #define wxINT64_SWAP_ON_LE_IN_PLACE(val)
-    #endif
+    #define wxUINT64_SWAP_ON_BE(val)  wxUINT64_SWAP_ALWAYS(val)
+    #define wxUINT64_SWAP_ON_LE(val)  (val)
+    #define wxINT64_SWAP_ON_BE(val)  wxINT64_SWAP_ALWAYS(val)
+    #define wxINT64_SWAP_ON_LE(val)  (val)
+
+    #define wxUINT64_SWAP_ON_BE_IN_PLACE(val)   val = wxUINT64_SWAP_ALWAYS(val)
+    #define wxINT64_SWAP_ON_BE_IN_PLACE(val)   val = wxINT64_SWAP_ALWAYS(val)
+    #define wxUINT64_SWAP_ON_LE_IN_PLACE(val)
+    #define wxINT64_SWAP_ON_LE_IN_PLACE(val)
 
     #define wxUINT16_SWAP_ON_BE_IN_PLACE(val)   val = wxUINT16_SWAP_ALWAYS(val)
     #define wxINT16_SWAP_ON_BE_IN_PLACE(val)   val = wxINT16_SWAP_ALWAYS(val)
@@ -1201,16 +1163,14 @@ typedef double wxDouble;
     #define wxINT32_SWAP_ON_LE(val)   wxINT32_SWAP_ALWAYS(val)
     #define wxUINT32_SWAP_ON_BE(val)  (val)
     #define wxINT32_SWAP_ON_BE(val)   (val)
-    #if wxHAS_INT64
-        #define wxUINT64_SWAP_ON_LE(val)  wxUINT64_SWAP_ALWAYS(val)
-        #define wxUINT64_SWAP_ON_BE(val)  (val)
-        #define wxINT64_SWAP_ON_LE(val)  wxINT64_SWAP_ALWAYS(val)
-        #define wxINT64_SWAP_ON_BE(val)  (val)
-        #define wxUINT64_SWAP_ON_BE_IN_PLACE(val)
-        #define wxINT64_SWAP_ON_BE_IN_PLACE(val)
-        #define wxUINT64_SWAP_ON_LE_IN_PLACE(val)   val = wxUINT64_SWAP_ALWAYS(val)
-        #define wxINT64_SWAP_ON_LE_IN_PLACE(val)   val = wxINT64_SWAP_ALWAYS(val)
-    #endif
+    #define wxUINT64_SWAP_ON_LE(val)  wxUINT64_SWAP_ALWAYS(val)
+    #define wxUINT64_SWAP_ON_BE(val)  (val)
+    #define wxINT64_SWAP_ON_LE(val)  wxINT64_SWAP_ALWAYS(val)
+    #define wxINT64_SWAP_ON_BE(val)  (val)
+    #define wxUINT64_SWAP_ON_BE_IN_PLACE(val)
+    #define wxINT64_SWAP_ON_BE_IN_PLACE(val)
+    #define wxUINT64_SWAP_ON_LE_IN_PLACE(val)   val = wxUINT64_SWAP_ALWAYS(val)
+    #define wxINT64_SWAP_ON_LE_IN_PLACE(val)   val = wxINT64_SWAP_ALWAYS(val)
 
     #define wxUINT16_SWAP_ON_BE_IN_PLACE(val)
     #define wxINT16_SWAP_ON_BE_IN_PLACE(val)
@@ -2460,13 +2420,13 @@ enum wxPaperSize
     wxPAPER_10X11,              /*  10 x 11 in */
     wxPAPER_15X11,              /*  15 x 11 in */
     wxPAPER_ENV_INVITE,         /*  Envelope Invite 220 x 220 mm */
-    wxPAPER_LETTER_EXTRA,       /*  Letter Extra 9 \275 x 12 in */
-    wxPAPER_LEGAL_EXTRA,        /*  Legal Extra 9 \275 x 15 in */
-    wxPAPER_TABLOID_EXTRA,      /*  Tabloid Extra 11.69 x 18 in */
+    wxPAPER_LETTER_EXTRA,       /*  Letter Extra 9.5 x 12 in */
+    wxPAPER_LEGAL_EXTRA,        /*  Legal Extra 9.5 x 15 in */
+    wxPAPER_TABLOID_EXTRA,      /*  Tabloid Extra 12 x 18 in */
     wxPAPER_A4_EXTRA,           /*  A4 Extra 9.27 x 12.69 in */
-    wxPAPER_LETTER_TRANSVERSE,  /*  Letter Transverse 8 \275 x 11 in */
+    wxPAPER_LETTER_TRANSVERSE,  /*  Letter Transverse 8.5 x 11 in */
     wxPAPER_A4_TRANSVERSE,      /*  A4 Transverse 210 x 297 mm */
-    wxPAPER_LETTER_EXTRA_TRANSVERSE, /*  Letter Extra Transverse 9\275 x 12 in */
+    wxPAPER_LETTER_EXTRA_TRANSVERSE, /*  Letter Extra Transverse 9.5 x 12 in */
     wxPAPER_A_PLUS,             /*  SuperA/SuperA/A4 227 x 356 mm */
     wxPAPER_B_PLUS,             /*  SuperB/SuperB/A3 305 x 487 mm */
     wxPAPER_LETTER_PLUS,        /*  Letter Plus 8.5 x 12.69 in */
@@ -2634,10 +2594,6 @@ typedef int (* LINKAGEMODE wxListIterateFunction)(void *current);
 #define DECLARE_WXOSX_OPAQUE_CFREF( name ) typedef struct __##name* name##Ref;
 #define DECLARE_WXOSX_OPAQUE_CONST_CFREF( name ) typedef const struct __##name* name##Ref;
 
-#endif
-
-#ifdef __WXMAC__
-
 #define WX_OPAQUE_TYPE( name ) struct wxOpaque##name
 
 typedef void*       WXHCURSOR;
@@ -2654,8 +2610,6 @@ typedef unsigned long   WXDWORD;
 typedef unsigned short  WXWORD;
 
 typedef WX_OPAQUE_TYPE(PicHandle ) * WXHMETAFILE ;
-
-typedef void*       WXDisplay;
 
 /*
  * core frameworks
@@ -2733,7 +2687,7 @@ typedef HIShapeRef WXHRGN;
 
 #endif // __WXMAC__
 
-#if defined(__WXMAC__)
+#ifdef __DARWIN__
 
 /* Objective-C type declarations.
  * These are to be used in public headers in lieu of NSSomething* because
@@ -2778,22 +2732,44 @@ DECLARE_WXCOCOA_OBJC_CLASS(NSData);
 DECLARE_WXCOCOA_OBJC_CLASS(NSMutableArray);
 DECLARE_WXCOCOA_OBJC_CLASS(NSString);
 DECLARE_WXCOCOA_OBJC_CLASS(NSObject);
+DECLARE_WXCOCOA_OBJC_CLASS(NSSet);
 
-#if wxOSX_USE_COCOA
+#ifdef __WXDARWIN_OSX__
+
+DECLARE_WXCOCOA_OBJC_CLASS(NSBitmapImageRep);
+DECLARE_WXCOCOA_OBJC_CLASS(NSColor);
+DECLARE_WXCOCOA_OBJC_CLASS(NSFont);
+DECLARE_WXCOCOA_OBJC_CLASS(NSFontDescriptor);
+DECLARE_WXCOCOA_OBJC_CLASS(NSImage);
+DECLARE_WXCOCOA_OBJC_CLASS(NSSound);
+DECLARE_WXCOCOA_OBJC_CLASS(NSThread);
+
+typedef WX_NSColor WXColor;
+typedef WX_NSImage WXImage;
+
+#elif defined(__WXDARWIN_IPHONE__)
+
+DECLARE_WXCOCOA_OBJC_CLASS(UIColor);
+DECLARE_WXCOCOA_OBJC_CLASS(UIImage);
+DECLARE_WXCOCOA_OBJC_CLASS(UIFont);
+
+typedef WX_UIColor WXColor;
+typedef WX_UIImage WXImage;
+
+#else
+
+#endif
+
+#ifdef __WXOSX_COCOA__
 
 DECLARE_WXCOCOA_OBJC_CLASS(NSApplication);
-DECLARE_WXCOCOA_OBJC_CLASS(NSBitmapImageRep);
 DECLARE_WXCOCOA_OBJC_CLASS(NSBox);
 DECLARE_WXCOCOA_OBJC_CLASS(NSButton);
-DECLARE_WXCOCOA_OBJC_CLASS(NSColor);
 DECLARE_WXCOCOA_OBJC_CLASS(NSColorPanel);
 DECLARE_WXCOCOA_OBJC_CLASS(NSControl);
 DECLARE_WXCOCOA_OBJC_CLASS(NSCursor);
 DECLARE_WXCOCOA_OBJC_CLASS(NSEvent);
-DECLARE_WXCOCOA_OBJC_CLASS(NSFont);
-DECLARE_WXCOCOA_OBJC_CLASS(NSFontDescriptor);
 DECLARE_WXCOCOA_OBJC_CLASS(NSFontPanel);
-DECLARE_WXCOCOA_OBJC_CLASS(NSImage);
 DECLARE_WXCOCOA_OBJC_CLASS(NSLayoutManager);
 DECLARE_WXCOCOA_OBJC_CLASS(NSMenu);
 DECLARE_WXCOCOA_OBJC_CLASS(NSMenuExtra);
@@ -2802,14 +2778,12 @@ DECLARE_WXCOCOA_OBJC_CLASS(NSNotification);
 DECLARE_WXCOCOA_OBJC_CLASS(NSPanel);
 DECLARE_WXCOCOA_OBJC_CLASS(NSResponder);
 DECLARE_WXCOCOA_OBJC_CLASS(NSScrollView);
-DECLARE_WXCOCOA_OBJC_CLASS(NSSound);
 DECLARE_WXCOCOA_OBJC_CLASS(NSStatusItem);
 DECLARE_WXCOCOA_OBJC_CLASS(NSTableColumn);
 DECLARE_WXCOCOA_OBJC_CLASS(NSTableView);
 DECLARE_WXCOCOA_OBJC_CLASS(NSTextContainer);
 DECLARE_WXCOCOA_OBJC_CLASS(NSTextField);
 DECLARE_WXCOCOA_OBJC_CLASS(NSTextStorage);
-DECLARE_WXCOCOA_OBJC_CLASS(NSThread);
 DECLARE_WXCOCOA_OBJC_CLASS(NSWindow);
 DECLARE_WXCOCOA_OBJC_CLASS(NSView);
 DECLARE_WXCOCOA_OBJC_CLASS(NSOpenGLContext);
@@ -2825,31 +2799,29 @@ DECLARE_WXCOCOA_OBJC_CLASS(NSPasteboard);
 DECLARE_WXCOCOA_OBJC_CLASS(WKWebView);
 
 typedef WX_NSWindow WXWindow;
+typedef WX_NSEvent WXEvent;
 typedef WX_NSView WXWidget;
-typedef WX_NSImage WXImage;
 typedef WX_NSMenu WXHMENU;
 typedef WX_NSOpenGLPixelFormat WXGLPixelFormat;
 typedef WX_NSOpenGLContext WXGLContext;
 typedef WX_NSPasteboard OSXPasteboard;
 typedef WX_WKWebView OSXWebViewPtr;
 
-#elif wxOSX_USE_IPHONE
+#elif defined(__WXOSX_IPHONE__)
 
 DECLARE_WXCOCOA_OBJC_CLASS(UIMenu);
 DECLARE_WXCOCOA_OBJC_CLASS(UIMenuItem);
 DECLARE_WXCOCOA_OBJC_CLASS(UIWindow);
-DECLARE_WXCOCOA_OBJC_CLASS(UImage);
 DECLARE_WXCOCOA_OBJC_CLASS(UIView);
-DECLARE_WXCOCOA_OBJC_CLASS(UIFont);
-DECLARE_WXCOCOA_OBJC_CLASS(UIImage);
 DECLARE_WXCOCOA_OBJC_CLASS(UIEvent);
-DECLARE_WXCOCOA_OBJC_CLASS(NSSet);
+DECLARE_WXCOCOA_OBJC_CLASS(UIPress);
+DECLARE_WXCOCOA_OBJC_CLASS(UIKey);
 DECLARE_WXCOCOA_OBJC_CLASS(EAGLContext);
 DECLARE_WXCOCOA_OBJC_CLASS(UIPasteboard);
 
 typedef WX_UIWindow WXWindow;
+typedef WX_UIEvent WXEvent;
 typedef WX_UIView WXWidget;
-typedef WX_UIImage WXImage;
 typedef WX_UIMenu WXHMENU;
 typedef WX_EAGLContext WXGLContext;
 typedef WX_NSString WXGLPixelFormat;
@@ -2858,8 +2830,7 @@ typedef WX_UIPasteboard WXOSXPasteboard;
 #endif
 
 
-
-#endif /* __WXMAC__ */
+#endif /* __DARWIN__ */
 
 /* ABX: check __WIN32__ instead of __WXMSW__ for the same MSWBase in any Win32 port */
 #if defined(__WIN32__)

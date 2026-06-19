@@ -43,7 +43,7 @@
     This class provides several functions for customizing the menu items
     appearance that are available only in wxMSW port. These functions should
     not be used in portable programs and, moreover, have some known limitations
-    even in wxMSW: using them switches the menu item in a "owner drawn" mode,
+    even in wxMSW: using them switches the menu item in an "owner drawn" mode,
     where it is painted by wxWidgets itself and not the system, which may
     result in a slightly different appearance for it. Owner drawn items are
     also incompatible with dark mode support and using them makes the entire
@@ -179,6 +179,9 @@ public:
     /**
         Returns the checked or unchecked bitmap.
 
+        Prefer using GetBitmapBundle() overload taking @a checked parameter in
+        the new code.
+
         This overload only exists in wxMSW, avoid using it in portable code.
     */
     wxBitmap GetBitmap(bool checked) const;
@@ -196,11 +199,32 @@ public:
     wxBitmapBundle GetBitmapBundle() const;
 
     /**
+        Returns the bitmap bundle containing the checked or unchecked bitmap
+        for this item.
+
+        @onlyfor{wxmsw}
+
+        @since 3.3.2
+     */
+    wxBitmapBundle GetBitmapBundle(bool checked) const;
+
+    /**
         Returns the bitmap used for disabled items.
+
+        @see GetDisabledBitmapBundle()
 
         @onlyfor{wxmsw}
     */
     virtual wxBitmap GetDisabledBitmap() const;
+
+    /**
+        Returns the bitmap bundle used for disabled items.
+
+        @onlyfor{wxmsw}
+
+        @since 3.3.2
+    */
+    wxBitmapBundle GetDisabledBitmapBundle() const;
 
     /**
         Returns the font associated with the menu item.

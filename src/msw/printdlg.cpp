@@ -39,6 +39,9 @@
 
 #include <stdlib.h>
 
+// This variable is used from src/msw/window.cpp.
+bool wxPrinterDialogShown = false;
+
 // smart pointer like class using OpenPrinter and ClosePrinter
 class WinPrinter
 {
@@ -830,7 +833,18 @@ int wxWindowsPrintDialog::ShowModal()
     PRINTDLGEX* pd = (PRINTDLGEX*) m_printDlg;
     pd->hwndOwner = hWndParent;
 
+    // Printer dialog sends WM_ACTIVATE to the parent window before destroying
+    // itself for some reason, which results in our handler trying to set the
+    // focus back to the last focused window -- and failing, because the window
+    // doesn't have activation yet (it will only once the dialog will have been
+    // destroyed). So ignore these events while it is shown by setting this
+    // variable -- see also the code using it in wxWindow::HandleActivate().
+    wxPrinterDialogShown = true;
+
     HRESULT dlgRes = PrintDlgEx(pd);
+
+    wxPrinterDialogShown = false;
+
     bool ret = (dlgRes == S_OK && pd->dwResultAction == PD_RESULT_PRINT);
 
     pd->hwndOwner = 0;
@@ -890,18 +904,56 @@ bool wxWindowsPrintDialog::ConvertToNative( wxPrintDialogData &data )
     pd->nCopies = (DWORD)data.GetNoCopies();
 
     // Required only if PD_NOPAGENUMS flag is not set.
-    // Currently only one page range is supported.
     if ( data.GetEnablePageNumbers() )
     {
-        pd->nPageRanges = 1;
-        pd->nMaxPageRanges = 1;
-        pd->lpPageRanges = new PRINTPAGERANGE[1];
-        pd->lpPageRanges[0].nFromPage = (DWORD)data.GetFromPage();
-        pd->lpPageRanges[0].nToPage = (DWORD)data.GetToPage();
+        pd->nMaxPageRanges = (DWORD)data.GetMaxPageRanges();
 
-        // PrintDlgEx returns E_INVALIDARG if nFromPage is greater than nToPage
-        if (pd->lpPageRanges[0].nToPage < pd->lpPageRanges[0].nFromPage)
-            pd->lpPageRanges[0].nToPage = pd->lpPageRanges[0].nFromPage;
+        // Fill the provided PRINTPAGERANGE with valid values, even if the
+        // input data is invalid because otherwise PrintDlgEx() would simply
+        // fail with E_INVALIDARG.
+        auto setPageRange = [](PRINTPAGERANGE* ppr, int from, int to)
+        {
+            DWORD nFromPage = (DWORD)from;
+            DWORD nToPage = (DWORD)to;
+
+            if ( !nFromPage )
+                nFromPage = 1;
+            if ( nToPage < nFromPage )
+                nToPage = nFromPage;
+
+            ppr->nFromPage = nFromPage;
+            ppr->nToPage = nToPage;
+        };
+
+        const wxVector<wxPrintPageRange>& ranges = data.GetPageRanges();
+        if ( ranges.empty() )
+        {
+            // Use values for from/to page here to define a single range (which
+            // will usually be just "1") for compatibility: it would arguably
+            // make more sense to not define any ranges at all by setting
+            // nPageRanges to 0 (which is allowed, only lpPageRanges must be
+            // non-null), but this would change the behaviour of the existing
+            // code without any real gain, so don't do it, even if this means
+            // that there is currently no way to not show anything at all in
+            // the "Pages" text box of the print dialog.
+            pd->nPageRanges = 1;
+            pd->lpPageRanges = new PRINTPAGERANGE[pd->nMaxPageRanges];
+
+            setPageRange(pd->lpPageRanges, data.GetFromPage(), data.GetToPage());
+        }
+        else
+        {
+            pd->nPageRanges = (DWORD) ranges.size();
+            if ( pd->nPageRanges > pd->nMaxPageRanges )
+                pd->nMaxPageRanges = pd->nPageRanges;
+            pd->lpPageRanges = new PRINTPAGERANGE[pd->nMaxPageRanges];
+
+            PRINTPAGERANGE* ppr = pd->lpPageRanges;
+            for ( const wxPrintPageRange& range : ranges )
+            {
+                setPageRange(ppr++, range.fromPage, range.toPage);
+            }
+        }
     }
 
     pd->Flags = PD_RETURNDC;
@@ -925,7 +977,7 @@ bool wxWindowsPrintDialog::ConvertToNative( wxPrintDialogData &data )
         pd->Flags |= PD_NOCURRENTPAGE;
     if ( !data.GetEnablePageNumbers() )
         pd->Flags |= PD_NOPAGENUMS;
-    else if ( (!data.GetAllPages()) && (!data.GetSelection()) && (!data.GetCurrentPage()) && (data.GetFromPage() != 0) && (data.GetToPage() != 0))
+    else if ( (!data.GetAllPages()) && (!data.GetSelection()) && (!data.GetCurrentPage()) && (!data.GetPageRanges().empty()) )
         pd->Flags |= PD_PAGENUMS;
     if ( data.GetEnableHelp() )
         pd->Flags |= PD_SHOWHELP;
@@ -970,8 +1022,16 @@ bool wxWindowsPrintDialog::ConvertFromNative( wxPrintDialogData &data )
 
     if ( pd->lpPageRanges )
     {
-        data.SetFromPage(pd->lpPageRanges[0].nFromPage);
-        data.SetToPage(pd->lpPageRanges[0].nToPage);
+        wxPrintPageRanges ranges(pd->nPageRanges);
+        const PRINTPAGERANGE* ppr = pd->lpPageRanges;
+        for (auto& range : ranges)
+        {
+            range.fromPage = ppr->nFromPage;
+            range.toPage = ppr->nToPage;
+            ++ppr;
+        }
+
+        data.SetPageRanges(ranges);
     }
 
     data.SetMinPage( pd->nMinPage );
@@ -1055,6 +1115,136 @@ int wxWindowsPageSetupDialog::ShowModal()
         return wxID_CANCEL;
 }
 
+static bool IsImperialPaperSize( wxPaperSize size )
+{
+    switch ( size )
+    {
+    case wxPAPER_LETTER:
+    case wxPAPER_LEGAL:
+    case wxPAPER_CSHEET:
+    case wxPAPER_DSHEET:
+    case wxPAPER_ESHEET:
+    case wxPAPER_LETTERSMALL:
+    case wxPAPER_TABLOID:
+    case wxPAPER_LEDGER:
+    case wxPAPER_STATEMENT:
+    case wxPAPER_EXECUTIVE:
+    case wxPAPER_FOLIO:
+    case wxPAPER_10X14:
+    case wxPAPER_11X17:
+    case wxPAPER_NOTE:
+    case wxPAPER_ENV_9:
+    case wxPAPER_ENV_10:
+    case wxPAPER_ENV_11:
+    case wxPAPER_ENV_12:
+    case wxPAPER_ENV_14:
+    case wxPAPER_ENV_MONARCH:
+    case wxPAPER_ENV_PERSONAL:
+    case wxPAPER_FANFOLD_US:
+    case wxPAPER_FANFOLD_STD_GERMAN:
+    case wxPAPER_FANFOLD_LGL_GERMAN:
+    case wxPAPER_9X11:
+    case wxPAPER_10X11:
+    case wxPAPER_15X11:
+    case wxPAPER_LETTER_EXTRA:
+    case wxPAPER_LEGAL_EXTRA:
+    case wxPAPER_TABLOID_EXTRA:
+    case wxPAPER_LETTER_TRANSVERSE:
+    case wxPAPER_LETTER_EXTRA_TRANSVERSE:
+    case wxPAPER_LETTER_PLUS:
+    case wxPAPER_LETTER_ROTATED:
+    case wxPAPER_12X11:
+        return true;
+
+    case wxPAPER_NONE:
+    case wxPAPER_A4:
+    case wxPAPER_A3:
+    case wxPAPER_A4SMALL:
+    case wxPAPER_A5:
+    case wxPAPER_B4:
+    case wxPAPER_B5:
+    case wxPAPER_QUARTO:
+    case wxPAPER_ENV_DL:
+    case wxPAPER_ENV_C5:
+    case wxPAPER_ENV_C3:
+    case wxPAPER_ENV_C4:
+    case wxPAPER_ENV_C6:
+    case wxPAPER_ENV_C65:
+    case wxPAPER_ENV_B4:
+    case wxPAPER_ENV_B5:
+    case wxPAPER_ENV_B6:
+    case wxPAPER_ENV_ITALY:
+    case wxPAPER_ISO_B4:
+    case wxPAPER_JAPANESE_POSTCARD:
+    case wxPAPER_ENV_INVITE:
+    case wxPAPER_A4_EXTRA:
+    case wxPAPER_A4_TRANSVERSE:
+    case wxPAPER_A_PLUS:
+    case wxPAPER_B_PLUS:
+    case wxPAPER_A4_PLUS:
+    case wxPAPER_A5_TRANSVERSE:
+    case wxPAPER_B5_TRANSVERSE:
+    case wxPAPER_A3_EXTRA:
+    case wxPAPER_A5_EXTRA:
+    case wxPAPER_B5_EXTRA:
+    case wxPAPER_A2:
+    case wxPAPER_A3_TRANSVERSE:
+    case wxPAPER_A3_EXTRA_TRANSVERSE:
+    case wxPAPER_DBL_JAPANESE_POSTCARD:
+    case wxPAPER_A6:
+    case wxPAPER_JENV_KAKU2:
+    case wxPAPER_JENV_KAKU3:
+    case wxPAPER_JENV_CHOU3:
+    case wxPAPER_JENV_CHOU4:
+    case wxPAPER_A3_ROTATED:
+    case wxPAPER_A4_ROTATED:
+    case wxPAPER_A5_ROTATED:
+    case wxPAPER_B4_JIS_ROTATED:
+    case wxPAPER_B5_JIS_ROTATED:
+    case wxPAPER_JAPANESE_POSTCARD_ROTATED:
+    case wxPAPER_DBL_JAPANESE_POSTCARD_ROTATED:
+    case wxPAPER_A6_ROTATED:
+    case wxPAPER_JENV_KAKU2_ROTATED:
+    case wxPAPER_JENV_KAKU3_ROTATED:
+    case wxPAPER_JENV_CHOU3_ROTATED:
+    case wxPAPER_JENV_CHOU4_ROTATED:
+    case wxPAPER_B6_JIS:
+    case wxPAPER_B6_JIS_ROTATED:
+    case wxPAPER_JENV_YOU4:
+    case wxPAPER_JENV_YOU4_ROTATED:
+    case wxPAPER_P16K:
+    case wxPAPER_P32K:
+    case wxPAPER_P32KBIG:
+    case wxPAPER_PENV_1:
+    case wxPAPER_PENV_2:
+    case wxPAPER_PENV_3:
+    case wxPAPER_PENV_4:
+    case wxPAPER_PENV_5:
+    case wxPAPER_PENV_6:
+    case wxPAPER_PENV_7:
+    case wxPAPER_PENV_8:
+    case wxPAPER_PENV_9:
+    case wxPAPER_PENV_10:
+    case wxPAPER_P16K_ROTATED:
+    case wxPAPER_P32K_ROTATED:
+    case wxPAPER_P32KBIG_ROTATED:
+    case wxPAPER_PENV_1_ROTATED:
+    case wxPAPER_PENV_2_ROTATED:
+    case wxPAPER_PENV_3_ROTATED:
+    case wxPAPER_PENV_4_ROTATED:
+    case wxPAPER_PENV_5_ROTATED:
+    case wxPAPER_PENV_6_ROTATED:
+    case wxPAPER_PENV_7_ROTATED:
+    case wxPAPER_PENV_8_ROTATED:
+    case wxPAPER_PENV_9_ROTATED:
+    case wxPAPER_PENV_10_ROTATED:
+    case wxPAPER_A0:
+    case wxPAPER_A1:
+      break;
+    }
+    return false;
+}
+
 bool wxWindowsPageSetupDialog::ConvertToNative( wxPageSetupDialogData &data )
 {
     wxWindowsPrintNativeData *native_data =
@@ -1114,25 +1304,32 @@ bool wxWindowsPageSetupDialog::ConvertToNative( wxPageSetupDialogData &data )
     if ( data.GetEnableHelp() )
         pd->Flags |= PSD_SHOWHELP;
 
-    // We want the units to be in hundredths of a millimetre
-    pd->Flags |= PSD_INHUNDREDTHSOFMILLIMETERS;
+    // We want the units to be in hundredths of a millimetre, except for imperial paper sizes
+    DWORD paperUnits{ PSD_INHUNDREDTHSOFMILLIMETERS };
+    DWORD unitScaleFactor{ 100 }; // hundredths of millimeters
+    if ( IsImperialPaperSize( data.GetPrintData().GetPaperId() ) )
+    {
+        paperUnits = PSD_INTHOUSANDTHSOFINCHES;
+        unitScaleFactor = 1000;
+    }
+    pd->Flags |= paperUnits;
 
     pd->lStructSize = sizeof( PAGESETUPDLG );
     pd->hwndOwner = nullptr;
     pd->hInstance = nullptr;
     //   PAGESETUPDLG is in hundreds of a mm
-    pd->ptPaperSize.x = data.GetPaperSize().x * 100;
-    pd->ptPaperSize.y = data.GetPaperSize().y * 100;
+    pd->ptPaperSize.x = data.GetPaperSize().x * unitScaleFactor;
+    pd->ptPaperSize.y = data.GetPaperSize().y * unitScaleFactor;
 
-    pd->rtMinMargin.left = data.GetMinMarginTopLeft().x * 100;
-    pd->rtMinMargin.top = data.GetMinMarginTopLeft().y * 100;
-    pd->rtMinMargin.right = data.GetMinMarginBottomRight().x * 100;
-    pd->rtMinMargin.bottom = data.GetMinMarginBottomRight().y * 100;
+    pd->rtMinMargin.left = data.GetMinMarginTopLeft().x * unitScaleFactor;
+    pd->rtMinMargin.top = data.GetMinMarginTopLeft().y * unitScaleFactor;
+    pd->rtMinMargin.right = data.GetMinMarginBottomRight().x * unitScaleFactor;
+    pd->rtMinMargin.bottom = data.GetMinMarginBottomRight().y * unitScaleFactor;
 
-    pd->rtMargin.left = data.GetMarginTopLeft().x * 100;
-    pd->rtMargin.top = data.GetMarginTopLeft().y * 100;
-    pd->rtMargin.right = data.GetMarginBottomRight().x * 100;
-    pd->rtMargin.bottom = data.GetMarginBottomRight().y * 100;
+    pd->rtMargin.left = data.GetMarginTopLeft().x * unitScaleFactor;
+    pd->rtMargin.top = data.GetMarginTopLeft().y * unitScaleFactor;
+    pd->rtMargin.right = data.GetMarginBottomRight().x * unitScaleFactor;
+    pd->rtMargin.bottom = data.GetMarginBottomRight().y * unitScaleFactor;
 
     pd->lCustData = 0;
     pd->lpfnPageSetupHook = nullptr;
@@ -1191,17 +1388,24 @@ bool wxWindowsPageSetupDialog::ConvertFromNative( wxPageSetupDialogData &data )
     data.SetDefaultInfo( ((pd->Flags & PSD_RETURNDEFAULT) == PSD_RETURNDEFAULT) );
     data.EnableHelp( ((pd->Flags & PSD_SHOWHELP) == PSD_SHOWHELP) );
 
-    //   PAGESETUPDLG is in hundreds of a mm
+    // PAGESETUPDLG is in hundreds of a mm
+    DWORD unitScaleFactor{ 100 };
+    if ( IsImperialPaperSize( data.GetPrintData().GetPaperId() ) )
+    {
+        // PAGESETUPDLG is in thousandths of an inch
+        unitScaleFactor = 1000;
+    }
+
     if (data.GetPrintData().GetOrientation() == wxLANDSCAPE)
-        data.SetPaperSize( wxSize(pd->ptPaperSize.y / 100, pd->ptPaperSize.x / 100) );
+        data.SetPaperSize( wxSize(pd->ptPaperSize.y / unitScaleFactor, pd->ptPaperSize.x / unitScaleFactor) );
     else
-        data.SetPaperSize( wxSize(pd->ptPaperSize.x / 100, pd->ptPaperSize.y / 100) );
+        data.SetPaperSize( wxSize(pd->ptPaperSize.x / unitScaleFactor, pd->ptPaperSize.y / unitScaleFactor) );
 
-    data.SetMinMarginTopLeft( wxPoint(pd->rtMinMargin.left / 100, pd->rtMinMargin.top / 100) );
-    data.SetMinMarginBottomRight( wxPoint(pd->rtMinMargin.right / 100, pd->rtMinMargin.bottom / 100) );
+    data.SetMinMarginTopLeft( wxPoint(pd->rtMinMargin.left / unitScaleFactor, pd->rtMinMargin.top / unitScaleFactor) );
+    data.SetMinMarginBottomRight( wxPoint(pd->rtMinMargin.right / unitScaleFactor, pd->rtMinMargin.bottom / unitScaleFactor) );
 
-    data.SetMarginTopLeft( wxPoint(pd->rtMargin.left / 100, pd->rtMargin.top / 100) );
-    data.SetMarginBottomRight( wxPoint(pd->rtMargin.right / 100, pd->rtMargin.bottom / 100) );
+    data.SetMarginTopLeft( wxPoint(pd->rtMargin.left / unitScaleFactor, pd->rtMargin.top / unitScaleFactor) );
+    data.SetMarginBottomRight( wxPoint(pd->rtMargin.right / unitScaleFactor, pd->rtMargin.bottom / unitScaleFactor) );
 
     return true;
 }

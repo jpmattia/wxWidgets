@@ -25,7 +25,6 @@
 #include "wx/gtk/private/list.h"
 #include "wx/gtk/private/messagetype.h"
 #include "wx/gtk/private/mnemonics.h"
-#include "wx/gtk/private/dialogcount.h"
 
 wxIMPLEMENT_CLASS(wxMessageDialog, wxDialog);
 
@@ -187,9 +186,11 @@ void wxMessageDialog::GTKCreateMsgDialog()
         gtk_window_set_keep_above(GTK_WINDOW(m_widget), TRUE);
     }
 
+#if GTK_CHECK_VERSION(2,22,0)
     // A GTKMessageDialog usually displays its labels without selection enabled,
     // so we enable selection to allow the user to select+copy the text out of
     // the dialog.
+    if (wx_is_at_least_gtk2(22))
     {
         GtkMessageDialog * const msgdlg = GTK_MESSAGE_DIALOG(m_widget);
 
@@ -206,6 +207,7 @@ void wxMessageDialog::GTKCreateMsgDialog()
             }
         }
     }
+#endif // GTK_CHECK_VERSION(2,22,0)
 
     // we need to add buttons manually if we use custom labels or always for
     // Yes/No/Cancel dialog as GTK+ doesn't support it natively
@@ -286,8 +288,6 @@ int wxMessageDialog::ShowModal()
     // parent TLW will disappear..
     if (m_parent)
         gtk_window_present( GTK_WINDOW(m_parent->m_widget) );
-
-    wxOpenModalDialogLocker modalLocker;
 
     gint result = gtk_dialog_run(GTK_DIALOG(m_widget));
     GTKDisconnect(m_widget);

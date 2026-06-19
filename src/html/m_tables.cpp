@@ -122,7 +122,7 @@ private:
 
 
 wxHtmlTableCell::wxHtmlTableCell(wxHtmlContainerCell *parent, const wxHtmlTag& tag, double pixel_scale)
- : wxHtmlContainerCell(parent)
+ : wxHtmlContainerCell(tag, parent)
 {
     m_PixelScale = pixel_scale;
     m_ColsInfo = nullptr;
@@ -329,6 +329,15 @@ void wxHtmlTableCell::AddCell(wxHtmlContainerCell *cell, const wxHtmlTag& tag)
             m_CellInfo[r][c].colspan = 1;
         if (m_CellInfo[r][c].rowspan < 1)
             m_CellInfo[r][c].rowspan = 1;
+
+        // The values come straight from the markup and are used below as
+        // r + rowspan and c + colspan, which overflow for values near INT_MAX
+        // and so bypass the bounds growth, resulting in an out-of-bounds access
+        // in Layout(). Clamp them to the limits used by the HTML specification.
+        if (m_CellInfo[r][c].colspan > 1000)
+            m_CellInfo[r][c].colspan = 1000;
+        if (m_CellInfo[r][c].rowspan > 65534)
+            m_CellInfo[r][c].rowspan = 65534;
 
         if ((m_CellInfo[r][c].colspan > 1) || (m_CellInfo[r][c].rowspan > 1))
         {

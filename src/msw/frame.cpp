@@ -39,6 +39,7 @@
 
 #include "wx/msw/private.h"
 #include "wx/msw/private/darkmode.h"
+#include "wx/msw/private/menu.h"
 
 #include "wx/generic/statusbr.h"
 
@@ -121,8 +122,6 @@ bool wxFrame::Create(wxWindow *parent,
 {
     if ( !wxTopLevelWindow::Create(parent, id, title, pos, size, style, name) )
         return false;
-
-    SetOwnBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_APPWORKSPACE));
 
 #if wxUSE_TASKBARBUTTON
     static bool s_taskbarButtonCreatedMsgRegistered = false;
@@ -244,6 +243,17 @@ void wxFrame::DoGetClientSize(int *x, int *y) const
         }
     }
 #endif // wxUSE_STATUSBAR
+
+    // Ensure that we always return a valid size, it can never be negative.
+    //
+    // Note that this takes care of the case when the frame is minimized, as
+    // Windows client size in this case is (0,0), but while we could test for
+    // this separately, it seems more robust to just always do this here to
+    // establish our post-condition.
+    if ( x && *x < 0 )
+        *x = 0;
+    if ( y && *y < 0 )
+        *y = 0;
 }
 
 // ----------------------------------------------------------------------------
@@ -460,27 +470,17 @@ wxTaskBarButton* wxFrame::MSWGetTaskBarButton()
 }
 #endif // wxUSE_TASKBARBUTTON
 
-// Responds to colour changes, and passes event on to children.
 void wxFrame::OnSysColourChanged(wxSysColourChangedEvent& event)
 {
-    // Don't override the colour explicitly set by the user, if any.
-    if ( !UseBgCol() )
+#if wxUSE_MENUS && wxUSE_OWNER_DRAWN && !defined(__WXUNIVERSAL__)
+    if ( wxMenuBar* const menuBar = GetMenuBar() )
     {
-        SetOwnBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_APPWORKSPACE));
-        Refresh();
+        menuBar->MSWApplyThemeBackground();
     }
+#endif // wxUSE_MENUS && wxUSE_OWNER_DRAWN && !defined(__WXUNIVERSAL__)
 
-#if wxUSE_STATUSBAR
-    if ( m_frameStatusBar )
-    {
-        wxSysColourChangedEvent event2;
-        event2.SetEventObject( m_frameStatusBar );
-        m_frameStatusBar->HandleWindowEvent(event2);
-    }
-#endif // wxUSE_STATUSBAR
-
-    // Propagate the event to the non-top-level children
-    wxWindow::OnSysColourChanged(event);
+    // Let children react to this event too.
+    event.Skip();
 }
 
 // Pass true to show full screen, false to restore.
@@ -710,6 +710,13 @@ void wxFrame::IconizeChildFrames(bool bIconize)
     }
 }
 
+wxVisualAttributes wxFrame::GetDefaultAttributes() const
+{
+    wxVisualAttributes attrs = GetClassDefaultAttributes(GetWindowVariant());
+    attrs.colBg = wxSystemSettings::GetColour(wxSYS_COLOUR_APPWORKSPACE);
+    return attrs;
+}
+
 WXHICON wxFrame::GetDefaultIcon() const
 {
     // we don't have any standard icons (any more)
@@ -828,6 +835,63 @@ bool wxFrame::HandleCommand(WXWORD id, WXWORD cmd, WXHWND control)
     return wxFrameBase::HandleCommand(id, cmd, control);
 }
 
+bool
+HandleMenuMessage(WXLRESULT* result,
+                  wxWindow* w,
+                  WXUINT nMsg,
+                  WXWPARAM wParam,
+                  WXLPARAM lParam)
+{
+    if ( wxMSWDarkMode::HandleMenuMessage(result, w, nMsg, wParam, lParam) )
+        return true;
+
+    using namespace wxMSWMenuImpl;
+
+    switch ( nMsg )
+    {
+        case WM_MENUBAR_MEASUREMENUITEM:
+            if ( auto* const measureMenuItem = (MenuBarMeasureMenuItem*)lParam )
+            {
+                // We only need to handle this message to work around the
+                // incorrect behavior of the native control not scaling its
+                // padding at high DPI, which is fixed in Windows 11.
+                if ( !(wxGetWinVersion() <= wxWinVersion_10 &&
+                       w->GetDPIScaleFactor() > 1.0) )
+                    break;
+
+                MEASUREITEMSTRUCT& mis = measureMenuItem->mis;
+
+                // Just a sanity check.
+                if ( mis.CtlType != ODT_MENU )
+                    break;
+
+                HWND hwnd = GetHwndOf(w);
+
+                WinStruct<MENUBARINFO> mbi;
+                if ( !::GetMenuBarInfo(hwnd, OBJID_MENU, 0, &mbi) )
+                {
+                    wxLogLastError("GetMenuBarInfo");
+                    break;
+                }
+
+                *result = w->MSWDefWindowProc(nMsg, wParam, lParam);
+
+                // Scale the horizontal padding of menu bar menus and the
+                // vertical padding of menu items with the DPI scaling factor
+                // as Windows doesn't do it.
+                if ( mbi.hMenu == measureMenuItem->mbdm.hmenu )
+                    mis.itemWidth += w->FromDIP(14) - 14;
+                else
+                    mis.itemHeight += w->FromDIP(6) - 6;
+
+                return true;
+            }
+            break;
+    }
+
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // the window proc for wxFrame
 // ---------------------------------------------------------------------------
@@ -837,11 +901,13 @@ WXLRESULT wxFrame::MSWWindowProc(WXUINT message, WXWPARAM wParam, WXLPARAM lPara
     WXLRESULT rc = 0;
     bool processed = false;
 
+#if wxUSE_MENUBAR
     if ( GetMenuBar() &&
-          wxMSWDarkMode::HandleMenuMessage(&rc, this, message, wParam, lParam) )
+          HandleMenuMessage(&rc, this, message, wParam, lParam) )
     {
         return rc;
     }
+#endif // wxUSE_MENUBAR
 
     switch ( message )
     {
@@ -873,6 +939,7 @@ WXLRESULT wxFrame::MSWWindowProc(WXUINT message, WXWPARAM wParam, WXLPARAM lPara
             }
             break;
 
+#if wxUSE_MENUBAR
         case WM_INITMENUPOPUP:
         case WM_UNINITMENUPOPUP:
             // We get these messages from the menu bar even if the menu is
@@ -888,6 +955,7 @@ WXLRESULT wxFrame::MSWWindowProc(WXUINT message, WXWPARAM wParam, WXLPARAM lPara
                 }
             }
             break;
+#endif // wxUSE_MENUBAR
 
         case WM_QUERYDRAGICON:
             {

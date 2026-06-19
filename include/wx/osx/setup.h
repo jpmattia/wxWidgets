@@ -329,19 +329,6 @@
 // non GUI features selection
 // ----------------------------------------------------------------------------
 
-// Set wxUSE_LONGLONG to 1 to compile the wxLongLong class. This is a 64 bit
-// integer which is implemented in terms of native 64 bit integers if any or
-// uses emulation otherwise.
-//
-// This class is required by wxDateTime and so you should enable it if you want
-// to use wxDateTime. For most modern platforms, it will use the native 64 bit
-// integers in which case (almost) all of its functions are inline and it
-// almost does not take any space, so there should be no reason to switch it
-// off.
-//
-// Recommended setting: 1
-#define wxUSE_LONGLONG      1
-
 // Set wxUSE_BASE64 to 1, to compile in Base64 support. This is required for
 // storing binary data in wxConfig on most platforms.
 //
@@ -427,8 +414,6 @@
 
 // Set wxUSE_DATETIME to 1 to compile the wxDateTime and related classes which
 // allow to manipulate dates, times and time intervals.
-//
-// Requires: wxUSE_LONGLONG
 //
 // Default is 1
 //
@@ -1076,9 +1061,6 @@
 // Recommended setting: 1 if you need it, can be safely set to 0 otherwise
 #define wxUSE_DISPLAY       1
 
-// Miscellaneous geometry code: needed for Canvas library
-#define wxUSE_GEOMETRY            1
-
 // Use wxImageList. This class is needed by wxNotebook, wxTreeCtrl and
 // wxListCtrl.
 //
@@ -1190,14 +1172,6 @@
 // ----------------------------------------------------------------------------
 // common dialogs
 // ----------------------------------------------------------------------------
-
-// Use common dialogs (e.g. file selector, printer dialog). Switching this off
-// also switches off the printing architecture and interactive wxPrinterDC.
-//
-// Default is 1
-//
-// Recommended setting: 1
-#define wxUSE_COMMON_DIALOGS 1
 
 // wxBusyInfo displays window with message when app is busy. Works in same way
 // as wxBusyCursor
@@ -1351,14 +1325,6 @@
 // otherwise.
 #define wxUSE_GLCANVAS       1
 
-// Setting wxUSE_GLCANVAS_EGL to 1 enables OpenGL EGL backend. This will be
-// automatically enabled if EGL support is detected.  EGL support is only
-// available under Unix platforms.
-//
-// Default is 0.
-//
-#define wxUSE_GLCANVAS_EGL   0
-
 // wxRichTextCtrl allows editing of styled text.
 //
 // Default is 1.
@@ -1507,6 +1473,10 @@
 // Set to 1 to use external nanosvg library when wxUSE_NANOSVG is enabled
 #define wxUSE_NANOSVG_EXTERNAL 0
 
+// Set to 1 for SVG rasterizing support using LunaSVG (minimum C++ 17 required)
+// Setting to 1 will override wxUSE_NANOSVG
+#define wxUSE_LUNASVG       0
+
 // Set to 1 for TGA format support (loading only)
 #define wxUSE_TGA           1
 
@@ -1530,6 +1500,9 @@
 
 // Set to 1 to compile in wxPalette class
 #define wxUSE_PALETTE       1
+
+// Set to 1 for WebP format support (requires libwebp)
+#define wxUSE_LIBWEBP       1
 
 // ----------------------------------------------------------------------------
 // wxUniversal-only options

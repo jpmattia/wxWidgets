@@ -31,9 +31,13 @@
 
 #include "wx/scopedptr.h"
 
+#include "wx/scopeguard.h"
+
 #include "wx/osx/private.h"
 #include "wx/osx/core/cfref.h"
 #include "wx/thread.h"
+
+#include "wx/private/safecall.h"
 
 #if wxUSE_GUI
     #include "wx/nonownedwnd.h"
@@ -118,7 +122,7 @@ wxCFEventLoop::DefaultModeObserverCallBack(CFRunLoopObserverRef WXUNUSED(observe
     if ( activity & kCFRunLoopBeforeTimers )
     {
     }
-    
+
     if ( activity & kCFRunLoopBeforeWaiting )
     {
     }
@@ -134,7 +138,7 @@ wxCFEventLoop::wxCFEventLoop()
 #if wxUSE_UIACTIONSIMULATOR
     m_shouldWaitForEvent = false;
 #endif
-    
+
     m_runLoop = CFGetCurrentRunLoop();
 
     CFRunLoopObserverContext ctxt;
@@ -311,56 +315,47 @@ void wxCFEventLoop::OSXDoStop()
 // terminating when Exit() is called
 int wxCFEventLoop::DoRun()
 {
+#if wxUSE_EXCEPTIONS
     // we must ensure that OnExit() is called even if an exception is thrown
     // from inside ProcessEvents() but we must call it from Exit() in normal
     // situations because it is supposed to be called synchronously,
-    // wxModalEventLoop depends on this (so we can't just use ON_BLOCK_EXIT or
-    // something similar here)
-#if wxUSE_EXCEPTIONS
-    for ( ;; )
-    {
-        try
-        {
+    // wxModalEventLoop depends on this, so we can't just use ON_BLOCK_EXIT and
+    // need a named guard to be able to dismiss it if it was called normally
+    wxScopeGuard guardOnExit = wxMakeObjGuard(*this, &wxCFEventLoop::OnExit);
 #endif // wxUSE_EXCEPTIONS
 
+    // This loop is only used when exceptions are used, but it should hopefully
+    // be optimized away completely when they are not, so use it in any case to
+    // make the code simpler.
+    for ( bool stop = false; !stop; )
+    {
+        wxSafeCall<void>([&, this]
+        {
             OSXDoRun();
 
 #if wxUSE_EXCEPTIONS
-            // exit the outer loop as well
-            break;
-        }
-        catch ( ... )
-        {
-            try
-            {
-                if ( !wxTheApp || !wxTheApp->OnExceptionInMainLoop() )
-                {
-                    OnExit();
-                    break;
-                }
-                //else: continue running the event loop
-            }
-            catch ( ... )
-            {
-                // OnException() throwed, possibly rethrowing the same
-                // exception again: very good, but we still need OnExit() to
-                // be called
-                OnExit();
-                throw;
-            }
-        }
-    }
+            guardOnExit.Dismiss();
 #endif // wxUSE_EXCEPTIONS
+
+            stop = true;
+        }, [&]()
+        {
+#if wxUSE_EXCEPTIONS
+            if ( !wxTheApp || !wxTheApp->OnExceptionInMainLoop() )
+            {
+                stop = true;
+            }
+            //else: continue running the event loop
+#endif // wxUSE_EXCEPTIONS
+        });
+    }
 
     return m_exitcode;
 }
 
-// sets the "should exit" flag and wakes up the loop so that it terminates
-// soon
-void wxCFEventLoop::ScheduleExit(int rc)
+void wxCFEventLoop::DoStop(int rc)
 {
     m_exitcode = rc;
-    m_shouldExit = true;
     OSXDoStop();
 }
 

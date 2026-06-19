@@ -14,6 +14,7 @@
 #include "wx/qt/private/winevent.h"
 #include "wx/stockitem.h"
 
+#include <QActionGroup>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QMenuBar>
 
@@ -353,7 +354,5 @@ void wxMenuBar::Attach(wxFrame *frame)
 
 void wxMenuBar::Detach()
 {
-    // the QMenuBar probably was deleted by Qt as setMenuBar takes ownership
-    m_qtWindow = nullptr;
     wxMenuBarBase::Detach();
 }

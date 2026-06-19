@@ -163,10 +163,6 @@ public :
         }
         [menu setDelegate:controller];
         [m_osxMenu setImplementation:this];
-        // gc aware
-        if ( m_osxMenu )
-            CFRetain(m_osxMenu);
-        [m_osxMenu release];
     }
 
     virtual ~wxMenuCocoaImpl();
@@ -176,7 +172,7 @@ public :
         NSMenuItem* nsmenuitem = (NSMenuItem*) pItem->GetPeer()->GetHMenuItem();
         // make sure a call of SetSubMenu is also reflected (occurring after Create)
         // update the native menu item accordingly
-        
+
         if ( pItem->IsSubMenu() )
         {
             wxMenu* wxsubmenu = pItem->GetSubMenu();
@@ -187,7 +183,7 @@ public :
                 [nsmenuitem setSubmenu:nssubmenu];
             }
         }
-        
+
         if ( pos == (size_t) -1 )
             [m_osxMenu addItem:nsmenuitem ];
         else
@@ -198,13 +194,13 @@ public :
     {
         [m_osxMenu removeItem:(NSMenuItem*) pItem->GetPeer()->GetHMenuItem()];
     }
-    
+
     virtual void MacSetupAppleMenu()
     {
         wxMenu* peer = GetWXPeer();
-        
+
         [NSApp setAppleMenu:[[m_osxMenu itemAtIndex:0] submenu]];
-        
+
         wxMenuItem *services = peer->FindItem(wxID_OSX_SERVICES);
         if ( services )
             [NSApp setServicesMenu:services->GetSubMenu()->GetHMenu()];
@@ -214,28 +210,28 @@ public :
             [NSApp setServicesMenu:nil];
 #endif
     }
-    
+
     virtual void MacSetupHelpMenu()
     {
         wxMenu* peer = GetWXPeer();
-        
+
         NSMenu* helpMenu = nil;
         int helpid = peer->FindItem(wxApp::s_macHelpMenuTitleName);
         if ( helpid == wxNOT_FOUND )
             helpid = peer->FindItem(_("&Help"));
-        
+
         if ( helpid != wxNOT_FOUND )
         {
             wxMenuItem* helpMenuItem = peer->FindItem(helpid);
-            
+
             if ( helpMenuItem->IsSubMenu() )
                 helpMenu = helpMenuItem->GetSubMenu()->GetHMenu();
         }
         if ( [NSApp respondsToSelector:@selector(setHelpMenu:)])
             [NSApp setHelpMenu:helpMenu];
-        
+
     }
-    
+
     virtual NSMenu* MacCreateOrFindWindowMenu()
     {
         NSString* nsWindowMenuTitle = wxNSStringWithWxString(wxStripMenuCodes(wxApp::s_macWindowMenuTitleName, wxStrip_Menu));
@@ -282,7 +278,7 @@ public :
         }
         return windowMenu;
     }
-    
+
     virtual void MacSetupWindowMenu()
     {
         if ( GetWXPeer()->GetMenuBar()->GetAutoWindowMenu() )
@@ -321,7 +317,7 @@ public :
         MacSetupAppleMenu();
         MacSetupHelpMenu();
         MacSetupWindowMenu();
-        
+
     }
 
     virtual void Enable( bool WXUNUSED(enable) )
@@ -347,7 +343,7 @@ public :
         {
             // we don't want plug-ins interfering
             m_osxMenu.allowsContextMenuPlugIns = NO;
-            
+
             wxTopLevelWindow* tlw = static_cast<wxTopLevelWindow*>(wxGetTopLevelParent(win));
             NSWindow* nsWindow = tlw->GetWXWindow();
             NSRect nsrect = NSZeroRect;
@@ -363,7 +359,7 @@ public :
                                                   eventNumber:0
                                                    clickCount:1
                                                      pressure:0];
-            
+
             [NSMenu popUpContextMenu:m_osxMenu withEvent:rightClick forView:view];
         }
         else
@@ -371,7 +367,7 @@ public :
             [m_osxMenu popUpMenuPositioningItem:nil atLocation:pointInView inView:view];
         }
     }
-    
+
     virtual void GetMenuBarDimensions(int &x, int &y, int &width, int &height) const override
     {
         NSRect r = [(NSScreen*)[[NSScreen screens] objectAtIndex:0] frame];
@@ -380,11 +376,11 @@ public :
         y = r.origin.y;
         width = r.size.width;
     }
-    
+
     void DisableAutoEnable()
     {
         [m_osxMenu setAutoenablesItems:NO];
-        
+
         wxMenu* menu = GetWXPeer();
         for ( wxMenuItemList::compatibility_iterator node = menu->GetMenuItems().GetFirst();
               node;
@@ -400,7 +396,7 @@ public :
         }
 
     }
-    
+
     WXHMENU GetHMenu() override { return m_osxMenu; }
 
     static wxMenuImpl* Create( wxMenu* peer, const wxString& title );
@@ -413,9 +409,7 @@ wxMenuCocoaImpl::~wxMenuCocoaImpl()
 {
     [m_osxMenu setDelegate:nil];
     [m_osxMenu setImplementation:nil];
-    // gc aware
-    if ( m_osxMenu )
-        CFRelease(m_osxMenu);
+    [m_osxMenu release];
 }
 
 wxMenuImpl* wxMenuImpl::Create( wxMenu* peer, const wxString& title )

@@ -43,6 +43,8 @@
 #include "wx/thread.h"
 #include "wx/stdpaths.h"
 
+#include "wx/private/safecall.h"
+
 #if wxUSE_EXCEPTIONS
     #include <exception>        // for std::current_exception()
     #include <utility>          // for std::swap()
@@ -59,6 +61,10 @@
 #if wxUSE_FONTMAP
     #include "wx/fontmap.h"
 #endif // wxUSE_FONTMAP
+
+#if wxUSE_LOG
+    #include "wx/private/log.h"
+#endif // wxUSE_LOG
 
 #if wxDEBUG_LEVEL
     #if wxUSE_STACKWALKER
@@ -97,6 +103,9 @@
                           const wxString& cond,
                           const wxString& msg,
                           wxAppTraits *traits = nullptr);
+
+    // Used to pass the function name from wxDefaultAssertHandler().
+    static wxString gs_assertFunc;
 #endif // wxDEBUG_LEVEL
 
 #ifdef __WXDEBUG__
@@ -288,16 +297,29 @@ void wxAppConsoleBase::OnLaunched()
 
 int wxAppConsoleBase::OnExit()
 {
-    // Delete all pending objects first, they might use wxConfig to save their
-    // state during their destruction.
-    DeletePendingObjects();
+    return 0;
+}
+
+int wxAppConsoleBase::CallOnExit()
+{
+    // As we're not dispatching any events any more, it should be safe to
+    // delete all pending objects and all still existing TLWs now, as they
+    // won't get any events any more.
+    DoDelayedCleanup();
+
+    const int rc = OnExit();
+
+    // Delete all pending objects again, in case more of them were created
+    // inside OnExit(): they might use wxConfig to save their state during
+    // their destruction.
+    DoDelayedCleanup();
 
 #if wxUSE_CONFIG
     // Ensure we won't create it on demand any more if we hadn't done it yet.
     wxConfigBase::DontCreateOnDemand();
 #endif // wxUSE_CONFIG
 
-    return 0;
+    return rc;
 }
 
 void wxAppConsoleBase::Exit()
@@ -319,19 +341,26 @@ wxAppTraits *wxAppConsoleBase::CreateTraits()
 
 wxAppTraits *wxAppConsoleBase::GetTraits()
 {
-    // Check for m_fullyConstructed to prevent constructing wrong traits
-    // object: if it is false, it means that the object of the user-defined
-    // wxApp-derived class hasn't been fully constructed yet, and so its
-    // possibly overridden CreateTraits() wouldn't be called if we called it
-    // now, so avoid doing it.
-    if ( !m_traits && m_fullyConstructed )
-    {
-        m_traits = CreateTraits();
+    // If we already have valid traits, just return them.
+    if ( m_traits )
+        return m_traits;
 
-        wxASSERT_MSG( m_traits, wxT("wxApp::CreateTraits() failed?") );
-    }
+    // Otherwise, create a new traits object as it would be unexpected (and
+    // backwards incompatible) to return a null pointer from this function.
+    auto* const traits = CreateTraits();
 
-    return m_traits;
+    // But only remember it if we're fully constructed to prevent using wrong
+    // traits object later: if m_fullyConstructed is false, it means that the
+    // object of the user-defined wxApp-derived class hasn't been fully
+    // constructed yet, and so its possibly overridden CreateTraits() wasn't
+    // called above, so make sure we do call it the next time GetTraits() is
+    // called.
+    if ( m_fullyConstructed )
+        m_traits = traits;
+
+    wxASSERT_MSG( traits, wxT("wxApp::CreateTraits() failed?") );
+
+    return traits;
 }
 
 /* static */
@@ -415,7 +444,10 @@ bool wxAppConsoleBase::ProcessIdle()
     // synthesize an idle event and check if more of them are needed
     wxIdleEvent event;
     event.SetEventObject(this);
-    ProcessEvent(event);
+
+    // Don't let exceptions propagate from the user-defined handler, we may be
+    // called from an extern "C" callback (e.g. this is the case in wxGTK).
+    SafelyProcessEvent(event);
 
 #if wxUSE_LOG
     // flush the logged messages if any (do this after processing the events
@@ -629,6 +661,11 @@ void wxAppConsoleBase::DeletePendingObjects()
     }
 }
 
+void wxAppConsoleBase::DoDelayedCleanup()
+{
+    DeletePendingObjects();
+}
+
 // ----------------------------------------------------------------------------
 // exception handling
 // ----------------------------------------------------------------------------
@@ -686,6 +723,25 @@ void wxAppConsoleBase::OnUnhandledException()
         what,
         wxIsMainThread() ? "the application" : "the thread in which it happened"
     );
+}
+
+/* static */
+void wxAppConsoleBase::CallOnUnhandledException()
+{
+    if ( wxTheApp )
+    {
+        wxSafeCall<void>([]()
+        {
+            wxTheApp->OnUnhandledException();
+        }, []()
+        {
+            // And OnUnhandledException() absolutely shouldn't throw,
+            // but we still must account for the possibility that it
+            // did. At least show some information about the exception
+            // in this case by calling our, non-overridden version.
+            wxTheApp->wxAppConsoleBase::OnUnhandledException();
+        });
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -852,7 +908,11 @@ void wxAppConsoleBase::OnAssert(const wxChar *file,
                                 const wxChar *cond,
                                 const wxChar *msg)
 {
+#if wxDEBUG_LEVEL
+    OnAssertFailure(file, line, gs_assertFunc.wc_str(), cond, msg);
+#else
     OnAssertFailure(file, line, nullptr, cond, msg);
+#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -879,14 +939,14 @@ void wxAppConsoleBase::SetCLocale()
 
 wxLog *wxConsoleAppTraitsBase::CreateLogTarget()
 {
-    return new wxLogStderr;
+    return new wxLogOutputBest;
 }
 
 #endif // wxUSE_LOG
 
 wxMessageOutput *wxConsoleAppTraitsBase::CreateMessageOutput()
 {
-    return new wxMessageOutputStderr;
+    return new wxMessageOutputBest;
 }
 
 #if wxUSE_FONTMAP
@@ -1124,10 +1184,6 @@ wxDefaultAssertHandler(const wxString& file,
                        const wxString& cond,
                        const wxString& msg)
 {
-    // If this option is set, we should abort immediately when assert happens.
-    if ( wxSystemOptions::GetOptionInt("exit-on-assert") )
-        wxAbort();
-
     // FIXME MT-unsafe
     static int s_bInAssert = 0;
 
@@ -1140,6 +1196,10 @@ wxDefaultAssertHandler(const wxString& file,
         return;
     }
 
+    // If this option is set, we should abort immediately when assert happens.
+    if ( wxSystemOptions::GetOptionInt("exit-on-assert") )
+        wxAbort();
+
     if ( !wxTheApp )
     {
         // by default, show the assert dialog box -- we can't customize this
@@ -1149,8 +1209,11 @@ wxDefaultAssertHandler(const wxString& file,
     else
     {
         // let the app process it as it wants
-        wxTheApp->OnAssertFailure(file.wc_str(), line, func.wc_str(),
-                                  cond.wc_str(), msg.wc_str());
+
+        // for compatibility, call the old function after stashing the function
+        // name into a global, so that it could pass it to the new one
+        gs_assertFunc = func;
+        wxTheApp->OnAssert(file.wc_str(), line, cond.wc_str(), msg.wc_str());
     }
 }
 

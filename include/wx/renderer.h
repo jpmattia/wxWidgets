@@ -23,15 +23,15 @@
 #ifndef _WX_RENDERER_H_
 #define _WX_RENDERER_H_
 
-class WXDLLIMPEXP_FWD_CORE wxDC;
-class WXDLLIMPEXP_FWD_CORE wxReadOnlyDC;
-class WXDLLIMPEXP_FWD_CORE wxWindow;
-
 #include "wx/gdicmn.h" // for wxPoint, wxSize
 #include "wx/colour.h"
 #include "wx/font.h"
 #include "wx/bitmap.h"
 #include "wx/string.h"
+
+class WXDLLIMPEXP_FWD_CORE wxDC;
+class WXDLLIMPEXP_FWD_CORE wxReadOnlyDC;
+class WXDLLIMPEXP_FWD_CORE wxWindow;
 
 // some platforms have their own renderers, others use the generic one
 #if defined(__WXMSW__) || ( defined(__WXMAC__) && wxOSX_USE_COCOA_OR_CARBON ) || \
@@ -41,8 +41,9 @@ class WXDLLIMPEXP_FWD_CORE wxWindow;
     #undef wxHAS_NATIVE_RENDERER
 #endif
 
-// only MSW and OS X currently provides DrawTitleBarBitmap() method
-#if defined(__WXMSW__) || (defined(__WXMAC__) && wxUSE_LIBPNG && wxUSE_IMAGE)
+// only wxMSW, wxOSX and wxQt currently provides DrawTitleBarBitmap() method
+#if defined(__WXMSW__) || (defined(__WXMAC__) && wxUSE_LIBPNG && wxUSE_IMAGE) || \
+    defined(__WXQT__)
     #define wxHAS_DRAW_TITLE_BAR_BITMAP
 #endif
 

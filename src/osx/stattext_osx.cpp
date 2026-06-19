@@ -33,9 +33,9 @@ bool wxStaticText::Create( wxWindow *parent,
     const wxSize& size,
     long style,
     const wxString& name )
-{    
+{
     DontCreatePeer();
-    
+
     if ( !wxControl::Create( parent, id, pos, size, style, wxDefaultValidator, name ) )
         return false;
 
@@ -57,10 +57,8 @@ bool wxStaticText::Create( wxWindow *parent,
 
 void wxStaticText::SetLabel(const wxString& label)
 {
-    if ( label == m_labelOrig )
+    if ( !UpdateLabelOrig(label) )
         return;
-
-    m_labelOrig = label;
 
     // middle/end ellipsization is handled by the OS:
     if ( HasFlag(wxST_ELLIPSIZE_END) || HasFlag(wxST_ELLIPSIZE_MIDDLE)

@@ -128,7 +128,8 @@ void wxAuiFloatingFrame::SetPaneWindow(const wxAuiPaneInfo& pane)
     // So we must call it first but doing it generates a size event and updates
     // pane.floating_size from inside it so we must also record its original
     // value before doing it.
-    const bool hasFloatingSize = pane.floating_size != wxDefaultSize;
+    const bool hasFloatingSize = pane.floating_size != wxDefaultSize ||
+                                    pane.floating_client_size != wxDefaultSize;
     if (pane.IsFixed())
     {
         SetWindowStyleFlag(GetWindowStyleFlag() & ~wxRESIZE_BORDER);
@@ -136,7 +137,15 @@ void wxAuiFloatingFrame::SetPaneWindow(const wxAuiPaneInfo& pane)
 
     if ( hasFloatingSize )
     {
-        SetSize(pane.floating_size);
+        // give floating_client_size precedence over floating_size
+        if (pane.floating_client_size != wxDefaultSize)
+        {
+            SetClientSize(pane.floating_client_size);
+        }
+        else
+        {
+            SetSize(pane.floating_size);
+        }
     }
     else
     {
@@ -147,10 +156,11 @@ void wxAuiFloatingFrame::SetPaneWindow(const wxAuiPaneInfo& pane)
             size = m_paneWindow->GetSize();
         if (m_ownerMgr && pane.HasGripper())
         {
+            const int gripperSize = m_ownerMgr->m_art->GetMetricForWindow(wxAUI_DOCKART_GRIPPER_SIZE, m_paneWindow);
             if (pane.HasGripperTop())
-                size.y += m_paneWindow->FromDIP(m_ownerMgr->m_art->GetMetric(wxAUI_DOCKART_GRIPPER_SIZE));
+                size.y += gripperSize;
             else
-                size.x += m_paneWindow->FromDIP(m_ownerMgr->m_art->GetMetric(wxAUI_DOCKART_GRIPPER_SIZE));
+                size.x += gripperSize;
         }
 
         SetClientSize(size);

@@ -126,7 +126,6 @@ bool wxFileButton::Create( wxWindow *parent, wxWindowID id,
         m_parent->DoAddChild( this );
 
         PostCreation(size);
-        SetInitialSize(size);
     }
     else // Use generic implementation.
     {
@@ -270,14 +269,12 @@ static void file_set(GtkFileChooser* widget, wxDirButton* p)
 extern "C" {
 static void selection_changed(GtkFileChooser* chooser, wxDirButton* win)
 {
-    char* filename = gtk_file_chooser_get_filename(chooser);
+    wxGtkString filename(gtk_file_chooser_get_filename(chooser));
 
     if (wxString::FromUTF8(filename) == win->GetPath())
         win->m_bIgnoreNextChange = false;
     else if (!win->m_bIgnoreNextChange)
         file_set(chooser, win);
-
-    g_free(filename);
 }
 }
 
@@ -312,14 +309,12 @@ bool wxDirButton::Create( wxWindow *parent, wxWindowID id,
 
         m_path = path;
 
-        // GtkFileChooserButton does not support GTK_FILE_CHOOSER_CREATE_FOLDER
-        // thus we must ensure that the wxDD_DIR_MUST_EXIST style was given
         m_dialog = new wxDirDialog
                        (
                             nullptr,
                             message,
                             m_path.empty() ? m_initialDir : m_path,
-                            wxGenericDirButton::GetDialogStyle(style | wxDIRP_DIR_MUST_EXIST)
+                            wxGenericDirButton::GetDialogStyle(style)
                        );
 
         // little trick used to avoid problems when there are other GTK windows 'grabbed':

@@ -998,7 +998,7 @@ void wxGTKRenderer::DrawRadioButtonBitmap(wxDC& dc,
     DrawBackground(dc, wxSCHEME_COLOUR(m_scheme, CONTROL_CURRENT), rect);
 
     dc.SetPen(m_penDarkGrey);
-    dc.SetBrush(wxSCHEME_COLOUR(m_scheme, CONTROL_CURRENT)); 
+    dc.SetBrush(wxSCHEME_COLOUR(m_scheme, CONTROL_CURRENT));
     // draw the normal border
     dc.DrawCircle(xRight/2,yBottom/2,yMid);
 
@@ -1671,6 +1671,7 @@ void wxGTKRenderer::DoDrawMenuItem(wxDC& dc,
 
         if ( bmp.IsOk() )
         {
+            rect.x = MENU_BMP_MARGIN;
             rect.SetRight(geometryInfo->GetLabelOffset());
             wxControlRenderer::DrawBitmap(dc, bmp, rect);
         }
@@ -1780,6 +1781,16 @@ wxMenuGeometryInfo *wxGTKRenderer::GetMenuGeometry(wxWindow *win,
             if ( widthAccel > widthAccelMax )
             {
                 widthAccelMax = widthAccel;
+            }
+
+            if ( item->IsCheckable() )
+            {
+                wxCoord width = GetCheckBitmapSize().x;
+                if ( width > widthBmpMax )
+                    widthBmpMax = width;
+                width = GetRadioBitmapSize().x;
+                if ( width > widthBmpMax )
+                    widthBmpMax = width;
             }
 
             const wxBitmap& bmp = item->GetBitmap();

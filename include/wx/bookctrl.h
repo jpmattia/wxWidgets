@@ -316,7 +316,7 @@ protected:
     virtual wxSize DoGetBestSize() const override;
 
     // helper: get the next page wrapping if we reached the end
-    int GetNextPage(bool forward) const;
+    virtual int GetNextPage(bool forward) const;
 
     // Lay out controls
     virtual void DoSize();
@@ -401,7 +401,7 @@ public:
         m_nOldSel = event.m_nOldSel;
     }
 
-    virtual wxEvent *Clone() const override { return new wxBookCtrlEvent(*this); }
+    wxNODISCARD virtual wxEvent *Clone() const override { return new wxBookCtrlEvent(*this); }
 
     // accessors
         // the currently selected page (wxNOT_FOUND if none)

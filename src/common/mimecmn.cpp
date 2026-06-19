@@ -138,7 +138,9 @@ wxString wxFileType::ExpandCommand(const wxString& command,
 
     wxString str;
     for ( const wxChar *pc = command.c_str(); *pc != wxT('\0'); pc++ ) {
-        if ( *pc == wxT('%') ) {
+        // Make sure to leave any trailing '%' alone to avoid going past the
+        // end of string.
+        if ( *pc == wxT('%') && pc[1] != wxT('\0') ) {
             switch ( *++pc ) {
                 case wxT('s'):
                     // don't quote the file name if it's already quoted: notice
@@ -164,7 +166,6 @@ wxString wxFileType::ExpandCommand(const wxString& command,
                     {
                         const wxChar *pEnd = wxStrchr(pc, wxT('}'));
                         if ( pEnd == nullptr ) {
-                            wxString mimetype;
                             wxLogWarning(_("Unmatched '{' in an entry for mime type %s."),
                                          params.GetMimeType().c_str());
                             str << wxT("%{");

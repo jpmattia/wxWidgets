@@ -61,17 +61,20 @@ void wxQtPushButton::action()
 
 bool wxQtPushButton::event(QEvent* e)
 {
-    switch ( e->type() )
+    if ( GetHandler() )
     {
-    case QEvent::EnabledChange:
-    case QEvent::Enter:
-    case QEvent::Leave:
-    case QEvent::FocusIn:
-    case QEvent::FocusOut:
-        GetHandler()->QtUpdateState();
-        break;
-    default:
-        break;
+        switch ( e->type() )
+        {
+        case QEvent::EnabledChange:
+        case QEvent::Enter:
+        case QEvent::Leave:
+        case QEvent::FocusIn:
+        case QEvent::FocusOut:
+            GetHandler()->QtUpdateState();
+            break;
+        default:
+            break;
+        }
     }
 
     return QPushButton::event(e);
@@ -112,6 +115,9 @@ void wxAnyButton::QtSetBitmap( const wxBitmapBundle &bitmapBundle )
 
 void wxAnyButton::SetLabel( const wxString &label )
 {
+    if ( HasFlag(wxBU_NOTEXT) )
+        return;
+
     wxAnyButtonBase::SetLabel( label );
 
     GetQPushButton()->setText( wxQtConvertString( label ));

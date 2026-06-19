@@ -488,6 +488,17 @@ TEST_CASE_METHOD(FileFunctionsTestCase,
     wxString pathOnly = wxPathOnly(filename.GetFullPath());
     if ( !wxDirExists(pathOnly) )
         CHECK( pathOnly == wxString() );
+
+    CHECK( wxPathOnly(wxString{}) == "" );
+    CHECK( wxPathOnly("foo") == "" );
+    CHECK( wxPathOnly("foo/") == "foo" );
+    CHECK( wxPathOnly("/foo/") == wxString(wxFILE_SEP_PATH) + "foo" );
+
+#ifdef __WINDOWS__
+    CHECK( wxPathOnly("c:\\foo.exe") == "c:" );
+    CHECK( wxPathOnly("c:foo.exe") == "c:." );
+    CHECK( wxPathOnly("foo\\bar.dll") == "foo" );
+#endif
 }
 
 // Unit tests for Mkdir and Rmdir doesn't cover non-ASCII directory names.
@@ -496,7 +507,7 @@ TEST_CASE_METHOD(FileFunctionsTestCase,
                  "FileFunctions::Mkdir",
                  "[filefn]")
 {
-    wxString dirname = wxString::FromUTF8("__wxMkdir_test_dir_with_\xc3\xb6");
+    wxString dirname = wxString::FromUTF8("__wxMkdir_test_dir_with_ö");
     INFO("Dir: " << dirname);
 
     CHECK( wxMkdir(dirname) );
@@ -508,7 +519,7 @@ TEST_CASE_METHOD(FileFunctionsTestCase,
                  "FileFunctions::Rmdir",
                  "[filefn]")
 {
-    wxString dirname = wxString::FromUTF8("__wxRmdir_test_dir_with_\xc3\xb6");
+    wxString dirname = wxString::FromUTF8("__wxRmdir_test_dir_with_ö");
     INFO("Dir: " << dirname);
 
     CHECK( wxMkdir(dirname) );
@@ -537,3 +548,25 @@ bool wxIsExecutable(const wxString &path);
 */
 
 #endif // wxUSE_FILE
+
+#if wxUSE_FSVOLUME
+
+#include "wx/volume.h"
+
+TEST_CASE("FSVolume", "[fs][volume]")
+{
+    wxFSVolumeBase vol;
+    CHECK( !vol.IsOk() );
+
+    const auto& volumes = wxFSVolumeBase::GetVolumes();
+    if ( volumes.empty() )
+    {
+        WARN("No volumes found, skipping wxFSVolume tests.");
+        return;
+    }
+
+    vol.Create(volumes[0]);
+    REQUIRE( vol.IsOk() );
+}
+
+#endif // wxUSE_FSVOLUME

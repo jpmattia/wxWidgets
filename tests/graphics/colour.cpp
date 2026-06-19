@@ -159,3 +159,44 @@ TEST_CASE("wxColour::GetLuminance", "[colour][luminance]")
     CHECK( wxRED->GetLuminance() > 0 );
     CHECK( wxRED->GetLuminance() < 1 );
 }
+
+TEST_CASE("wxColour::IsXXX", "[colour][opacity]")
+{
+    CHECK(wxColour{ 0, 0, 0, 0 }.IsTransparent());
+    CHECK_FALSE(wxColour{ 0, 0, 0, 1 }.IsTransparent());
+
+    CHECK(wxColour{ 0, 0, 0, 255 }.IsOpaque());
+    CHECK_FALSE(wxColour{ 0, 0, 0, 1 }.IsOpaque());
+
+    CHECK(wxColour{ 0, 0, 0, 254 }.IsTranslucent());
+    CHECK(wxColour{ 0, 0, 0, 10 }.IsTranslucent());
+    CHECK_FALSE(wxColour{ 0, 0, 0, 0 }.IsTranslucent());
+    CHECK_FALSE(wxColour{ 0, 0, 0, 255 }.IsTranslucent());
+}
+
+TEST_CASE("wxColour::Database", "[colour][database]")
+{
+    wxColourDatabase db;
+
+    // Check that we can add custom colours.
+    db.AddColour("NQB", wxColour(0x010203)); // Not quite black.
+    CHECK_THAT( db.Find("nqb"), RGBSameAs(0x03, 0x02, 0x01) );
+
+    // Unfortunately we can't check that all colours round trip because this is
+    // not the case for the colours present in the database under multiple
+    // names, such as "GREY" and "GRAY" for example. But we can at least check
+    // that the name found for all colours uses the same colour.
+    for ( const auto& name : db.GetAllNames() )
+    {
+        const wxColour& colour = db.Find(name);
+        const wxString& maybeOtherName = db.FindName(colour);
+        CHECK( db.Find(maybeOtherName) == colour );
+    }
+
+    // Check that green uses CSS value by default.
+    CHECK_THAT( db.Find("green"), RGBSameAs(0, 0x80, 0) );
+
+    // But we can use the legacy value for it too.
+    db.UseScheme(wxColourDatabase::Traditional);
+    CHECK_THAT( db.Find("green"), RGBSameAs(0, 0xff, 0) );
+}

@@ -55,7 +55,7 @@ public:
     virtual void SetName(const wxString& name,
                          wxPathFormat format = wxPATH_NATIVE) = 0;
 
-    wxArchiveEntry *Clone() const { return DoClone(); }
+    wxNODISCARD wxArchiveEntry *Clone() const { return DoClone(); }
 
     void SetNotifier(wxArchiveNotifier& notifier);
     virtual void UnsetNotifier() { m_notifier = nullptr; }
@@ -217,9 +217,9 @@ public:
 
     wxArchiveIterator& operator =(const wxArchiveIterator& it) {
         if (it.m_rep)
-            it.m_rep.AddRef();
+            it.m_rep->AddRef();
         if (m_rep)
-            this->m_rep.UnRef();
+            m_rep->UnRef();
         m_rep = it.m_rep;
         return *this;
     }
@@ -346,7 +346,7 @@ public:
     void Remove();
 
 protected:
-    // old compilers don't support covarient returns, so 'Do' methods are
+    // old compilers don't support covariant returns, so 'Do' methods are
     // used to simulate them
     virtual wxArchiveEntry        *DoNewEntry() const = 0;
     virtual wxArchiveInputStream  *DoNewStream(wxInputStream& stream) const = 0;

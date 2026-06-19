@@ -8,18 +8,22 @@
 /**
     @class wxCursor
 
-    A cursor is a small bitmap usually used for denoting where the mouse
-    pointer is, with a picture that might indicate the interpretation of a
-    mouse click. As with icons, cursors in X and MS Windows are created in a
-    different manner. Therefore, separate cursors will be created for the
-    different environments. Platform-specific methods for creating a wxCursor
-    object are catered for, and this is an occasion where conditional
-    compilation will probably be required (see wxIcon for an example).
+    A cursor is a small bitmap used for denoting where the mouse pointer is,
+    with a picture that indicates the point of a mouse click.
 
-    A single cursor object may be used in many windows (any subwindow type).
-    The wxWidgets convention is to set the cursor for a window, as in X, rather
-    than to set it globally as in MS Windows, although a global wxSetCursor()
-    function is also available for MS Windows use.
+    A cursor may be associated either with the given window (and all its
+    children, unless any of them defines its own cursor) using
+    wxWindow::SetCursor(), or set globally using wxSetCursor(). It is also
+    common to temporarily change the cursor to a "busy cursor" indicating that
+    some lengthy operation is in progress and wxBusyCursor can be used for
+    this.
+
+    Because a custom cursor of a fixed size would look either inappropriately
+    big in standard resolution or too small in high resolution, wxCursorBundle
+    class allows to define a set of cursors of different sizes, letting
+    wxWidgets to automatically select the most appropriate one for the current
+    resolution and user's preferred cursor size. Using this class with
+    wxWindow::SetCursorBundle() is the recommended way to use custom cursors.
 
     @section cursor_custom Creating a Custom Cursor
 
@@ -88,38 +92,25 @@ public:
     wxCursor();
 
     /**
-        Constructs a cursor by passing an array of bits (XBM data).
+        Constructs a cursor from the provided bitmap and hotspot position.
 
-        The parameters @a fg and @a bg have an effect only on GTK+, and force
-        the cursor to use particular background and foreground colours.
-
-        @param bits
-            An array of XBM data bits.
-        @param width
-            Cursor width.
-        @param height
-            Cursor height.
+        @param bitmap
+            The bitmap to use for the cursor, should be valid.
         @param hotSpotX
             Hotspot x coordinate (relative to the top left of the image).
         @param hotSpotY
             Hotspot y coordinate (relative to the top left of the image).
-        @param maskBits
-            Bits for a mask bitmap.
-        @param fg
-            Foreground colour.
-        @param bg
-            Background colour.
 
-        @onlyfor{wxgtk}
+        @since 3.3.0
+     */
+    wxCursor(const wxBitmap& bitmap, int hotSpotX = 0, int hotSpotY = 0);
 
-        @beginWxPerlOnly
-        In wxPerl use Wx::Cursor->newData(bits, width, height, hotSpotX = -1, hotSpotY = -1, maskBits = 0).
-        @endWxPerlOnly
-    */
-    wxCursor(const char bits[], int width, int height,
-             int hotSpotX = -1, int hotSpotY = -1,
-             const char maskBits[] = nullptr,
-             const wxColour* fg = nullptr, const wxColour* bg = nullptr);
+    /**
+        @overload
+
+        @since 3.3.0
+     */
+    wxCursor(const wxBitmap& bitmap, const wxPoint& hotSpot);
 
     /**
         Constructs a cursor by passing a string resource name or filename.
@@ -153,6 +144,13 @@ public:
     wxCursor(const wxString& cursorName,
              wxBitmapType type = wxCURSOR_DEFAULT_TYPE,
              int hotSpotX = 0, int hotSpotY = 0);
+
+    /**
+        @overload
+
+        @since 3.3.0
+     */
+    wxCursor(const wxString& name, wxBitmapType type, const wxPoint& hotSpot);
 
     /**
         Constructs a cursor using a cursor identifier.
@@ -200,6 +198,40 @@ public:
     wxCursor(const char* const* xpmData);
 
     /**
+        wxGTK-specific constructor from data in XBM format.
+
+        The parameters @a fg and @a bg have an effect only on GTK+, and force
+        the cursor to use particular background and foreground colours.
+
+        @param bits
+            An array of XBM data bits.
+        @param width
+            Cursor width.
+        @param height
+            Cursor height.
+        @param hotSpotX
+            Hotspot x coordinate (relative to the top left of the image).
+        @param hotSpotY
+            Hotspot y coordinate (relative to the top left of the image).
+        @param maskBits
+            Bits for a mask bitmap.
+        @param fg
+            Foreground colour.
+        @param bg
+            Background colour.
+
+        @onlyfor{wxgtk}
+
+        @beginWxPerlOnly
+        In wxPerl use Wx::Cursor->newData(bits, width, height, hotSpotX = -1, hotSpotY = -1, maskBits = 0).
+        @endWxPerlOnly
+    */
+    wxCursor(const char bits[], int width, int height,
+             int hotSpotX = -1, int hotSpotY = -1,
+             const char maskBits[] = nullptr,
+             const wxColour* fg = nullptr, const wxColour* bg = nullptr);
+
+    /**
         Copy constructor, uses @ref overview_refcount "reference counting".
 
         @param cursor
@@ -218,8 +250,8 @@ public:
         The hot spot is the point at which the mouse is actually considered to
         be when this cursor is used.
 
-        This method is currently only implemented in wxMSW and wxGTK2+ and
-        simply returns ::wxDefaultPosition in the other ports.
+        This method is currently implemented in wxMSW, wxGTK and wxOSX (since
+        wxWidgets 3.3.0) and returns ::wxDefaultPosition in the other ports.
 
         @since 3.1.0
      */
@@ -244,3 +276,111 @@ wxCursor* wxHOURGLASS_CURSOR;
 wxCursor* wxCROSS_CURSOR;
 ///@}
 
+/**
+    @class wxCursorBundle
+
+    A cursor bundle is a set of different versions of the same cursor at
+    different sizes.
+
+    This class relationship with wxCursor is similar to that of wxBitmapBundle
+    with wxBitmap, but it has a simpler interface because cursors are never
+    scaled and always use the closest available size. It is typically used like
+    the following:
+
+    @code
+    MyFrame::MyFrame()
+    {
+        SetCursorBundle(wxCursorBundle(wxBitmapBundle::FromResources("mycursor"),
+                                       wxPoint(1, 1)));
+    }
+    @endcode
+
+    Please see wxBitmapBundle documentation for more information about
+    different ways of creating it.
+
+    @library{wxcore}
+    @category{gdi}
+
+    @since 3.3.0
+ */
+class wxCursorBundle
+{
+public:
+    /**
+        Default ctor constructs an empty bundle.
+
+        Such bundle represents the absence of any custom cursor but not an
+        empty cursor (::wxCURSOR_BLANK can be used if this is really needed).
+
+        You can use the assignment operator to set the bundle contents later.
+     */
+    wxCursorBundle();
+
+    /**
+        Create a cursor bundle from the given bitmap bundle.
+
+        @param bitmaps
+            The bitmap bundle to use for the cursor, typically containing
+            bitmap in at least two sizes.
+        @param hotSpot
+            Hotspot coordinates (relative to the top left of the image).
+            The coordinates are relative to the default size of the bitmap
+            bundle and are scaled by wxWidgets for other sizes.
+     */
+    explicit wxCursorBundle(const wxBitmapBundle& bitmaps,
+                            const wxPoint& hotSpot);
+
+    /// @overload
+    explicit wxCursorBundle(const wxBitmapBundle& bitmaps,
+                            int hotSpotX = 0, int hotSpotY = 0);
+
+    /**
+        Copy constructor performs a shallow copy of the bundle.
+
+        This operation is cheap as it doesn't copy any bitmaps.
+     */
+    wxCursorBundle(const wxCursorBundle& other);
+
+    /**
+        Assignment operator performs a shallow copy of the bundle.
+
+        This operation is cheap as it doesn't copy any bitmaps.
+     */
+    wxCursorBundle& operator=(const wxCursorBundle& other);
+
+    /**
+        Check if cursor bundle is non-empty.
+     */
+    bool IsOk() const;
+
+    /**
+        Clear the bundle contents.
+
+        IsOk() will return false after doing this.
+
+        Use the assignment operator to set the bundle contents later.
+     */
+    void Clear();
+
+    /**
+        Get the cursor of the size suitable for the given window.
+     */
+    wxCursor GetCursorFor(const wxWindow* window) const;
+
+    /**
+        Get the cursor of the default size.
+
+        Prefer to use GetCursorFor() instead if there is a suitable window
+        available, this function only exists as last resort.
+     */
+    wxCursor GetCursorForMainWindow() const;
+
+    /**
+        Check if two objects refer to the same bundle.
+
+        Note that this compares the object identity, i.e. this function returns
+        @true only for copies of the same bundle, but @false for two bundles
+        created from the same bitmap bundle and same hotspot coordinates.
+     */
+    bool IsSameAs(const wxCursorBundle& other) const;
+};

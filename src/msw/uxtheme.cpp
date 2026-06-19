@@ -19,8 +19,6 @@
 #include "wx/wxprec.h"
 
 
-#if wxUSE_UXTHEME
-
 #ifndef WX_PRECOMP
     #include "wx/app.h"
     #include "wx/toplevel.h"
@@ -32,16 +30,46 @@
 #include "wx/dynlib.h"
 
 #include "wx/msw/uxtheme.h"
+#include "wx/msw/private/darkmode.h"
 
 bool wxUxThemeIsActive()
 {
-    return ::IsAppThemed() && ::IsThemeActive();
+    static int s_isActive = -1;
+    if ( s_isActive == -1 )
+    {
+        s_isActive = ::IsAppThemed() && ::IsThemeActive() ? 1 : 0;
+    }
+
+    return s_isActive != 0;
+}
+
+wxUxThemeHandle::wxUxThemeHandle(const wxWindowMSW* win,
+                                 const wchar_t* classes,
+                                 const wchar_t* classesDark)
+    : m_hTheme{DoOpenThemeData(GetHwndOf(win),
+                               classes,
+                               classesDark,
+                               win->GetDPI().y)}
+{
 }
 
 /* static */
 HTHEME
-wxUxThemeHandle::DoOpenThemeData(HWND hwnd, const wchar_t *classes, int dpi)
+wxUxThemeHandle::DoOpenThemeData(HWND hwnd,
+                                 const wchar_t *classes,
+                                 const wchar_t *classesDark,
+                                 int dpi)
 {
+    if ( classesDark && wxMSWDarkMode::IsActive() )
+    {
+        classes = classesDark;
+
+        // When using dark mode and using dark mode-specific classes we have to
+        // use the handle of a control which is *not* in dark mode, and as we
+        // don't have any, just use 0.
+        hwnd = 0;
+    }
+
     // If DPI is the default one, we can use the old function.
     if ( dpi != STD_DPI )
     {
@@ -82,10 +110,11 @@ wxColour wxUxThemeHandle::GetColour(int part, int prop, int state) const
     return wxRGBToColour(col);
 }
 
-wxSize wxUxThemeHandle::DoGetSize(int part, int state, THEMESIZE ts) const
+wxSize
+wxUxThemeHandle::DoGetSize(HDC hdc, int part, int state, THEMESIZE ts) const
 {
     SIZE size;
-    HRESULT hr = ::GetThemePartSize(m_hTheme, nullptr, part, state, nullptr, ts,
+    HRESULT hr = ::GetThemePartSize(m_hTheme, hdc, part, state, nullptr, ts,
                                     &size);
     if ( FAILED(hr) )
     {
@@ -99,10 +128,51 @@ wxSize wxUxThemeHandle::DoGetSize(int part, int state, THEMESIZE ts) const
     return wxSize{size.cx, size.cy};
 }
 
-void
-wxUxThemeHandle::DrawBackground(HDC hdc, const RECT& rc, int part, int state)
+bool
+wxUxThemeHandle::GetMargins(MARGINS& margins,
+                            int part,
+                            int prop,
+                            int state,
+                            HDC hdc) const
 {
-    HRESULT hr = ::DrawThemeBackground(m_hTheme, hdc, part, state, &rc, nullptr);
+    HRESULT hr = ::GetThemeMargins(m_hTheme, hdc, part, state, prop, nullptr,
+                                   &margins);
+    if ( FAILED(hr) )
+    {
+        wxLogApiError(
+            wxString::Format("GetThemeMargins(%i, %i, %i)", part, state, prop),
+            hr
+        );
+        return false;
+    }
+
+    return true;
+}
+
+bool
+wxUxThemeHandle::GetFont(LOGFONTW& lf, HDC hdc, int part, int state) const
+{
+    HRESULT hr = ::GetThemeFont(m_hTheme, hdc, part, state, TMT_FONT, &lf);
+    if ( FAILED(hr) )
+    {
+        wxLogApiError(
+            wxString::Format("GetThemeFont(%i, %i)", part, state),
+            hr
+        );
+        return false;
+    }
+
+    return true;
+}
+
+void
+wxUxThemeHandle::DrawBackground(HDC hdc,
+                                const RECT& rc,
+                                int part,
+                                int state,
+                                const RECT* rcClip)
+{
+    HRESULT hr = ::DrawThemeBackground(m_hTheme, hdc, part, state, &rc, rcClip);
     if ( FAILED(hr) )
     {
         wxLogApiError(
@@ -120,10 +190,3 @@ wxUxThemeHandle::DrawBackground(HDC hdc, const wxRect& rect, int part, int state
 
     DrawBackground(hdc, rc, part, state);
 }
-
-#else
-bool wxUxThemeIsActive()
-{
-    return false;
-}
-#endif // wxUSE_UXTHEME

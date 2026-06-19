@@ -17,7 +17,9 @@
 // Apparently {mouse,key}Event() functions signature has changed from QWidget to
 // QWindow at some time during Qt5.  Fortunately, we can continue to use the API
 // taking QWidget by defining QT_WIDGETS_LIB before including the test headers.
+#ifndef QT_WIDGETS_LIB
 #define QT_WIDGETS_LIB
+#endif
 
 #include <QtTest/QtTestGui>
 #include <QtWidgets/QApplication>
@@ -175,7 +177,7 @@ static bool SimulateKeyboardKey( KeyAction keyAction, Key key, int modifiers )
     // always produces a lowercase of that char! (which must be in uppercase)
     if ( modifiers == wxMOD_SHIFT && key < 256 )
     {
-        const QChar qChar(key);
+        const QChar qChar(static_cast<int>(key));
         if ( qChar.isLetter() )
         {
             widget->windowHandle() != nullptr ?

@@ -197,7 +197,7 @@ void wxPGEditor::SetControlAppearance( wxPropertyGrid* pg,
 #else
             tcText = property->GetValueAsString(
 #endif // WXWIN_COMPATIBILITY_3_2 | !WXWIN_COMPATIBILITY_3_2
-                property->HasFlag(wxPGPropertyFlags::ReadOnly)?wxPGPropValFormatFlags::Null:wxPGPropValFormatFlags::EditableValue);
+                property->HasFlag(wxPGFlags::ReadOnly)?wxPGPropValFormatFlags::Null:wxPGPropValFormatFlags::EditableValue);
             changeText = true;
         }
 
@@ -285,12 +285,12 @@ wxPGWindowList wxPGTextCtrlEditor::CreateControls( wxPropertyGrid* propGrid,
 
     //
     // If has children, and limited editing is specified, then don't create.
-    if ( property->HasFlag(wxPGPropertyFlags::NoEditor) &&
+    if ( property->HasFlag(wxPGFlags::NoEditor) &&
          property->HasAnyChild() )
         return nullptr;
 
     wxPGPropValFormatFlags fmtFlags = wxPGPropValFormatFlags::Null;
-    if ( !property->HasFlag(wxPGPropertyFlags::ReadOnly) &&
+    if ( !property->HasFlag(wxPGFlags::ReadOnly) &&
          !property->IsValueUnspecified() )
         fmtFlags |= wxPGPropValFormatFlags::EditableValue;
 #if WXWIN_COMPATIBILITY_3_2
@@ -455,7 +455,7 @@ void wxPGTextCtrlEditor_OnFocus( wxPGProperty* property,
 {
     // Make sure there is correct text (instead of unspecified value
     // indicator or hint text)
-    wxPGPropValFormatFlags fmtFlags = property->HasFlag(wxPGPropertyFlags::ReadOnly) ?
+    wxPGPropValFormatFlags fmtFlags = property->HasFlag(wxPGFlags::ReadOnly) ?
         wxPGPropValFormatFlags::Null : wxPGPropValFormatFlags::EditableValue;
 #if WXWIN_COMPATIBILITY_3_2
     // Special implementation with check if user-overriden obsolete function is still in use
@@ -829,11 +829,11 @@ void wxPropertyGrid::OnComboItemPaint( const wxPGComboBox* pCb,
     {
         renderFlags |= wxPGCellRenderer::Control;
 
-        // If wxPGPropertyFlags::CustomImage was set, then that means any custom
+        // If wxPGFlags::CustomImage was set, then that means any custom
         // image will not appear on the control row (it may be too
         // large to fit, for instance). Also do not draw custom image
         // if no choice was selected.
-        if ( !p->HasFlag(wxPGPropertyFlags::CustomImage) )
+        if ( !p->HasFlag(wxPGFlags::CustomImage) )
             useCustomPaintProcedure = false;
     }
     else
@@ -971,7 +971,7 @@ wxWindow* wxPGChoiceEditor::CreateControlsBase( wxPropertyGrid* propGrid,
     // Since it is not possible (yet) to create a read-only combo box in
     // the same sense that wxTextCtrl is read-only, simply do not create
     // the control in this case.
-    if ( property->HasFlag(wxPGPropertyFlags::ReadOnly) )
+    if ( property->HasFlag(wxPGFlags::ReadOnly) )
         return nullptr;
 
     const wxPGChoices& choices = property->GetChoices();
@@ -979,7 +979,7 @@ wxWindow* wxPGChoiceEditor::CreateControlsBase( wxPropertyGrid* propGrid,
     int index = property->GetChoiceSelection();
 
     wxPGPropValFormatFlags fmtFlags = wxPGPropValFormatFlags::Null;
-    if ( !property->HasFlag(wxPGPropertyFlags::ReadOnly) &&
+    if ( !property->HasFlag(wxPGFlags::ReadOnly) &&
          !property->IsValueUnspecified() )
         fmtFlags |= wxPGPropValFormatFlags::EditableValue;
 #if WXWIN_COMPATIBILITY_3_2
@@ -1265,13 +1265,12 @@ bool wxPGComboBoxEditor::OnEvent( wxPropertyGrid* propGrid,
                                   wxWindow* ctrl,
                                   wxEvent& event ) const
 {
-    wxOwnerDrawnComboBox* cb = nullptr;
     wxWindow* textCtrl = nullptr;
 
     if ( ctrl )
     {
-        cb = (wxOwnerDrawnComboBox*)ctrl;
-        textCtrl = cb->GetTextCtrl();
+        if ( auto cb = wxDynamicCast(ctrl, wxOwnerDrawnComboBox) )
+            textCtrl = cb->GetTextCtrl();
     }
 
     if ( wxPGTextCtrlEditor::OnTextCtrlEvent(propGrid,property,textCtrl,event) )
@@ -1393,7 +1392,7 @@ wxPGWindowList wxPGTextCtrlAndButtonEditor::CreateControls( wxPropertyGrid* prop
 {
     wxWindow* wnd2;
     wxWindow* wnd = propGrid->GenerateEditorTextCtrlAndButton( pos, sz, &wnd2,
-        property->HasFlag(wxPGPropertyFlags::NoEditor), property);
+        property->HasFlag(wxPGFlags::NoEditor), property);
 
     return wxPGWindowList(wnd, wnd2);
 }
@@ -1622,8 +1621,6 @@ void wxSimpleCheckBox::OnPaint( wxPaintEvent& WXUNUSED(event) )
     dc.SetBrush( bgcol );
     dc.SetPen( bgcol );
 
-    dc.SetTextForeground(GetForegroundColour());
-
     wxSimpleCheckBoxStates state = m_state;
     if ( !(state & wxSimpleCheckBoxStates::Unspecified) &&
          GetFont().GetWeight() == wxFONTWEIGHT_BOLD )
@@ -1681,7 +1678,7 @@ wxPGWindowList wxPGCheckBoxEditor::CreateControls( wxPropertyGrid* propGrid,
                                                    const wxPoint& pos,
                                                    const wxSize& size ) const
 {
-    if ( property->HasFlag(wxPGPropertyFlags::ReadOnly) )
+    if ( property->HasFlag(wxPGFlags::ReadOnly) )
         return nullptr;
 
     wxPoint pt = pos;
@@ -1958,7 +1955,7 @@ wxWindow* wxPropertyGrid::GenerateEditorTextCtrl( const wxPoint& pos,
 
     int tcFlags = wxTE_PROCESS_ENTER | extraStyle;
 
-    if ( prop->HasFlag(wxPGPropertyFlags::ReadOnly) && forColumn == 1 )
+    if ( prop->HasFlag(wxPGFlags::ReadOnly) && forColumn == 1 )
         tcFlags |= wxTE_READONLY;
 
     wxPoint p(pos);
@@ -2011,7 +2008,7 @@ wxWindow* wxPropertyGrid::GenerateEditorTextCtrl( const wxPoint& pos,
     // This code is repeated from DoSelectProperty(). However, font boldness
     // must be set before margin is set up below in FixPosForTextCtrl().
     if ( forColumn == 1 &&
-         prop->HasFlag(wxPGPropertyFlags::Modified) &&
+         prop->HasFlag(wxPGFlags::Modified) &&
          HasFlag(wxPG_BOLD_MODIFIED) )
          tc->SetFont( m_captionFont );
 
@@ -2078,7 +2075,7 @@ wxWindow* wxPropertyGrid::GenerateEditorButton( const wxPoint& pos, const wxSize
     p.x = pos.x + sz.x - s.x;
     but->Move(p);
 
-    if ( selected->HasFlag(wxPGPropertyFlags::ReadOnly) && !selected->HasFlag(wxPGPropertyFlags_ActiveButton) )
+    if ( selected->HasFlag(wxPGFlags::ReadOnly) && !selected->HasFlag(wxPGPropertyFlags_ActiveButton) )
         but->Disable();
 
     return but;
@@ -2109,9 +2106,9 @@ wxWindow* wxPropertyGrid::GenerateEditorTextCtrlAndButton( const wxPoint& pos,
     if ( !property->IsValueUnspecified() )
 #if WXWIN_COMPATIBILITY_3_2
         // Special implementation with check if user-overriden obsolete function is still in use
-        text = property->GetValueAsStringWithCheck(property->HasFlag(wxPGPropertyFlags::ReadOnly)?wxPGPropValFormatFlags::Null : wxPGPropValFormatFlags::EditableValue);
+        text = property->GetValueAsStringWithCheck(property->HasFlag(wxPGFlags::ReadOnly)?wxPGPropValFormatFlags::Null : wxPGPropValFormatFlags::EditableValue);
 #else
-        text = property->GetValueAsString(property->HasFlag(wxPGPropertyFlags::ReadOnly) ? wxPGPropValFormatFlags::Null : wxPGPropValFormatFlags::EditableValue);
+        text = property->GetValueAsString(property->HasFlag(wxPGFlags::ReadOnly) ? wxPGPropValFormatFlags::Null : wxPGPropValFormatFlags::EditableValue);
 #endif // WXWIN_COMPATIBILITY_3_2 | !WXWIN_COMPATIBILITY_3_2
 
     return GenerateEditorTextCtrl(pos, sz, text, but, 0, property->GetMaxLength());
@@ -2209,100 +2206,14 @@ void wxPGMultiButton::Finalize( wxPropertyGrid* WXUNUSED(propGrid),
     Move( pos.x + m_fullEditorSize.x - m_buttonsWidth, pos.y - wxPG_BUTTON_BORDER_WIDTH, wxSIZE_ALLOW_MINUS_ONE);
 }
 
-int wxPGMultiButton::GenId( int itemid ) const
-{
-    return itemid < -1 ? wxID_ANY : itemid;
-}
-
 #if wxUSE_BMPBUTTON
-
-#if defined(__WXGTK__)
-// Dedicated wxBitmapButton with reduced internal borders
-#include "wx/gtk/private.h"
-
-class wxPGEditorBitmapButton : public wxBitmapButton
-{
-public:
-    wxPGEditorBitmapButton(wxWindow *parent, wxWindowID id,
-                     const wxBitmap& bitmap, const wxPoint& pos,
-                     const wxSize& size, long style = 0)
-        : wxBitmapButton(parent, id, bitmap, pos, size, style)
-    {
-#if defined(__WXGTK3__)
-        GTKApplyCssStyle("*{ padding:0 }");
-#else
-        // Define a special button style without inner border
-        // if it's not yet done.
-        if ( !m_exactFitStyleDefined )
-        {
-            gtk_rc_parse_string(
-              "style \"wxPGEditorBitmapButton_style\"\n"
-              "{ GtkButton::inner-border = { 0, 0, 0, 0 } }\n"
-              "widget \"*wxPGEditorBitmapButton*\" style \"wxPGEditorBitmapButton_style\"\n"
-            );
-            m_exactFitStyleDefined = true;
-        }
-
-        // Assign the button to the GTK style without inner border.
-        gtk_widget_set_name(m_widget, "wxPGEditorBitmapButton");
-#endif
-    }
-
-    virtual ~wxPGEditorBitmapButton() = default;
-
-private:
-#ifndef __WXGTK3__
-    // To mark if special GTK style was already defined.
-    static bool m_exactFitStyleDefined;
-#endif // !__WXGTK3__
-};
-
-#ifndef __WXGTK3__
-bool wxPGEditorBitmapButton::m_exactFitStyleDefined = false;
-#endif // !__WXGTK3__
-
-#else // !__WXGTK__
-
-typedef wxBitmapButton wxPGEditorBitmapButton;
-
-#endif // __WXGTK__ / !__WXGTK__
 
 void wxPGMultiButton::Add( const wxBitmapBundle& bitmap, int itemid )
 {
-    itemid = GenId(itemid);
     wxSize sz = GetSize();
-
-    // Internal margins around the bitmap inside the button
-    const int margins =
-#if defined(__WXMSW__)
-            2*4;
-#elif defined(__WXGTK3__)
-            2*2;
-#elif defined(__WXGTK__)
-            2*6;
-#elif defined(__WXOSX__)
-            2*3;
-#else
-            0;
-#endif
-    // Maximal heigth of the bitmap
-    const int hMax = wxMax(4, sz.y - margins);
-
-    wxBitmap bmp = bitmap.GetBitmapFor(this);
-    wxBitmap scaledBmp;
-    // Scale bitmap down if necessary
-    if ( bmp.GetHeight() > hMax )
-    {
-        double scale = (double)hMax / bmp.GetHeight();
-        scaledBmp = wxPropertyGrid::RescaleBitmap(bmp, scale, scale);
-    }
-    else
-    {
-        scaledBmp = bmp;
-    }
-
-    wxBitmapButton* button = new wxPGEditorBitmapButton(this, itemid, scaledBmp,
-                           wxPoint(sz.x, 0), wxSize(wxDefaultCoord, sz.y));
+    wxBitmapButton* button = new wxBitmapButton(this, itemid, bitmap,
+                           wxPoint(sz.x, 0), wxSize(wxDefaultCoord, sz.y),
+                           wxBU_EXACTFIT);
     // If button is narrow make it a square
     wxSize szBtn = button->GetSize();
     if ( szBtn.x < szBtn.y )
@@ -2314,7 +2225,6 @@ void wxPGMultiButton::Add( const wxBitmapBundle& bitmap, int itemid )
 
 void wxPGMultiButton::Add( const wxString& label, int itemid )
 {
-    itemid = GenId(itemid);
     wxSize sz = GetSize();
     wxButton* button = new wxButton(this, itemid, label,
                     wxPoint(sz.x, 0), wxSize(wxDefaultCoord, sz.y), wxBU_EXACTFIT);

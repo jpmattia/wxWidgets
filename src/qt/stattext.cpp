@@ -33,6 +33,32 @@ wxStaticText::wxStaticText(wxWindow *parent,
              const wxString &name)
 {
     Create( parent, id, label, pos, size, style, name );
+
+    // to allow dynamic ellipsizing of the label.
+    Bind(wxEVT_SIZE, [this](wxSizeEvent& event)
+        {
+            event.Skip();
+
+            UpdateLabel();
+        });
+}
+
+wxStaticText::~wxStaticText()
+{
+    // Dissociate the buddy before QLabel get destroyed to avoid this assertion:
+    //
+    // ASSERT failure in QLabel: "Called object is not of the correct type (class
+    // destructor may have already run)", file...
+    //
+    // Explanation:
+    // ------------
+    // When setBuddy() is called to set the buddy (see Create() below), Qt (internally)
+    // connects the QLabel to the QObject::destroyed() signal to be notified of the
+    // buddy's destruction and to dissociate it. Since the QLabel and its buddy are
+    // the same object, setBuddy() will be called on an already destroyed object, producing
+    // the aforementioned assertion message.
+
+    GetQLabel()->setBuddy( nullptr );
 }
 
 bool wxStaticText::Create(wxWindow *parent,
@@ -73,12 +99,8 @@ QLabel* wxStaticText::GetQLabel() const
 void wxStaticText::SetLabel(const wxString& label)
 {
     // If the label doesn't really change, avoid flicker by not doing anything.
-    if ( label == m_labelOrig )
+    if ( !UpdateLabelOrig(label) )
         return;
-
-    // save the label in m_labelOrig with both the markup (if any) and
-    // the mnemonics characters (if any)
-    m_labelOrig = label;
 
     WXSetVisibleLabel(GetEllipsizedLabel());
 

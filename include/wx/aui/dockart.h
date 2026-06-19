@@ -22,6 +22,9 @@
 #include "wx/brush.h"
 #include "wx/bmpbndl.h"
 #include "wx/colour.h"
+#include "wx/font.h"
+
+class WXDLLIMPEXP_FWD_AUI wxAuiPaneInfo;
 
 // dock art provider code - a dock provider provides all drawing
 // functionality to the wxAui dock manager.  This allows the dock
@@ -34,7 +37,14 @@ public:
     wxAuiDockArt() = default;
     virtual ~wxAuiDockArt() = default;
 
-    virtual wxAuiDockArt* Clone() = 0;
+    wxNODISCARD virtual wxAuiDockArt* Clone() = 0;
+
+    // This function should be used for querying metrics in the new code, as it
+    // will scale them by the DPI of the provided window if necessary. The
+    // older GetMetric() function is kept for compatibility and shouldn't be
+    // used outside of this class itself.
+    virtual int GetMetricForWindow(int id, wxWindow* window);
+
     virtual int GetMetric(int id) = 0;
     virtual void SetMetric(int id, int newVal) = 0;
     virtual void SetFont(int id, const wxFont& font) = 0;
@@ -92,7 +102,7 @@ public:
 
     wxAuiDefaultDockArt();
 
-    wxAuiDockArt* Clone() override;
+    wxNODISCARD wxAuiDockArt* Clone() override;
     int GetMetric(int metricId) override;
     void SetMetric(int metricId, int newVal) override;
     wxColour GetColour(int id) override;
@@ -151,6 +161,10 @@ protected:
 
     void InitBitmaps();
 
+    // Preferred function for bitmap access: use it rather than wxBitmapBundle
+    // member variables directly.
+    wxBitmapBundle GetPaneButtonBitmap(int button, const wxAuiPaneInfo& pane);
+
 protected:
 
     wxPen m_borderPen;
@@ -182,6 +196,11 @@ protected:
     int m_buttonSize;
     int m_gripperSize;
     int m_gradientType;
+
+private:
+    // Allocated on demand, use only via GetPaneButtonBitmap().
+    wxBitmapBundle m_inactiveMinimizeBitmap;
+    wxBitmapBundle m_activeMinimizeBitmap;
 };
 
 

@@ -55,10 +55,14 @@ enum wxImageResizeQuality
     /**
         Default image resizing algorithm used by wxImage::Scale().
 
-        Currently this is the same as wxIMAGE_QUALITY_NEAREST when enlarging
-        the image (in at least one direction) and wxIMAGE_QUALITY_BILINEAR when
-        reducing it, which produces relatively good results for the images
-        typically used for the icons in the GUI applications.
+        Currently this algorithm uses wxIMAGE_QUALITY_BILINEAR when reducing
+        the image size (in both directions) to resize the image to an integer
+        multiple of the target size and, after doing this, or as the only step
+        when enlarging the image, applies wxIMAGE_QUALITY_BOX_AVERAGE to obtain
+        the desired size.
+
+        This produces relatively good results for the images typically used for
+        the icons in the GUI applications.
     */
     wxIMAGE_QUALITY_NORMAL,
 
@@ -144,12 +148,16 @@ enum wxImagePNGType
 #define wxIMAGE_OPTION_PNG_COMPRESSION_MEM_LEVEL        wxString("PngZM")
 #define wxIMAGE_OPTION_PNG_COMPRESSION_STRATEGY         wxString("PngZS")
 #define wxIMAGE_OPTION_PNG_COMPRESSION_BUFFER_SIZE      wxString("PngZB")
+#define wxIMAGE_OPTION_PNG_DESCRIPTION                  wxString("PngDescription")
 
 #define wxIMAGE_OPTION_TIFF_BITSPERSAMPLE               wxString("BitsPerSample")
 #define wxIMAGE_OPTION_TIFF_SAMPLESPERPIXEL             wxString("SamplesPerPixel")
 #define wxIMAGE_OPTION_TIFF_COMPRESSION                 wxString("Compression")
 #define wxIMAGE_OPTION_TIFF_PHOTOMETRIC                 wxString("Photometric")
 #define wxIMAGE_OPTION_TIFF_IMAGEDESCRIPTOR             wxString("ImageDescriptor")
+
+#define wxIMAGE_OPTION_WEBP_QUALITY                     wxString("WebPQuality")
+#define wxIMAGE_OPTION_WEBP_FORMAT                      wxString("WebPFormat")
 
 
 enum
@@ -205,10 +213,24 @@ public:
     /**
         Default constructor.
 
-        In your own default constructor, initialise the members
-        m_name, m_extension and m_type.
+        When using this constructor, derived class must initialize
+        m_name, m_extension and m_type in its own constructor. Use of the
+        overloaded constructor below is recommended instead.
     */
     wxImageHandler();
+
+    /**
+        Full constructor.
+
+        This constructor initializes all fields that must be initialized and is
+        the recommended constructor to use.
+
+        @since 3.3.2
+     */
+    wxImageHandler(const wxString& name,
+                   const wxString& ext,
+                   wxBitmapType type,
+                   const wxString& mime);
 
     /**
         Destroys the wxImageHandler object.
@@ -263,7 +285,7 @@ public:
             stream to be seekable; see wxStreamBase::IsSeekable).
 
         @return Number of available images. For most image handlers, this is 1
-                (exceptions are TIFF and ICO formats as well as animated GIFs
+                (exceptions are TIFF and ICO formats as well as animated GIF and WebP
                 for which this function returns the number of frames in the
                 animation).
     */
@@ -492,6 +514,7 @@ const unsigned char wxIMAGE_ALPHA_THRESHOLD = 0x80;
     - wxICOHandler: For loading and saving.
     - wxCURHandler: For loading and saving.
     - wxANIHandler: For loading only.
+    - wxWEBPHandler: For loading and saving (see below). Includes alpha support.
 
     When saving in PCX format, wxPCXHandler will count the number of different
     colours in the image; if there are 256 or less colours, it will save as 8 bit,
@@ -502,6 +525,8 @@ const unsigned char wxIMAGE_ALPHA_THRESHOLD = 0x80;
 
     Saving GIFs requires images of maximum 8 bpp (see wxQuantize), and the alpha channel converted to a mask (see wxImage::ConvertAlphaToMask).
     Saving an animated GIF requires images of the same size (see wxGIFHandler::SaveAnimation)
+
+    Single WebP images may be loaded, even from animations.
 
     @library{wxcore}
     @category{gdi}
@@ -660,12 +685,13 @@ public:
             @li wxBITMAP_TYPE_ICO: Load a Windows icon file (ICO).
             @li wxBITMAP_TYPE_CUR: Load a Windows cursor file (CUR).
             @li wxBITMAP_TYPE_ANI: Load a Windows animated cursor file (ANI).
+            @li wxBITMAP_TYPE_WEBP: Load a WebP file (since 3.3.0).
             @li wxBITMAP_TYPE_ANY: Will try to autodetect the format.
         @param index
             Index of the image to load in the case that the image file contains
-            multiple images. This is only used by GIF, ICO and TIFF handlers.
+            multiple images. This is only used by GIF, ICO, TIFF and WebP handlers.
             The default value (-1) means "choose the default image" and is
-            interpreted as the first image (index=0) by the GIF and TIFF handler
+            interpreted as the first image (index=0) by the GIF, TIFF and WebP handlers,
             and as the largest and most colourful one by the ICO handler.
 
         @remarks Depending on how wxWidgets has been configured and by which
@@ -877,9 +903,15 @@ public:
         For a description of the @a quality parameter, see the Scale() function.
         Returns the (modified) image itself.
 
+        Overload taking wxSize is only available since wxWidgets 3.3.0.
+
         @see Scale()
     */
     wxImage& Rescale(int width, int height,
+                     wxImageResizeQuality quality = wxIMAGE_QUALITY_NORMAL);
+
+    /// @overload
+    wxImage& Rescale(const wxSize& size,
                      wxImageResizeQuality quality = wxIMAGE_QUALITY_NORMAL);
 
     /**
@@ -1008,10 +1040,16 @@ public:
         for 32-bit programs. For 64-bit programs the limit is 2^48 and so not
         relevant in practice.
 
+        The overload taking a wxSize is only available since wxWidgets 3.3.0.
+
         @see Rescale()
     */
     wxImage Scale(int width, int height,
                    wxImageResizeQuality quality = wxIMAGE_QUALITY_NORMAL) const;
+
+    /// @overload
+    wxImage Scale(const wxSize& size,
+                  wxImageResizeQuality quality = wxIMAGE_QUALITY_NORMAL) const;
 
     /**
         Returns a resized version of this image without scaling it by adding either a
@@ -1299,6 +1337,16 @@ public:
             its own comment. If there is only a comment in the first frame of
             a GIF it will not be repeated in other frames.
 
+        Options specific to wxPNGHandler:
+        @li @c wxIMAGE_OPTION_PNG_DESCRIPTION: The contents of this option
+            will be converted to an uncompressed iTXt chunk with the
+            key: "Description", and written to the PNG file upon saving.
+            Contents of tXTt and iTXt chunks with the key: "Description" are
+            also automatically retrieved upon loading a PNG file, and stored
+            in this option. If multiple chunks with this key are present,
+            only one is retrieved.
+            @since 3.3.1
+
         @param name
             The name of the option, case-insensitive.
         @return
@@ -1418,6 +1466,15 @@ public:
             to pink (default).
             This option has been added in wxWidgets 3.1.1.
 
+        Options specific to wxWEBPHandler:
+        @li @c wxIMAGE_OPTION_WEBP_QUALITY: WebP quality used when saving lossy image.
+            This is an integer ranging from 0 (smaller output, lower quality) to 100
+            (best quality, larger output).
+            When unspecified, quality 90 will be used.
+        @li @c wxIMAGE_OPTION_WEBP_FORMAT: wxWebPImageFormat type of the image that is
+            loaded or saved.
+            When unspecified or undefined, the image is saved as wxWebPImageFormat::Lossy.
+
         @note
         Be careful when combining the options @c wxIMAGE_OPTION_TIFF_SAMPLESPERPIXEL,
         @c wxIMAGE_OPTION_TIFF_BITSPERSAMPLE, and @c wxIMAGE_OPTION_TIFF_PHOTOMETRIC.
@@ -1535,12 +1592,13 @@ public:
             @li wxBITMAP_TYPE_ICO: Load a Windows icon file (ICO).
             @li wxBITMAP_TYPE_CUR: Load a Windows cursor file (CUR).
             @li wxBITMAP_TYPE_ANI: Load a Windows animated cursor file (ANI).
+            @li wxBITMAP_TYPE_WEBP: Load a WebP file.
             @li wxBITMAP_TYPE_ANY: Will try to autodetect the format.
         @param index
             Index of the image to load in the case that the image file contains
-            multiple images. This is only used by GIF, ICO and TIFF handlers.
+            multiple images. This is only used by GIF, ICO, TIFF and WebP handlers.
             The default value (-1) means "choose the default image" and is
-            interpreted as the first image (index=0) by the GIF and TIFF handler
+            interpreted as the first image (index=0) by the GIF, TIFF and WebP handlers,
             and as the largest and most colourful one by the ICO handler.
 
         @return @true if the operation succeeded, @false otherwise.
@@ -1749,6 +1807,20 @@ public:
     */
     void SetData(unsigned char* data, int new_width, int new_height,
                  bool static_data = false);
+
+    /**
+        Sets the (non-premultiplied) RGBA image data without performing checks.
+
+        The data given must have the size (width*height*4) or results will be
+        unexpected. Don't use this method if you aren't sure you know what you
+        are doing.
+
+        Due to the internal data representation, wxImage will always create a
+        copy of the data.
+
+        @since 3.3.0
+    */
+    void SetDataRGBA(const unsigned char* data);
 
     /**
         Sets the default value for the flags used for loading image files.
@@ -2073,10 +2145,11 @@ public:
         @li wxBITMAP_TYPE_ICO: Load a Windows icon file (ICO).
         @li wxBITMAP_TYPE_CUR: Load a Windows cursor file (CUR).
         @li wxBITMAP_TYPE_ANI: Load a Windows animated cursor file (ANI).
+        @li wxBITMAP_TYPE_WEBP: Load a WebP file.
         @li wxBITMAP_TYPE_ANY: Will try to autodetect the format.
 
         @return Number of available images. For most image handlers, this is 1
-                (exceptions are TIFF and ICO formats as well as animated GIFs
+                (exceptions are TIFF and ICO formats as well as animated GIF and WebP
                 for which this function returns the number of frames in the
                 animation).
     */

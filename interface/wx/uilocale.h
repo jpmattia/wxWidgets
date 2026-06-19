@@ -48,6 +48,13 @@ enum
     current UI locale or wxString::FromCDouble() and wxString::ToCDouble()
     functions for doing it always using period as decimal separator.
 
+    To set the C runtime functions (e.g., @c strtod()) to use the user's locale
+    consistently on all platforms, a wxLocale object should be created and
+    initialized with @c wxLANGUAGE_DEFAULT. This is not recommended due to
+    various side effects, but can be done for applications which rely on these
+    functions. (Note that this should be done in conjunction with calling
+    wxUILocale::UseDefault().)
+
     Localized applications should call wxUILocale::UseDefault() on startup to
     explicitly indicate that they opt-in using the current UI locale, even if
     this results in changing the global C locale, as is the case in wxGTK. Note
@@ -61,7 +68,7 @@ enum
     listed as a supported language in the application @c Info.plist file under
     @c CFBundleLocalizations key.
 
-    Unlike wxLocale class, this class doesn't affect the translations used by
+    Unlike the wxLocale class, this class doesn't affect the translations used by
     the application, see wxTranslations for doing this.
 
     @library{wxbase}
@@ -90,6 +97,18 @@ public:
     static bool UseDefault();
 
     /**
+        Return true if the locale was set by calling either UseDefault() or
+        UseLocaleName().
+
+        It is typically not necessary to call this function, as GetCurrent()
+        always returns a valid object, but it can be used to check whether an
+        application-set locale or the default one is being used.
+
+        @since 3.3.1
+     */
+    static bool IsSet();
+
+    /**
         Get the object corresponding to the currently used locale.
 
         If UseDefault() had been called, this object corresponds to the default
@@ -98,6 +117,41 @@ public:
         format.
      */
     static const wxUILocale& GetCurrent();
+
+    /**
+        Configure the UI to use the locale corresponding to the given locale name tag.
+
+        If localized applications use this function instead of the recommended
+        function wxUILocale::UseDefault(), it should be called as early as possible
+        during the program startup, e.g. in the very beginning of the overridden
+        wxApp::OnInit().
+
+        @param localeName
+            The locale name tag for which the corresponding locale should be created.
+            Example: "de_DE.UTF-8" - German locale name in POSIX notation.
+            See wxLocaleIdent::FromTag() for more information about the syntax of
+            the @a locale tag string.
+
+        Note that under most Unix systems (but not macOS) this function changes
+        the C locale to the locale specified by the environment variables and
+        so affects the results of calling C functions such as @c sprintf() etc
+        which can use comma, rather than period, as decimal separator. The
+        wxString::ToCDouble() and wxString::FromCDouble() functions can be used
+        for parsing and formatting floating point numbers using period as
+        decimal separator independently of the current locale.
+
+        @return @true on success or @false if the locale with the given name
+        couldn't be set
+
+        @note If an application tries to configure the UI to use a locale other
+              than the default user locale of the system, it can't be guaranteed
+              that really @em all controls will obey the locale setting. For
+              example, under Windows the calendar control will always use the
+              default user locale, no matter which locale was set by this function.
+              Under MacOS several standard dialogs like the file selection dialog
+              will use at least partially the default user locale.
+     */
+    static bool UseLocaleName(const wxString& localeName);
 
     /**
         Creates the local corresponding to the given language tag.
@@ -243,6 +297,106 @@ public:
     wxLayoutDirection GetLayoutDirection() const;
 
     /**
+        Return all settings related to number formatting for the current locale.
+        The information includes:
+        - the grouping separator
+        - the grouping specification
+        - the decimal separator
+        - the number of fractional digits
+
+        @return
+            The wxLocaleNumberFormatting structure with the number formatting details.
+        @since 3.3.2
+     */
+    wxLocaleNumberFormatting GetNumberFormatting() const;
+
+    /**
+        Query the currency symbol of the current locale.
+
+        @return
+            The currency symbol that is typically used locally for currency values.
+            If no currency symbol could be determined, an empty string will be returned.
+        @since 3.3.2
+     */
+    wxString GetCurrencySymbol() const;
+
+    /**
+        Query the ISO 4217 currency code of the current locale.
+
+        @return
+            The 3-letter ISO 4217 currency code.
+            If no currency code could be determined, an empty string will be returned.
+        @since 3.3.2
+     */
+    wxString GetCurrencyCode() const;
+
+    /**
+        Query the currency symbol position of the current locale.
+
+        The currency symbol can be positioned in one of 4 ways:
+        as a prefix or suffix to the currency value, either separated from the value
+        by a space character or not. Accordingly, one of the following values is returned:
+        - wxCurrencySymbolPosition::PrefixWithSep
+        - wxCurrencySymbolPosition::PrefixNoSep
+        - wxCurrencySymbolPosition::SuffixWithSep
+        - wxCurrencySymbolPosition::SuffixNoSep
+
+        @note The position of the currency symbol does not affect the representation
+              with the currency code. The currency code is always placed before the
+              currency value and separated by a space.
+
+        @return
+            The currency symbol position.
+        @since 3.3.2
+     */
+    wxCurrencySymbolPosition GetCurrencySymbolPosition() const;
+
+    /**
+        Return all settings related to currency formatting for the current locale.
+
+        The currency information includes the following items:
+        - the currency symbol
+        - the currency code
+        - the currency symbol position
+        - the currency value formatting information
+
+        @return
+            The wxLocaleCurrencyInfo structure.
+        @since 3.3.2
+     */
+    wxLocaleCurrencyInfo GetCurrencyInfo() const;
+
+    /**
+        Query whether the current locale uses the metric system
+
+        @note If wxMeasurementSystem::Unknown is returned,
+        GuessMetricSystemFromRegion() can be used as a fallback
+
+        @return
+            The measurement system, one of the values
+            wxMeasurementSystem::Metric, wxMeasurementSystem::NonMetric,
+            or wxMeasurementSystem::Unknown.
+        @since 3.3.2
+
+        @see GuessMetricSystemFromRegion()
+     */
+    wxMeasurementSystem UsesMetricSystem() const;
+
+    /**
+        Guess whether the current locale uses the metric system
+        base on from the region part of the locale identification.
+
+        @param idLocale
+            The id of the locale for which the measurement system should be guessed.
+        @return
+            The guessed measurement system, one of the values
+            wxMeasurementSystem::Metric, wxMeasurementSystem::NonMetric,
+            or wxMeasurementSystem::Unknown.
+        @since 3.3.2
+     */
+    static wxMeasurementSystem GuessMetricSystemFromRegion(const wxLocaleIdent& idLocale);
+
+    /**
         Return true if locale is supported on the current system.
 
         If this function returns @a false, the other functions of this class,
@@ -252,6 +406,13 @@ public:
         conventions.
      */
     bool IsSupported() const;
+
+    /**
+        Return true if locale was instantiated via UseDefault(), false otherwise.
+
+        @since 3.3.3
+     */
+    bool IsDefault() const;
 
     /**
         Adds custom, user-defined language to the database of known languages.
@@ -297,6 +458,13 @@ public:
         GetSystemLanguage() is used.
     */
     static const wxLanguageInfo* GetLanguageInfo(int lang);
+
+    /**
+        Tries to retrieve a list of the user's (or OS's) preferred UI languages.
+
+        @return An empty list if language-guessing algorithm failed.
+    */
+    static wxVector<wxString> GetPreferredUILanguages();
 
     /**
         Returns English name of the given language or empty string if this

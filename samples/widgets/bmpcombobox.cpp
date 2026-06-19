@@ -98,7 +98,7 @@ enum
 class BitmapComboBoxWidgetsPage : public ItemContainerWidgetsPage
 {
 public:
-    BitmapComboBoxWidgetsPage(WidgetsBookCtrl *book, wxImageList *imaglist);
+    BitmapComboBoxWidgetsPage(WidgetsBookCtrl *book, wxVector<wxBitmapBundle>& imaglist);
 
     virtual wxWindow *GetWidget() const override { return m_combobox; }
     virtual wxItemContainer* GetContainer() const override { return m_combobox; }
@@ -247,7 +247,7 @@ IMPLEMENT_WIDGETS_PAGE(BitmapComboBoxWidgetsPage, "BitmapCombobox",
 
 
 BitmapComboBoxWidgetsPage::BitmapComboBoxWidgetsPage(WidgetsBookCtrl *book,
-                                             wxImageList *imaglist)
+                                             wxVector<wxBitmapBundle>& imaglist)
                   : ItemContainerWidgetsPage(book, imaglist, bmpcombobox_xpm)
 {
     // init everything
@@ -336,7 +336,7 @@ void BitmapComboBoxWidgetsPage::CreateContent()
     m_textChangeHeight->SetSize(20, wxDefaultCoord);
     sizerOptions->Add(sizerRow, 0, wxALL | wxFIXED_MINSIZE /*| wxGROW*/, 5);
 
-    sizerLeft->Add( sizerOptions, wxSizerFlags().Expand().Border(wxTOP, 2));
+    sizerLeft->Add( sizerOptions, wxSizerFlags().Expand().Border(wxTOP, FromDIP(2)));
 
     // middle pane
     wxStaticBoxSizer *sizerMiddle = new wxStaticBoxSizer(wxVERTICAL, this, "&Change wxBitmapComboBox contents");
@@ -451,16 +451,26 @@ void BitmapComboBoxWidgetsPage::CreateCombo()
             break;
     }
 
-    wxArrayString items;
-    wxArrayPtrVoid bitmaps;
+    struct Item
+    {
+        Item(const wxString& text, const wxBitmap& bitmap)
+            : text(text), bitmap(bitmap)
+        {
+        }
+
+        wxString text;
+        wxBitmap bitmap;
+    };
+    std::vector<Item> items;
     if ( m_combobox )
     {
         unsigned int count = m_combobox->GetCount();
+        items.reserve(count);
+
         for ( unsigned int n = 0; n < count; n++ )
         {
-            items.Add(m_combobox->GetString(n));
-            wxBitmap bmp = m_combobox->GetItemBitmap(n);
-            bitmaps.Add(new wxBitmap(bmp));
+            items.push_back(Item{m_combobox->GetString(n),
+                                 m_combobox->GetItemBitmap(n)});
         }
 
         m_sizerCombo->Detach( m_combobox );
@@ -480,12 +490,9 @@ void BitmapComboBoxWidgetsPage::CreateCombo()
 
     NotifyWidgetRecreation(m_combobox);
 
-    unsigned int count = items.GetCount();
-    for ( unsigned int n = 0; n < count; n++ )
+    for ( const Item& item : items )
     {
-        wxBitmap* bmp = (wxBitmap*) bitmaps[n];
-        m_combobox->Append(items[n], *bmp);
-        delete bmp;
+        m_combobox->Append(item.text, item.bitmap);
     }
 
     m_sizerCombo->Add(m_combobox, 0, wxGROW | wxALL, 5);

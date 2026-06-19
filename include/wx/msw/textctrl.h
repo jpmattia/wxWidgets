@@ -37,13 +37,13 @@ public:
     // overridden wxTextEntry methods
     // ------------------------------
 
-    virtual wxString GetValue() const override;
     virtual wxString GetRange(long from, long to) const override;
 
 #if wxUSE_RICHEDIT
     virtual wxString GetRTFValue() const override;
     virtual void SetRTFValue(const wxString& val) override;
     virtual bool IsRTFSupported() override { return IsRich(); }
+    virtual wxTextSearchResult SearchText(const wxTextSearch& search) const override;
 #endif // wxUSE_RICHEDIT
 
     virtual bool IsEmpty() const;
@@ -244,6 +244,10 @@ protected:
     virtual wxSize DoGetSizeFromTextSize(int xlen, int ylen = -1) const override;
 
     virtual void DoMoveWindow(int x, int y, int width, int height) override;
+
+    virtual wxString DoGetValue() const override;
+
+    virtual void MSWSetDarkOrLightMode(SetMode setmode) override;
 
 #if wxUSE_RICHEDIT
     virtual void MSWUpdateFontOnDPIChange(const wxSize& newDPI) override;

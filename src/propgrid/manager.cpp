@@ -97,7 +97,7 @@ static const char gs_svg_noncatmode[] =
 "<line x1=\"16\" y1=\"25\" x2=\"20\" y2=\"25\" stroke-width=\"2\" stroke=\"#868686\" stroke-linecap=\"square\"/>"
 "<line x1=\"24\" y1=\"25\" x2=\"28\" y2=\"25\" stroke-width=\"2\" stroke=\"#868686\" stroke-linecap=\"square\"/>"
 "<line x1=\"16\" y1=\"29\" x2=\"20\" y2=\"29\" stroke-width=\"2\" stroke=\"#868686\" stroke-linecap=\"square\"/>"
-"<line x1=\"24\" y1=\"29\" x2=\"28\" y2=\"29\" stroke-width=\"2\" stroke=\"#868686\" stroke-linecap=\"square\"/>" 
+"<line x1=\"24\" y1=\"29\" x2=\"28\" y2=\"29\" stroke-width=\"2\" stroke=\"#868686\" stroke-linecap=\"square\"/>"
 "</svg>";
 
 // Default Page Icon.
@@ -628,16 +628,18 @@ bool wxPropertyGridManager::Create( wxWindow *parent,
     if ( !m_pPropGrid )
         m_pPropGrid = CreatePropertyGrid();
 
-    bool res = wxPanel::Create( parent, id, pos, size,
-                                (style & wxWINDOW_STYLE_MASK)|wxWANTS_CHARS,
-                                name );
+    if ( !wxPanel::Create( parent, id, pos, size,
+                           (style & wxWINDOW_STYLE_MASK)|wxWANTS_CHARS,
+                           name ) )
+        return false;
+
     Init2(style);
 
     SetInitialSize(size);
     // Create controls
     RecreateControls();
 
-    return res;
+    return true;
 }
 
 // -----------------------------------------------------------------------
@@ -1475,7 +1477,6 @@ void wxPropertyGridManager::UpdateDescriptionBox( int new_splittery, int new_wid
     }
     else
     {
-        m_pTxtHelpCaption->Wrap(-1);
         m_pTxtHelpCaption->Show( true );
         if ( cnt_hei <= 2 )
         {
@@ -1484,7 +1485,6 @@ void wxPropertyGridManager::UpdateDescriptionBox( int new_splittery, int new_wid
         else
         {
             m_pTxtHelpContent->SetSize(3,cnt_y,use_width,cnt_hei);
-            m_pTxtHelpContent->Wrap(use_width);
             m_pTxtHelpContent->Show( true );
         }
     }
@@ -1841,7 +1841,9 @@ void wxPropertyGridManager::RecreateControls()
                                                  wxString(),
                                                  wxDefaultPosition,
                                                  wxDefaultSize,
-                                                 wxALIGN_LEFT|wxST_NO_AUTORESIZE);
+                                                 wxALIGN_LEFT|
+                                                 wxST_NO_AUTORESIZE|
+                                                 wxST_WRAP);
             m_pTxtHelpContent->SetCursor( *wxSTANDARD_CURSOR );
         }
 

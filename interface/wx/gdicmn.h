@@ -46,6 +46,8 @@ enum wxBitmapType
     wxBITMAP_TYPE_TGA,
     wxBITMAP_TYPE_MACCURSOR,
     wxBITMAP_TYPE_MACCURSOR_RESOURCE,
+    wxBITMAP_TYPE_WEBP, ///< @since 3.3.0
+    wxBITMAP_TYPE_WEBP_RESOURCE, ///< @since 3.3.0
     wxBITMAP_TYPE_ANY = 50
 };
 
@@ -479,6 +481,10 @@ public:
     /**
         Returns @true if this rectangle has a width or height less than or
         equal to 0 and @false otherwise.
+
+        This is equivalent to using `GetSize().IsEmpty()`.
+
+        @see wxSize::IsEmpty()
     */
     bool IsEmpty() const;
 
@@ -694,17 +700,33 @@ public:
         Converts the given wxRealPoint (with floating point coordinates) to a
         wxPoint instance.
 
-        Notice that this truncates the floating point values of @a pt
-        components, if you want to round them instead you need to do it
-        manually, e.g.
-        @code
-            #include <wx/math.h>    // for wxRound()
-
-            wxRealPoint rp = ...;
-            wxPoint p(wxRound(rp.x), wxRound(rp.y));
-        @endcode
+        Notice that since v3.1.2 the behaviour of this constructor has changed
+        to round the floating point values of @a pt components, if you want to
+        truncate them instead, please use wxPoint::Truncate().
     */
     wxPoint(const wxRealPoint& pt);
+
+    /**
+        Creates a wxPoint by rounding the coordinates of the given
+        wxRealPoint.
+
+        This is equivalent to using the constructor taking wxRealPoint but is
+        more explicit about the fact that rounding is performed.
+
+        @since 3.3.2
+    */
+    static wxPoint Round(const wxRealPoint& pt);
+
+    /**
+        Creates a wxPoint by truncating the coordinates of the given
+        wxRealPoint.
+
+        This is similar to Round() but instead of rounding the coordinates,
+        they are simply truncated to integers.
+
+        @since 3.3.2
+    */
+    static wxPoint Truncate(const wxRealPoint& pt);
 
     /**
         @name Miscellaneous operators
@@ -815,6 +837,13 @@ const wxPoint wxDefaultPosition;
     set of named colours. The application may add to this set if desired by
     using AddColour() and may use it to look up colours by names using Find()
     or find the names for the standard colour using FindName().
+
+    It is also possible to switch between the colour values defined in the CSS
+    standard (see https://www.w3.org/TR/css-color-4/#named-colors) and the
+    traditional colour values which were used by wxWidgets versions earlier
+    than 3.3.0, which may be useful to preserve the appearance of the existing
+    code: if you need to do this, please call UseScheme() with @c Traditional
+    argument, but the use of new, standard colours is recommended.
 
     There is one predefined, global instance of this class called
     ::wxTheColourDatabase.
@@ -939,6 +968,56 @@ public:
         @since 3.3.0
     */
     wxVector<wxString> GetAllNames() const;
+
+    /**
+        Possible colour schemes for UseScheme().
+
+        @since 3.3.0
+    */
+    enum Scheme
+    {
+        CSS,        ///< Use CSS standard colours, default since 3.3.0.
+        Traditional ///< Use traditional wxWidgets colours for compatibility.
+    };
+
+    /**
+        Select the colour scheme to use.
+
+        By default, wxColourDatabase uses CSS scheme which returns the standard
+        values for the colours defined in the CSS specification, see
+        https://www.w3.org/TR/css-color-4/#named-colors
+
+        If preserving compatibility with the behaviour and appearance of the
+        previous wxWidgets versions is important, you may switch to the
+        traditional colour scheme by using this function with @c Traditional
+        argument, e.g. call
+
+        @code
+            wxTheColourDatabase->UseScheme(wxColourDatabase::Traditional);
+        @endcode
+
+        during the application initialization. Please note that in the previous
+        versions wxGTK already used CSS colour values, unlike all the other
+        ports, so @c Traditional is not actually backwards compatible for
+        wxGTK, but does make the colour values consistent across all platforms
+        and the same as had been used by wxMSW and wxOSX before. In other
+        words, to obtain 100% compatibility with the previous versions, the
+        UseScheme() call above should be made for all ports except wxGTK.
+
+        Note that the colour names defined only by wxWidgets, which notably
+        includes all colour variants with spaces in their names, are still
+        available in the default CSS colour scheme, with their traditional
+        values but the names of colours defined by CSS standard are taken from
+        it, e.g. "GREEN" corresponds to @c #00ff00 in the traditional scheme
+        but to @c #008000 in the CSS scheme. Similarly, CSS colour names that
+        were not defined by the previous wxWidgets versions are available even
+        when using the traditional scheme, the scheme choice only affects the
+        values of the colours defined by both wxWidgets and CSS with different
+        values.
+
+        @since 3.3.0
+    */
+    void UseScheme(Scheme scheme);
 };
 
 
@@ -1054,6 +1133,17 @@ public:
         @since 3.3.0
      */
     bool IsAtLeast(const wxSize& size) const;
+
+    /**
+        Returns @true if either of the size object components is 0 or -1/
+
+        Empty wxSize objects don't define a valid size in the geometric sense.
+
+        @see wxRect::IsEmpty()
+
+        @since 3.3.1
+    */
+    bool IsEmpty() const;
 
     /**
         Returns @true if neither of the size object components is equal to -1,
@@ -1279,14 +1369,24 @@ bool wxColourDisplay();
 int wxDisplayDepth();
 
 /**
-    Globally sets the cursor; only has an effect on Windows, Mac and GTK+. You
-    should call this function with wxNullCursor to restore the system cursor.
+    Globally sets the cursor.
 
-    @see wxCursor, wxWindow::SetCursor()
+    The globally set cursor overrides any cursor set for the individual
+    windows, i.e. the specified cursor will be used for all windows of the
+    application until this function is called again with an empty cursor bundle
+    to restore the default behaviour of using the window-specific cursors.
+
+    Note that this function won't update the cursor size if the DPI or user
+    preferred cursor size changes, as this is considered unlikely to happen
+    while this temporary cursor is shown. If you do want to update the cursor
+    size, you need to handle ::wxEVT_DPI_CHANGED and ::wxEVT_SYS_METRIC_CHANGED
+    events and call this function again from their handlers.
+
+    @see wxCursor, wxWindow::SetCursor(), wxWindow::SetCursorBundle()
 
     @header{wx/gdicmn.h}
 */
-void wxSetCursor(const wxCursor& cursor);
+void wxSetCursor(const wxCursorBundle& cursors);
 
 ///@}
 

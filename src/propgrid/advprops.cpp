@@ -1811,7 +1811,7 @@ wxString wxCursorProperty::ValueToString(wxVariant& value, wxPGPropValFormatFlag
 wxSize wxCursorProperty::OnMeasureImage( int item ) const
 {
 #if wxPG_CAN_DRAW_CURSOR
-    if ( item != -1 && item < static_cast<int>(gs_cp_es_syscursors_values.size()) )
+    if ( item != -1 && item < wxSsize(gs_cp_es_syscursors_values) )
         return wxSize(wxPG_CURSOR_IMAGE_WIDTH,wxPG_CURSOR_IMAGE_WIDTH);
 #else
     wxUnusedVar(item);
@@ -1832,7 +1832,7 @@ void wxCursorProperty::OnCustomPaint( wxDC& dc,
     {
         dc.DrawRectangle( rect );
 
-        if ( paintdata.m_choiceItem < static_cast<int>(gs_cp_es_syscursors_values.size()) )
+        if ( paintdata.m_choiceItem < wxSsize(gs_cp_es_syscursors_values) )
         {
             wxStockCursor cursorIndex =
                 (wxStockCursor) gs_cp_es_syscursors_values[paintdata.m_choiceItem];
@@ -1964,7 +1964,7 @@ void wxImageFileProperty::OnCustomPaint( wxDC& dc,
         if ( !m_bitmap.IsOk() )
         {
             wxImage imgScaled = m_image;
-            imgScaled.Rescale(rect.width, rect.height);
+            imgScaled.Rescale(rect.GetSize());
             m_bitmap = wxBitmap(imgScaled, dc);
         }
     }

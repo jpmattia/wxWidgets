@@ -60,6 +60,7 @@ public:
 
     virtual void Remove(long from, long to) override;
 
+    virtual void SetMaxLength(unsigned long length) override;
     virtual void MarkDirty() override;
     virtual void DiscardEdits() override;
 
@@ -105,6 +106,10 @@ public:
     virtual wxTextProofOptions GetProofCheckOptions() const override;
 #endif // wxUSE_SPELLCHECK && __WXGTK3__
 
+#ifdef __WXGTK3__
+    virtual wxTextSearchResult SearchText(const wxTextSearch& search) const override;
+#endif // __WXGTK3__
+
     // GTK-specific functions
 
     // Get the underlying text buffer for multi-line controls.
@@ -112,6 +117,9 @@ public:
     // Get the underlying text control.
     GtkEditable *GTKGetEditable() const { return GetEditable(); }
 
+#ifdef __WXGTK3__
+    bool GTKSetPangoMarkup(const wxString& str);
+#endif // __WXGTK3__
 
     // Implementation from now on
     void OnDropFiles( wxDropFilesEvent &event );
@@ -133,7 +141,7 @@ public:
     bool SetForegroundColour(const wxColour& colour) override;
     bool SetBackgroundColour(const wxColour& colour) override;
 
-    GtkWidget* GetConnectWidget() override;
+    GtkWidget* GetConnectWidget() const override;
 
     void SetUpdateFont(bool WXUNUSED(update)) { }
 
@@ -161,6 +169,8 @@ public:
 
     void GTKOnTextChanged() override;
     void GTKAfterLayout();
+
+    int GTKGetMaxLength() const { return m_maxlen; }
 
 protected:
     // overridden wxWindow virtual methods
@@ -229,6 +239,9 @@ private:
     bool m_dontMarkDirty;
 
     int         m_countUpdatesToIgnore;
+
+    // Length set by SetMaxLength() or 0 if there is no limit.
+    int m_maxlen = 0;
 
     // Our text buffer. Convenient, and holds the buffer while using
     // a dummy one when frozen

@@ -54,18 +54,23 @@ enum wxPrinterError
     wxPRINTER_ERROR
 };
 
+// The following symbols are preserved only for compatibility.
+// Please use wxWindowMode directly instead in any new code.
+
 // Preview frame modality kind used with wxPreviewFrame::Initialize()
-enum wxPreviewFrameModalityKind
-{
-    // Disable all the other top level windows while the preview is shown.
-    wxPreviewFrame_AppModal,
+using wxPreviewFrameModalityKind = wxWindowMode;
 
-    // Disable only the parent window while the preview is shown.
-    wxPreviewFrame_WindowModal,
+// Disable all the other top level windows while the preview is shown.
+constexpr wxPreviewFrameModalityKind
+wxPreviewFrame_AppModal = wxWindowMode::AppModal;
 
-    // Don't disable any windows.
-    wxPreviewFrame_NonModal
-};
+// Disable only the parent window while the preview is shown.
+constexpr wxPreviewFrameModalityKind
+wxPreviewFrame_WindowModal = wxWindowMode::WindowModal;
+
+// Don't disable any windows.
+constexpr wxPreviewFrameModalityKind
+wxPreviewFrame_NonModal = wxWindowMode::Normal;
 
 //----------------------------------------------------------------------------
 // wxPrintFactory
@@ -283,8 +288,15 @@ public:
 
     virtual bool HasPage(int page);
     virtual bool OnPrintPage(int page) = 0;
+
+    // Return the total range of pages and fill in the provided parameter with
+    // the ranges of pages that should be printed (if it remains empty, all
+    // pages are printed).
+    virtual wxPrintPageRange GetPagesInfo(wxPrintPageRanges& ranges);
+
+    // Override GetPagesInfo() instead if more than one range of pages needs to
+    // be printed.
     virtual void GetPageInfo(int *minPage, int *maxPage, int *pageFrom, int *pageTo);
-    virtual bool IsPageSelected(int page);
 
     virtual wxString GetTitle() const { return m_printoutTitle; }
 
@@ -441,13 +453,9 @@ public:
     inline wxPreviewControlBar* GetControlBar() const { return m_controlBar; }
 
 protected:
-    wxPreviewCanvas*      m_previewCanvas;
-    wxPreviewControlBar*  m_controlBar;
+    wxPreviewCanvas*      m_previewCanvas = nullptr;
+    wxPreviewControlBar*  m_controlBar = nullptr;
     wxPrintPreviewBase*   m_printPreview;
-    wxWindowDisabler*     m_windowDisabler;
-
-    wxPreviewFrameModalityKind m_modalityKind;
-
 
 private:
     void OnChar(wxKeyEvent& event);

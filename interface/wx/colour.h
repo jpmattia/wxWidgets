@@ -256,6 +256,29 @@ public:
         @since 3.1.2
     */
     virtual bool IsSolid() const;
+
+    /**
+        Returns @true if the color is completely transparent (i.e., no opacity).
+
+        @since 3.3.1
+    */
+    bool IsTransparent() const;
+
+    /**
+        Returns @true if the color is completely opaque (i.e., full opacity).
+
+        @since 3.3.1
+    */
+    bool IsOpaque() const;
+
+    /**
+        Returns @true if the color has some translucency
+        (not fully opaque, but not transparent either).
+
+        @since 3.3.1
+    */
+    bool IsTranslucent() const;
+
     ///@{
     /**
         Sets the RGB intensity values using the given values (first overload),
@@ -340,8 +363,8 @@ public:
     static unsigned char AlphaBlend(unsigned char fg, unsigned char bg, double alpha);
 
     /**
-        Utility function that simply darkens or lightens a color, based on the specified 
-        percentage @a ialpha. @a ialpha of 0 would be make the color completely black, 
+        Utility function that simply darkens or lightens a color, based on the specified
+        percentage @a ialpha. @a ialpha of 0 would be make the color completely black,
         200 completely white and 100 would not change the color.
         @since 2.9.0
     */

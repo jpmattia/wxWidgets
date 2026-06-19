@@ -18,7 +18,7 @@ public:
     ~wxQtEventLoopBase();
 
     virtual int DoRun() override;
-    virtual void ScheduleExit(int rc = 0) override;
+    virtual void DoStop(int rc) override;
     virtual bool Pending() const override;
     virtual bool Dispatch() override;
     virtual int DispatchTimeout(unsigned long timeout) override;
@@ -26,6 +26,19 @@ public:
     virtual void DoYieldFor(long eventsToProcess) override;
 
     void ScheduleIdleCheck();
+
+    // Non-blocking Dispatch() version:
+    // Returns true if an event was processed, otherwise returns false.
+    // This function is added to address code like:
+    //
+    //      while (evtloop->Pending())
+    //          evtloop->Dispatch();
+    //
+    // which can simply replaced with:
+    //
+    //      while (evtloop->QtDispatch())
+    //          ;
+    bool QtDispatch() const;
 
 private:
     QEventLoop *m_qtEventLoop;

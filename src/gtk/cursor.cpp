@@ -21,6 +21,7 @@
 #include "wx/gtk/private/wrapgtk.h"
 #include "wx/gtk/private/object.h"
 #include "wx/gtk/private/backend.h"
+#include "wx/gtk/private/gtk3-compat.h"
 
 GdkWindow* wxGetTopLevelGDK();
 
@@ -73,6 +74,11 @@ wxCursor::wxCursor()
 {
 }
 
+wxCursor::wxCursor(const wxBitmap& bitmap, int hotSpotX, int hotSpotY)
+{
+    InitFromBitmap(bitmap, hotSpotX, hotSpotY);
+}
+
 wxCursor::wxCursor(const wxString& cursor_file,
                    wxBitmapType type,
                    int hotSpotX, int hotSpotY)
@@ -108,15 +114,26 @@ wxCursor::wxCursor(const char bits[], int width, int height,
                    int hotSpotX, int hotSpotY,
                    const char maskBits[], const wxColour *fg, const wxColour *bg)
 {
+    wxBitmap bitmap(bits, width, height);
+    if (maskBits)
+        bitmap.SetMask(new wxMask(wxBitmap(maskBits, width, height), *wxWHITE));
+
+    InitFromBitmap(bitmap, hotSpotX, hotSpotY, fg, bg);
+}
+
+void
+wxCursor::InitFromBitmap(const wxBitmap& bitmap, int hotSpotX, int hotSpotY,
+                         const wxColour *fg, const wxColour *bg)
+{
+    const int width = bitmap.GetWidth();
+    const int height = bitmap.GetHeight();
+
     m_refData = new wxCursorRefData;
     if (hotSpotX < 0 || hotSpotX >= width)
         hotSpotX = 0;
     if (hotSpotY < 0 || hotSpotY >= height)
         hotSpotY = 0;
 #ifdef __WXGTK3__
-    wxBitmap bitmap(bits, width, height);
-    if (maskBits)
-        bitmap.SetMask(new wxMask(wxBitmap(maskBits, width, height), *wxWHITE));
     GdkPixbuf* pixbuf = bitmap.GetPixbuf();
     if ((fg && *fg != *wxBLACK) || (bg && *bg != *wxWHITE))
     {
@@ -149,27 +166,43 @@ wxCursor::wxCursor(const char bits[], int width, int height,
             }
         }
     }
-    M_CURSORDATA->m_cursor = gdk_cursor_new_from_pixbuf(
-        gdk_window_get_display(wxGetTopLevelGDK()), pixbuf, hotSpotX, hotSpotY);
+
+    GdkDisplay* const display = gdk_window_get_display(wxGetTopLevelGDK());
+
+    // Prefer to create cursor from surface as this allows us to specify the
+    // bitmap scaling factor.
+#if GTK_CHECK_VERSION(3,10,0)
+    if (wx_is_at_least_gtk3(10))
+    {
+        cairo_surface_t* const
+            surface = gdk_cairo_surface_create_from_pixbuf(pixbuf, 1, nullptr);
+        const double scaleFactor = bitmap.GetScaleFactor();
+        cairo_surface_set_device_scale(surface, scaleFactor, scaleFactor);
+
+        M_CURSORDATA->m_cursor = gdk_cursor_new_from_surface(
+            display, surface, hotSpotX / scaleFactor, hotSpotY / scaleFactor);
+
+        cairo_surface_destroy(surface);
+    }
+    else
+#endif // GTK 3 > 3.10
+    {
+        M_CURSORDATA->m_cursor = gdk_cursor_new_from_pixbuf(
+            display, pixbuf, hotSpotX, hotSpotY);
+    }
 #else
-    if (!maskBits)
-        maskBits = bits;
     if (!fg)
         fg = wxBLACK;
     if (!bg)
         bg = wxWHITE;
 
-    GdkBitmap* data = gdk_bitmap_create_from_data(
-        wxGetTopLevelGDK(), const_cast<char*>(bits), width, height);
-    GdkBitmap* mask = gdk_bitmap_create_from_data(
-        wxGetTopLevelGDK(), const_cast<char*>(maskBits), width, height);
+    wxBitmap mask(bitmap.GetMask() ? bitmap.GetMask()->GetBitmap() : bitmap);
 
     M_CURSORDATA->m_cursor = gdk_cursor_new_from_pixmap(
-                 data, mask, fg->GetColor(), bg->GetColor(),
+                 bitmap.GetPixmap(),
+                 mask.GetPixmap(),
+                 fg->GetColor(), bg->GetColor(),
                  hotSpotX, hotSpotY );
-
-    g_object_unref (data);
-    g_object_unref (mask);
 #endif
 }
 
@@ -358,23 +391,13 @@ wxCursor g_busyCursor;
 static wxCursor gs_storedCursor;
 static int       gs_busyCount = 0;
 
-const wxCursor& wxBusyCursor::GetStoredCursor()
+static void UpdateCursors(wxWindow* win, GdkCursor* globalCursor)
 {
-    return gs_storedCursor;
-}
-
-const wxCursor wxBusyCursor::GetBusyCursor()
-{
-    return g_busyCursor;
-}
-
-static void UpdateCursors(wxWindow* win, bool isBusyOrGlobalCursor)
-{
-    win->GTKUpdateCursor(isBusyOrGlobalCursor);
-    const wxWindowList& children = win->GetChildren(); 
+    win->GTKUpdateCursor(globalCursor);
+    const wxWindowList& children = win->GetChildren();
     wxWindowList::const_iterator i = children.begin();
     for (size_t n = children.size(); n--; ++i)
-        UpdateCursors(*i, isBusyOrGlobalCursor);
+        UpdateCursors(*i, globalCursor);
 }
 
 static void SetGlobalCursor(const wxCursor& cursor)
@@ -389,7 +412,7 @@ static void SetGlobalCursor(const wxCursor& cursor)
         if (win->m_widget && (window = gtk_widget_get_window(win->m_widget)))
         {
             gdk_window_set_cursor(window, gdk_cursor);
-            UpdateCursors(win, gdk_cursor != nullptr);
+            UpdateCursors(win, gdk_cursor);
             if (display == nullptr)
                 display = gdk_window_get_display(window);
         }
@@ -424,8 +447,9 @@ bool wxIsBusy()
     return gs_busyCount > 0;
 }
 
-void wxSetCursor( const wxCursor& cursor )
+void wxSetCursor( const wxCursorBundle& cursors )
 {
+    const wxCursor& cursor = cursors.GetCursorForMainWindow();
     if (cursor.IsOk() || g_globalCursor.IsOk())
     {
         g_globalCursor = cursor;

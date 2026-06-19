@@ -77,19 +77,11 @@ bool wxPickerBase::CreateBase(wxWindow *parent,
             return false;
         }
 
-        // set the maximum length allowed for this textctrl.
-        // This is very important since any change to it will trigger an update in
-        // the m_picker; for very long strings, this real-time synchronization could
-        // become a CPU-blocker and thus should be avoided.
-        // 32 characters will be more than enough for all common uses.
-        m_text->SetMaxLength(32);
-
         // set the initial contents of the textctrl
         m_text->SetValue(text);
 
         m_text->Bind(wxEVT_TEXT, &wxPickerBase::OnTextCtrlUpdate, this);
         m_text->Bind(wxEVT_KILL_FOCUS, &wxPickerBase::OnTextCtrlKillFocus, this);
-        m_text->Bind(wxEVT_DESTROY, &wxPickerBase::OnTextCtrlDelete, this);
 
         m_sizer->Add(m_text,
                      wxSizerFlags(1).CentreVertical().Border(wxRIGHT));
@@ -177,12 +169,6 @@ void wxPickerBase::OnTextCtrlKillFocus(wxFocusEvent& event)
     // don't leave the textctrl empty
     if (m_text && m_text->GetValue().empty())
         UpdateTextCtrlFromPicker();
-}
-
-void wxPickerBase::OnTextCtrlDelete(wxWindowDestroyEvent &)
-{
-    // the textctrl has been deleted; our pointer is invalid!
-    m_text = nullptr;
 }
 
 void wxPickerBase::OnTextCtrlUpdate(wxCommandEvent &)

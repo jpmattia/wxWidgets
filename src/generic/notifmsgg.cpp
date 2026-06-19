@@ -156,7 +156,7 @@ wxNotificationMessageWindow::wxNotificationMessageWindow(wxGenericNotificationMe
 
     // Create title and message sizers
     wxSizer* textSizer = new wxBoxSizer(wxVERTICAL);
-    
+
     m_messageTitle = new wxStaticText(m_messagePanel, wxID_ANY, wxString());
     m_messageTitle->SetFont(m_messageTitle->GetFont().MakeBold());
     textSizer->Add(m_messageTitle, wxSizerFlags(0).Border());
@@ -171,7 +171,7 @@ wxNotificationMessageWindow::wxNotificationMessageWindow(wxGenericNotificationMe
 
     // Add a single close button if no actions are specified
     m_closeBtn = wxBitmapButton::NewCloseButton(m_messagePanel, wxID_ANY);
-    msgSizer->Add(m_closeBtn, wxSizerFlags(0).Border(wxALL, 3).Top());
+    msgSizer->Add(m_closeBtn, wxSizerFlags(0).Border(wxALL, FromDIP(3)).Top());
     m_closeBtn->Bind(wxEVT_BUTTON, &wxNotificationMessageWindow::OnCloseClicked, this);
     PrepareNotificationControl(m_closeBtn, false);
 

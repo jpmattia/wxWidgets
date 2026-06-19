@@ -99,7 +99,7 @@ bool wxTopLevelWindowMac::Destroy()
     // loop iteration
     if ( !wxPendingDelete.Member(this) )
         wxPendingDelete.Append(this);
-    
+
     Hide();
     return true;
 }
@@ -151,7 +151,15 @@ void wxTopLevelWindowMac::Restore()
 
 wxPoint wxTopLevelWindowMac::GetClientAreaOrigin() const
 {
+    // under Cocoa we keep for backwards compatibility the client origin at 0,0
+    // (representing the contentview), while under iOS the entire app has a contentview
+    // which extends under the statusbar, so we need to determine the correct client
+    // area
+#if wxOSX_USE_IPHONE
+    return wxNonOwnedWindow::GetClientAreaOrigin();
+#else
     return wxPoint(0, 0) ;
+#endif
 }
 
 void wxTopLevelWindowMac::SetTitle(const wxString& title)

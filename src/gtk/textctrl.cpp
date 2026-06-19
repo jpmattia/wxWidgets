@@ -50,14 +50,12 @@ static void wxGtkOnRemoveTag(GtkTextBuffer *buffer,
                              GtkTextIter * WXUNUSED(end),
                              char *prefix)
 {
-    gchar *name;
-    g_object_get (tag, "name", &name, nullptr);
+    wxGlibPtr<gchar> name;
+    g_object_get (tag, "name", name.Out(), nullptr);
 
     if (!name || strncmp(name, prefix, strlen(prefix)))
         // anonymous tag or not starting with prefix - don't remove
         g_signal_stop_emission_by_name (buffer, "remove_tag");
-
-    g_free(name);
 }
 }
 
@@ -544,7 +542,8 @@ wx_insert_text_callback(GtkTextBuffer* buffer,
 }
 
 
-// And an "after" version used for detecting URLs in the text.
+// And an "after" version used for detecting URLs in the text, applying custom
+// styles and enforcing max length limit.
 static void
 au_insert_text_callback(GtkTextBuffer *buffer,
                         GtkTextIter *end,
@@ -559,6 +558,28 @@ au_insert_text_callback(GtkTextBuffer *buffer,
     {
         wxGtkTextApplyTagsFromAttr(win->GetHandle(), buffer, win->GetDefaultStyle(),
                                    &start, end);
+    }
+
+    const auto maxlen = win->GTKGetMaxLength();
+    if ( maxlen > 0 )
+    {
+        const auto count = gtk_text_buffer_get_char_count( buffer );
+        if ( count > maxlen )
+        {
+            // Trim the extraneous characters.
+            int toTrim = count - maxlen;
+            GtkTextIter offset;
+            gtk_text_buffer_get_iter_at_offset(
+                buffer,
+                &offset,
+                gtk_text_iter_get_offset( end ) - toTrim
+            );
+            gtk_text_buffer_delete( buffer, &offset, end );
+
+            // And notify the application about hitting the limit.
+            win->IgnoreNextTextUpdate();
+            win->SendMaxLenEvent();
+        }
     }
 
     if ( !len || !(win->GetWindowStyleFlag() & wxTE_AUTO_URL) )
@@ -633,7 +654,7 @@ extern "C" {
 static void mark_set(GtkTextBuffer*, GtkTextIter*, GtkTextMark* mark, GSList** markList)
 {
     if (gtk_text_mark_get_name(mark) == nullptr)
-        *markList = g_slist_prepend(*markList, mark);
+        *markList = g_slist_prepend(*markList, g_object_ref(mark));
 }
 }
 
@@ -645,7 +666,7 @@ extern "C" {
 static void state_flags_changed(GtkWidget*, GtkStateFlags, wxTextCtrl* win)
 {
     // restore non-default cursor, if any
-    win->GTKUpdateCursor(false, true);
+    win->GTKApplyCursor();
 }
 }
 #endif // __WXGTK3__
@@ -709,7 +730,7 @@ wxTextCtrl::~wxTextCtrl()
         Thaw();
 
     if (m_anonymousMarkList)
-        g_slist_free(m_anonymousMarkList);
+        g_slist_free_full(m_anonymousMarkList, g_object_unref);
     if (m_afterLayoutId)
         g_source_remove(m_afterLayoutId);
 }
@@ -884,7 +905,8 @@ bool wxTextCtrl::Create( wxWindow *parent,
         g_signal_connect(m_buffer, "insert_text",
                          G_CALLBACK(wx_insert_text_callback), this);
 
-        // Needed for wxTE_AUTO_URL and applying custom styles
+        // Needed for wxTE_AUTO_URL, applying custom styles and max length
+        // limit support.
         g_signal_connect_after(m_buffer, "insert_text",
                                G_CALLBACK(au_insert_text_callback), this);
     }
@@ -911,6 +933,18 @@ GtkEditable *wxTextCtrl::GetEditable() const
     wxCHECK_MSG( IsSingleLine(), nullptr, "shouldn't be called for multiline" );
 
     return GTK_EDITABLE(m_text);
+}
+
+void wxTextCtrl::SetMaxLength(unsigned long length)
+{
+    if ( IsMultiLine() )
+    {
+        m_maxlen = length;
+    }
+    else
+    {
+        wxTextEntry::SetMaxLength( length );
+    }
 }
 
 GtkEntry *wxTextCtrl::GetEntry() const
@@ -1226,6 +1260,12 @@ static gboolean afterLayout(void* data)
 void wxTextCtrl::WriteText( const wxString &text )
 {
     wxCHECK_RET( m_text != nullptr, wxT("invalid text ctrl") );
+
+    // Disable max length check, it shouldn't prevent the program itself from
+    // making the text as long as it wants.
+    const auto maxlenOrig = m_maxlen;
+    m_maxlen = 0;
+    wxON_BLOCK_EXIT_SET( m_maxlen, maxlenOrig );
 
     if ( text.empty() )
     {
@@ -1856,7 +1896,7 @@ void wxTextCtrl::OnChar( wxKeyEvent &key_event )
     key_event.Skip();
 }
 
-GtkWidget* wxTextCtrl::GetConnectWidget()
+GtkWidget* wxTextCtrl::GetConnectWidget() const
 {
     return GTK_WIDGET(m_text);
 }
@@ -2074,6 +2114,103 @@ bool wxTextCtrl::GetStyle(long position, wxTextAttr& style)
     return true;
 }
 
+#ifdef __WXGTK3__
+bool wxTextCtrl::GTKSetPangoMarkup(const wxString& str)
+{
+    wxCHECK_MSG(IsMultiLine(), false,
+                "Pango markup only supported in multiline controls");
+
+#if GTK_CHECK_VERSION(3,16,0)
+    if (gtk_check_version(3,16,0) == nullptr)
+    {
+        // multiple events may get fired while editing text, so block those
+        {
+            EventsSuppressor noevents(this);
+            // clear current content
+            GtkTextIter start, end;
+            gtk_text_buffer_get_bounds(m_buffer, &start, &end);
+            gtk_text_buffer_delete(m_buffer, &start, &end);
+
+            gtk_text_buffer_insert_markup(m_buffer, &start, str.utf8_str(), -1);
+        }
+        SendTextUpdatedEvent(GetEditableWindow());
+
+        return true;
+    }
+#endif // GTK 3.16
+
+    return false;
+}
+wxTextSearchResult wxTextCtrl::SearchText(const wxTextSearch& search) const
+{
+    if ( !IsMultiLine() )
+    {
+        return wxTextSearchResult{};
+    }
+
+    int flags = GTK_TEXT_SEARCH_TEXT_ONLY;
+    if ( !search.m_matchCase )
+        flags |= GTK_TEXT_SEARCH_CASE_INSENSITIVE;
+
+    // get the beginning and end of text buffer
+    GtkTextIter textStart, textEnd;
+    gtk_text_buffer_get_start_iter(m_buffer, &textStart);
+    gtk_text_buffer_get_end_iter(m_buffer, &textEnd);
+
+    const bool forward = search.m_direction == wxTextSearch::Direction::Down;
+
+    // start search at the start or at the end depending on the direction
+    GtkTextIter searchStart = forward ? textStart : textEnd;
+
+    // but user-provided position overrides the default starting position
+    if ( search.m_startingPosition != -1 )
+    {
+        gtk_text_buffer_get_iter_at_offset(m_buffer, &searchStart,
+                                           static_cast<gint>(search.m_startingPosition));
+    }
+
+    // the match results
+    GtkTextIter selectionStart, selectionEnd;
+
+    const auto searchFunc = forward ? gtk_text_iter_forward_search
+                                    : gtk_text_iter_backward_search;
+    for ( ;; )
+    {
+        if ( !searchFunc
+              (
+                &searchStart,
+                search.m_searchValue.utf8_str(),
+                static_cast<GtkTextSearchFlags>(flags),
+                &selectionStart,
+                &selectionEnd,
+                nullptr // no limit
+              ) )
+        {
+            // If we haven't found anything at all, we're done.
+            return wxTextSearchResult{};
+        }
+
+        // But if we did find something, we may need to check whether it was
+        // a whole word.
+        if ( !search.m_wholeWord )
+            break;
+
+        // Check if this is a whole-word match.
+        if ( gtk_text_iter_starts_word(&selectionStart) &&
+                gtk_text_iter_ends_word(&selectionEnd) )
+            break;
+
+        // Not a whole-word match, keep searching for the next match, maybe it
+        // will be a whole-word one.
+        searchStart = selectionEnd;
+    }
+
+    return wxTextSearchResult{ gtk_text_iter_get_offset(&selectionStart),
+                               gtk_text_iter_get_offset(&selectionEnd) };
+}
+
+#endif // __WXGTK3__
+
 void wxTextCtrl::DoApplyWidgetStyle(GtkRcStyle *style)
 {
     GTKApplyStyle(m_text, style);
@@ -2202,7 +2339,7 @@ void wxTextCtrl::DoFreeze()
                 if (GTK_IS_TEXT_MARK(mark) && !gtk_text_mark_get_deleted(mark))
                     gtk_text_buffer_delete_mark(m_buffer, mark);
             }
-            g_slist_free(m_anonymousMarkList);
+            g_slist_free_full(m_anonymousMarkList, g_object_unref);
             m_anonymousMarkList = nullptr;
         }
     }

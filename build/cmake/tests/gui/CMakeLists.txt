@@ -16,6 +16,7 @@ set(TEST_GUI_SRC
     geometry/point.cpp
     geometry/region.cpp
     graphics/bitmap.cpp
+    graphics/bmpbundle.cpp
     graphics/colour.cpp
     graphics/ellipsization.cpp
     graphics/measuring.cpp
@@ -23,6 +24,7 @@ set(TEST_GUI_SRC
     graphics/boundingbox.cpp
     graphics/clipper.cpp
     graphics/clippingbox.cpp
+    graphics/svgattributes.cpp
     graphics/coords.cpp
     graphics/graphbitmap.cpp
     graphics/graphmatrix.cpp
@@ -48,6 +50,7 @@ set(TEST_GUI_SRC
     controls/htmllboxtest.cpp
     controls/hyperlinkctrltest.cpp
     controls/itemcontainertest.cpp
+    controls/infobar.cpp
     controls/label.cpp
     controls/listbasetest.cpp
     controls/listbooktest.cpp
@@ -69,6 +72,7 @@ set(TEST_GUI_SRC
     controls/slidertest.cpp
     controls/spinctrldbltest.cpp
     controls/spinctrltest.cpp
+    controls/statbmptest.cpp
     controls/styledtextctrltest.cpp
     controls/textctrltest.cpp
     controls/textentrytest.cpp
@@ -82,6 +86,7 @@ set(TEST_GUI_SRC
     controls/windowtest.cpp
     controls/dialogtest.cpp
     events/clone.cpp
+    events/enterleave.cpp
     # Duplicate this file here to test GUI event loops too.
     events/evtlooptest.cpp
     events/propagation.cpp
@@ -91,7 +96,9 @@ set(TEST_GUI_SRC
     exec/exec.cpp
     font/fonttest.cpp
     image/image.cpp
+    image/imagwebp.cpp
     image/rawbmp.cpp
+    html/helpdata.cpp
     html/htmlparser.cpp
     html/htmlwindow.cpp
     html/htmprint.cpp
@@ -102,6 +109,7 @@ set(TEST_GUI_SRC
     misc/garbage.cpp
     misc/safearrayconverttest.cpp
     misc/settings.cpp
+    misc/textwrap.cpp
     # This one is intentionally duplicated here (it is also part of
     # non-GUI test) as sockets behave differently in console and GUI
     # applications.
@@ -122,7 +130,6 @@ set(TEST_GUI_SRC
     testprec.h
     testableframe.h
     asserthelper.h
-    testdate.h
     testfile.h
     testimage.h
     controls/bookctrlbasetest.h
@@ -147,10 +154,19 @@ set(TEST_GUI_DATA
     horse.tga
     horse.tif
     horse.xpm
+    horse.webp
     image/bitfields.bmp
     image/bitfields-alpha.bmp
     image/8bpp-colorsused-large.bmp
     image/8bpp-colorsused-negative.bmp
+    image/32bpp_rgb.bmp
+    image/32bpp_rgb.ico
+    image/32bpp_rgb_a0.ico
+    image/badrle4.bmp
+    image/rgb16-3103.bmp
+    image/rgb32-7187.bmp
+    image/rgb32bf.bmp
+    image/rgba32.bmp
     image/rle4-delta-320x240.bmp
     image/rle8-delta-320x240-expected.bmp
     image/rle8-delta-320x240.bmp

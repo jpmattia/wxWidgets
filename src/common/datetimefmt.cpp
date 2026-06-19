@@ -394,7 +394,7 @@ wxString wxDateTime::Format(const wxString& formatp, const TimeZone& tz) const
     tmTimeOnly.tm_year = 76;
     tmTimeOnly.tm_isdst = 0;        // no DST, we adjust for tz ourselves
 
-    wxString tmp, res, fmt;
+    wxString res, fmt;
     for ( wxString::const_iterator p = format.begin(); p != format.end(); ++p )
     {
         if ( *p != wxT('%') )
@@ -405,8 +405,17 @@ wxString wxDateTime::Format(const wxString& formatp, const TimeZone& tz) const
             continue;
         }
 
+        // advance to the format specifier following the '%': a trailing '%'
+        // is not a valid format, so output it verbatim and stop here instead
+        // of letting the loop's own ++p move the iterator past the end
+        if ( ++p == format.end() )
+        {
+            res += wxT('%');
+            break;
+        }
+
         // set the default format
-        switch ( (*++p).GetValue() )
+        switch ( (*p).GetValue() )
         {
             case wxT('Y'):               // year has 4 digits
             case wxT('G'):               // (and ISO week year too)
@@ -632,6 +641,10 @@ wxString wxDateTime::Format(const wxString& formatp, const TimeZone& tz) const
 
                 case wxT('S'):       // second as a decimal number (00-61)
                     res += wxString::Format(fmt, tm.sec);
+                    break;
+
+                case wxT('T'):       // time as %H:%M:%S
+                    res += wxString::Format(wxT("%02d:%02d:%02d"), tm.hour, tm.min, tm.sec);
                     break;
 
                 case wxT('U'):       // week number in the year (Sunday 1st week day)
@@ -1044,7 +1057,6 @@ wxDateTime::ParseFormat(const wxString& date,
     wxCHECK_MSG( !format.empty(), false, "format can't be empty" );
     wxCHECK_MSG( endParse, false, "end iterator pointer must be specified" );
 
-    wxString str;
     unsigned long num;
 
     // what fields have we found?
@@ -1556,8 +1568,8 @@ wxDateTime::ParseFormat(const wxString& date,
                         minusFound = false;
                     else if
                     (
-                        *input == wxS('-')
-                        || *input == wxString::FromUTF8("\xe2\x88\x92")
+                        *input == wxS('-') ||
+                        *input == wxString::FromUTF8("−") // U+2212 MINUS SIGN
                     )
                         minusFound = true;
                     else
@@ -2403,10 +2415,16 @@ wxString wxTimeSpan::Format(const wxString& format) const
 
     for ( wxString::const_iterator pch = format.begin(); pch != format.end(); ++pch )
     {
-        wxChar ch = *pch;
+        wxUniChar ch = *pch;
 
         if ( ch == wxT('%') )
         {
+            if ( ++pch == format.end() )
+            {
+                wxFAIL_MSG( wxT("trailing '%' in format string") );
+                break;
+            }
+
             // the start of the format specification of the printf() below
             wxString fmtPrefix(wxT('%'));
 
@@ -2416,8 +2434,8 @@ wxString wxTimeSpan::Format(const wxString& format) const
             // the number of digits for the format string, 0 if unused
             unsigned digits = 0;
 
-            ch = *++pch;    // get the format spec char
-            switch ( ch )
+            ch = *pch;    // get the format spec char
+            switch ( ch.GetValue() )
             {
                 default:
                     wxFAIL_MSG( wxT("invalid format character") );

@@ -13,7 +13,7 @@ dnl ---------------------------------------------------------------------------
 dnl initialization
 dnl ---------------------------------------------------------------------------
 
-AC_INIT([wxWidgets], [3.3.0], [wx-dev@googlegroups.com])
+AC_INIT([wxWidgets], [3.3.3], [wx-dev@googlegroups.com])
 
 dnl the file passed to AC_CONFIG_SRCDIR should be specific to our package
 AC_CONFIG_SRCDIR([wx-config.in])
@@ -39,7 +39,7 @@ dnl wx_release_number += 1
 
 wx_major_version_number=3
 wx_minor_version_number=3
-wx_release_number=0
+wx_release_number=3
 wx_subrelease_number=0
 
 WX_RELEASE=$wx_major_version_number.$wx_minor_version_number
@@ -154,6 +154,11 @@ case "${host}" in
     dnl _HPUX_SOURCE is defined, see stdsyms(5)
     CPPFLAGS="-D_HPUX_SOURCE $CPPFLAGS"
   ;;
+  *-*-android* )
+    USE_LINUX=1
+    AC_DEFINE(__LINUX__)
+    LIBS="-llog $LIBS"
+  ;;
   *-*-linux* )
     USE_LINUX=1
     AC_DEFINE(__LINUX__)
@@ -261,6 +266,9 @@ case "${host}" in
     dnl      USE_UNIX  must be set and not USE_WIN32
     PROGRAM_EXT=".exe"
     DEFAULT_DEFAULT_wxUSE_MSW=1
+    dnl This is not the final value, we may reset it to 0 if we use Cygwin in
+    dnl Unix emulation mode.
+    USE_WIN32=1
   ;;
 
   *-*-darwin* )
@@ -317,6 +325,7 @@ DEFAULT_wxUSE_LIBMSPACK=no
 DEFAULT_wxUSE_LIBSDL=no
 DEFAULT_wxUSE_LIBLZMA=no
 DEFAULT_wxUSE_CAIRO=no
+DEFAULT_wxUSE_LUNASVG=no
 
 dnl features disabled by default
 DEFAULT_wxUSE_ACCESSIBILITY=no
@@ -329,6 +338,7 @@ DEFAULT_wxUSE_HOTKEY=auto
 DEFAULT_wxUSE_MEDIACTRL=auto
 DEFAULT_wxUSE_METAFILE=auto
 DEFAULT_wxUSE_OPENGL=auto
+DEFAULT_wxUSE_SECRETSTORE=auto
 DEFAULT_wxUSE_WEBVIEW_EDGE=no
 
 dnl Mac/Cocoa users need to enable building universal binaries explicitly
@@ -339,6 +349,9 @@ DEFAULT_wxUSE_OFFICIAL_BUILD=no
 
 dnl Always default to no. Only special cases require this.
 DEFAULT_wxUSE_OBJC_UNIQUIFYING=no
+
+dnl Prefer to use built-in CATCH library, there are no real drawbacks to it.
+DEFAULT_wxUSE_CATCH2=builtin
 
 dnl ===========================
 dnl deal with configure options
@@ -411,6 +424,7 @@ WX_ARG_ONLY_WITH(osx_iphone,    [  --with-osx_iphone       use iOS], [wxUSE_OSX_
 WX_ARG_ONLY_WITH(osx,           [  --with-osx              use macOS (default port, Cocoa)], [wxUSE_OSX_COCOA="$withval" CACHE_OSX_COCOA=1 TOOLKIT_GIVEN=1])
 WX_ARG_ONLY_WITH(cocoa,         [  --with-cocoa            same as --with-osx_cocoa], [wxUSE_OSX_COCOA="$withval" CACHE_OSX_COCOA=1 TOOLKIT_GIVEN=1])
 WX_ARG_ONLY_WITH(iphone,        [  --with-iphone           same as --with-osx_iphone], [wxUSE_OSX_IPHONE="$withval" CACHE_OSX_IPHONE=1 TOOLKIT_GIVEN=1])
+WX_ARG_ONLY_WITH(iphonesimulator, [  --with-iphonesimulator     same as --with-osx_iphonesimulator], [wxUSE_OSX_IPHONE="$withval" wxUSE_IPHONESIMULATOR="yes" CACHE_OSX_IPHONE=1 TOOLKIT_GIVEN=1])
 WX_ARG_ONLY_WITH(mac,           [  --with-mac              same as --with-osx], [wxUSE_OSX_COCOA="$withval" CACHE_OSX_COCOA=1 TOOLKIT_GIVEN=1])
 WX_ARG_ONLY_WITH(wine,          [  --with-wine             use Wine], [wxUSE_WINE="$withval" CACHE_WINE=1])
 WX_ARG_ONLY_WITH(msw,           [  --with-msw              use MS-Windows], [wxUSE_MSW="$withval" CACHE_MSW=1 TOOLKIT_GIVEN=1])
@@ -512,6 +526,8 @@ dnl ---------------------------------------------------------------------------
 WX_ARG_SYS_WITH(libpng,    [  --with-libpng           use libpng (PNG image format)], wxUSE_LIBPNG)
 WX_ARG_SYS_WITH(libjpeg,   [  --with-libjpeg          use libjpeg (JPEG file format)], wxUSE_LIBJPEG)
 WX_ARG_SYS_WITH(libtiff,   [  --with-libtiff          use libtiff (TIFF file format)], wxUSE_LIBTIFF)
+WX_ARG_SYS_WITH(libwebp,   [  --with-libwebp          use libwebp (WebP file format)], wxUSE_LIBWEBP)
+WX_ARG_SYS_WITH(catch2,    [  --with-catch2           use CATCH2 (testing framework)], wxUSE_CATCH2)
 
 dnl We don't provide built-in version of this library, so if the use of system
 dnl libraries is explicitly disabled, we can't use it at all.
@@ -525,11 +541,13 @@ WX_ARG_SYS_WITH(libxpm,    [  --with-libxpm           use libxpm (XPM file forma
 WX_ARG_WITH(libiconv,      [  --with-libiconv         use libiconv (character conversion)], wxUSE_LIBICONV)
 WX_ARG_WITH(libmspack,     [  --with-libmspack        use libmspack (CHM help files loading)], wxUSE_LIBMSPACK)
 WX_ARG_WITHOUT(gtkprint,   [  --without-gtkprint      don't use GTK printing support], wxUSE_GTKPRINT)
+WX_ARG_WITHOUT(wayland,    [  --without-wayland       don't use Wayland-specific code], wxUSE_WAYLAND)
 WX_ARG_WITH(gnomevfs,      [  --with-gnomevfs         use GNOME VFS for associating MIME types], wxUSE_LIBGNOMEVFS)
 WX_ARG_WITH(libnotify,     [  --with-libnotify        use libnotify for notifications], wxUSE_LIBNOTIFY)
 WX_ARG_WITH(opengl,        [  --with-opengl           use OpenGL (or Mesa)], wxUSE_OPENGL)
 WX_ARG_WITH(xtest,         [  --with-xtest            use XTest extension], wxUSE_XTEST)
 WX_ARG_WITH(nanosvg,       [  --with-nanosvg          use NanoSVG for rasterizing SVG], wxUSE_NANOSVG)
+WX_ARG_WITH(lunasvg,       [  --with-lunasvg          use LunaSVG for rasterizing SVG], wxUSE_LUNASVG)
 
 if test "$wxUSE_GTK" = 1 -o "$wxUSE_X11" = 1; then
     wx_needs_cairo_for_gc=1
@@ -552,9 +570,9 @@ WX_ARG_SYS_WITH(zlib,      [  --with-zlib             use zlib for LZW compressi
 WX_ARG_SYS_WITH(expat,     [  --with-expat            enable XML support using expat parser], wxUSE_EXPAT)
 
 WX_ARG_WITH(libcurl,       [  --with-libcurl          use libcurl-based wxWebRequest], wxUSE_LIBCURL)
-dnl USE_WIN32 is not defined yet, so we always define this option even if it's
-dnl MSW-specific, which is not ideal, but better than never defining it.
+if test "$USE_WIN32" = 1; then
 WX_ARG_WITH(winhttp,       [  --with-winhttp          use WinHTTP-based wxWebRequest], wxUSE_WINHTTP)
+fi
 if test "$USE_DARWIN" = 1; then
 WX_ARG_WITH(urlsession,    [  --with-urlsession       use NSURLSession-based wxWebRequest], wxUSE_URLSESSION)
 fi
@@ -654,7 +672,6 @@ WX_ARG_DISABLE(pic,          [  --disable-pic           don't use position indep
 WX_ARG_ENABLE(no_rtti,       [  --enable-no_rtti        create code without RTTI information], wxUSE_NO_RTTI)
 WX_ARG_ENABLE(no_exceptions, [  --enable-no_exceptions  create code without C++ exceptions handling], wxUSE_NO_EXCEPTIONS)
 WX_ARG_ENABLE(permissive,    [  --enable-permissive     compile code disregarding strict ANSI], wxUSE_PERMISSIVE)
-WX_ARG_DISABLE(vararg_macros,[  --disable-vararg_macros don't use vararg macros, even if they are supported], wxUSE_VARARG_MACROS)
 
 if test "$USE_DARWIN" = 1; then
 WX_ARG_ENABLE_PARAM(universal_binary, [[  --enable-universal_binary=archs create universal binary for the specified (or all supported) architectures]], wxUSE_UNIVERSAL_BINARY)
@@ -666,6 +683,7 @@ WX_ARG_DISABLE(compat32,     [  --disable-compat32      disable wxWidgets 3.2 co
 
 WX_ARG_DISABLE(rpath,        [  --disable-rpath         disable use of rpath for uninstalled builds], wxUSE_RPATH)
 
+WX_ARG_DISABLE(symver,       [  --disable-symver        disable use of ELF symbols versioning even if supported], wxUSE_ELF_SYMVER)
 WX_ARG_DISABLE(visibility,   [  --disable-visibility    disable use of ELF symbols visibility even if supported], wxUSE_VISIBILITY)
 
 WX_ARG_ENABLE(repro_build,   [  --enable-repro-build    enable reproducible build mode], wxUSE_REPRODUCIBLE_BUILD)
@@ -718,11 +736,11 @@ WX_ARG_FEATURE(fontmap,       [  --enable-fontmap        use font encodings conv
 WX_ARG_FEATURE(fs_archive,    [  --enable-fs_archive     use virtual archive filesystems], wxUSE_FS_ARCHIVE)
 WX_ARG_FEATURE(fs_inet,       [  --enable-fs_inet        use virtual HTTP/FTP filesystems], wxUSE_FS_INET)
 WX_ARG_FEATURE(fs_zip,        [  --enable-fs_zip         now replaced by fs_archive], wxUSE_FS_ZIP)
+if test "$USE_WIN32" = 1 -o "$USE_DARWIN"; then
 WX_ARG_FEATURE(fsvolume,      [  --enable-fsvolume       use wxFSVolume class], wxUSE_FSVOLUME)
+fi
 WX_ARG_FEATURE(fswatcher,     [  --enable-fswatcher      use wxFileSystemWatcher class], wxUSE_FSWATCHER)
-WX_ARG_FEATURE(geometry,      [  --enable-geometry       use geometry class], wxUSE_GEOMETRY)
 WX_ARG_FEATURE(log,           [  --enable-log            use logging system], wxUSE_LOG)
-WX_ARG_FEATURE(longlong,      [  --enable-longlong       use wxLongLong class], wxUSE_LONGLONG)
 WX_ARG_FEATURE(mimetype,      [  --enable-mimetype       use wxMimeTypesManager], wxUSE_MIMETYPE)
 WX_ARG_FEATURE(printfposparam,[  --enable-printfposparam use wxVsnprintf() which supports positional parameters], wxUSE_PRINTF_POS_PARAMS)
 WX_ARG_FEATURE(secretstore,   [  --enable-secretstore    use wxSecretStore class], wxUSE_SECRETSTORE)
@@ -969,7 +987,6 @@ dnl ---------------------------------------------------------------------------
 dnl common dialogs
 dnl ---------------------------------------------------------------------------
 
-WX_ARG_FEATURE(commondlg,   [  --enable-commondlg      use all common dialogs], wxUSE_COMMONDLGS)
 WX_ARG_FEATURE(aboutdlg,    [  --enable-aboutdlg       use wxAboutBox], wxUSE_ABOUTDLG)
 WX_ARG_FEATURE(choicedlg,   [  --enable-choicedlg      use wxChoiceDialog], wxUSE_CHOICEDLG)
 WX_ARG_FEATURE(coldlg,      [  --enable-coldlg         use wxColourDialog], wxUSE_COLOURDLG)
@@ -1034,7 +1051,6 @@ WX_ARG_FEATURE(dccache,     [  --enable-dccache        cache temporary wxDC obje
 WX_ARG_FEATURE(ps-in-msw,   [  --enable-ps-in-msw      use PS printing in wxMSW (Win32 only)], wxUSE_POSTSCRIPT_ARCHITECTURE_IN_MSW)
 WX_ARG_FEATURE(ownerdrawn,  [  --enable-ownerdrawn     use owner drawn controls (Win32 and OS/2 only)], wxUSE_OWNER_DRAWN)
 WX_ARG_FEATURE(taskbarbutton,[  --enable-taskbarbutton  enable wxTaskBarButton (Win32 only)], wxUSE_TASKBARBUTTON)
-WX_ARG_FEATURE(uxtheme,     [  --enable-uxtheme        enable support for Windows XP themed look (Win32 only)], wxUSE_UXTHEME)
 WX_ARG_FEATURE(wxdib,       [  --enable-wxdib          use wxDIB class (Win32 only)], wxUSE_DIB)
 
 dnl Turn off MSW-only IE webview backend here to avoid reporting it as "on" in
@@ -1113,10 +1129,18 @@ case "${wxWITH_CXX-$wxDEFAULT_CXXSTD}" in
             AC_MSG_ERROR([Using wxWebView Chromium backend requires C++14 or later.])
         fi
 
+        if test "$wxUSE_LUNASVG" = "yes"; then
+            AC_MSG_ERROR([Using LunaSVG requires C++17 or later])
+        fi
+
         AX_CXX_COMPILE_STDCXX(11)
         ;;
 
     14)
+        if test "$wxUSE_LUNASVG" = "yes"; then
+            AC_MSG_ERROR([Using LunaSVG requires C++17 or later])
+        fi
+
         AX_CXX_COMPILE_STDCXX(14)
         ;;
 
@@ -1327,7 +1351,11 @@ fi
 
 if test "x$wxUSE_MACOSX_VERSION_MIN" != "x"; then
     if test "$wxUSE_OSX_IPHONE" = 1; then
-        MACOSX_VERSION_MIN_OPTS="-miphoneos-version-min=$wxUSE_MACOSX_VERSION_MIN"
+        if test "$wxUSE_IPHONESIMULATOR" = "yes"; then
+            MACOSX_VERSION_MIN_OPTS="-miphonesimulator-version-min=$wxUSE_MACOSX_VERSION_MIN"
+        else
+            MACOSX_VERSION_MIN_OPTS="-miphoneos-version-min=$wxUSE_MACOSX_VERSION_MIN"
+        fi
     else
         MACOSX_VERSION_MIN_OPTS="-mmacosx-version-min=$wxUSE_MACOSX_VERSION_MIN"
     fi
@@ -1465,7 +1493,6 @@ esac
 dnl Determine whether we want to use Cygwin as Windows or POSIX platform: the
 dnl latter makes more sense for wxGTK/X11 ports
 wants_win32=0
-doesnt_want_win32=0
 case "${host}" in
   *-*-cygwin*)
       if test "$wxUSE_MSW" = 1 ; then
@@ -1491,7 +1518,8 @@ case "${host}" in
         if test "$wx_cv_nocygwin" = "yes"; then
             wants_win32=1
         else
-            doesnt_want_win32=1
+            dnl Undo USE_WIN32=1 done above.
+            USE_WIN32=0
         fi
       fi
       if test "$wants_win32" = 1 ; then
@@ -1508,8 +1536,6 @@ if test "$wxUSE_WINE" = "yes"; then
     LDFLAGS_GUI="-mwindows"
 fi
 
-dnl NB: The two tests below are *NOT* mutually exclusive! They should only
-dnl     take effect on Cygwin/Mingw and not other platforms.
 if test "$wants_win32" = 1 ; then
     USE_UNIX=0
     USE_WIN32=1
@@ -1518,11 +1544,6 @@ if test "$wants_win32" = 1 ; then
     AC_DEFINE(__GNUWIN32__)
     AC_DEFINE(STRICT)
 fi
-if test "$doesnt_want_win32" = 1 ; then
-    USE_UNIX=1
-    USE_WIN32=0
-fi
-dnl (end of Windows-only piece)
 
 if test "$USE_UNIX" = 1 ; then
     wxUSE_UNIX=yes
@@ -1552,11 +1573,6 @@ dnl ------------------------------------------------------------------------
 dnl Note: non-empty last parameter makes check compile-only,
 dnl   skipping worthless preprocessing check
 AC_CHECK_HEADERS(langinfo.h wchar.h,,, [AC_INCLUDES_DEFAULT])
-
-dnl maybe wchar_t is in wcstr.h if we don't have wchar.h?
-if test "$ac_cv_header_wchar_h" != "yes"; then
-    AC_CHECK_HEADERS([wcstr.h],,, [AC_INCLUDES_DEFAULT()])
-fi
 
 if test "$USE_UNIX" = 1 ; then
     dnl POSIX needs this for select(), but old systems don't have it
@@ -1610,12 +1626,10 @@ AC_CHECK_SIZEOF(wchar_t, 0,
         #if defined(__DJGPP__) && !( (__GNUC_MINOR__ >= 8 && __GNUC__ == 2 ) || __GNUC__ >= 3 )
         #  error "fake wchar_t"
         #endif
-        #ifdef HAVE_WCHAR_H
-        #  ifdef __CYGWIN__
-        #    include <stddef.h>
-        #  endif
-        #  include <wchar.h>
+        #ifdef __CYGWIN__
+        #  include <stddef.h>
         #endif
+        #include <wchar.h>
         #ifdef HAVE_STDLIB_H
         #  include <stdlib.h>
         #endif
@@ -1759,8 +1773,7 @@ if test "$ac_cv_sys_largefile_source" != no; then
     WXCONFIG_CPPFLAGS="$WXCONFIG_CPPFLAGS -D_LARGEFILE_SOURCE=$ac_cv_sys_largefile_source"
 fi
 
-dnl check for bytesex stuff (don't use AC_C_BIGENDIAN to allow cross-compiling)
-WX_C_BIGENDIAN
+AC_C_BIGENDIAN
 
 dnl With Sun CC, temporaries have block scope by default. This flag is needed
 dnl to get the expression scope behaviour that conforms to the standard.
@@ -2504,6 +2517,58 @@ if test "$wxUSE_LIBJBIG" = "yes"; then
 fi
 
 dnl ------------------------------------------------------------------------
+dnl Check for webp library
+dnl ------------------------------------------------------------------------
+
+WEBP_LINK=
+if test "$wxUSE_LIBWEBP" != "no" ; then
+    AC_DEFINE(wxUSE_LIBWEBP)
+    if test "$wxUSE_LIBWEBP" = "sys" -o "$wxUSE_LIBWEBP" = "yes" ; then
+        PKG_CHECK_MODULES(
+            WebP, [libwebp libwebpdemux],
+            [
+                WEBP_LINK=$WebP_LIBS
+                CXXFLAGS="$WebP_CFLAGS $CXXFLAGS"
+            ],
+            [
+            ]
+        )
+
+        if test "x$WEBP_LINK" = "x" ; then
+            if test "$wxUSE_LIBWEBP" = "sys" ; then
+                AC_MSG_ERROR([system webp library not found! Use --with-libwebp=builtin to use built-in version])
+            else
+                AC_MSG_WARN([system webp library not found, will use built-in instead])
+                wxUSE_LIBWEBP=builtin
+            fi
+        else
+            dnl we are using the system library
+            wxUSE_LIBWEBP=sys
+        fi
+    fi
+
+    dnl We should test if built-in webp library is avalable, preferably
+    dnl downloaded through --recurse-submodules option if cloned from git.
+    dnl Would be available when downloaded as a zipped or tarball release.
+    if test "$wxUSE_LIBWEBP" = "builtin" ; then
+        AC_MSG_CHECKING([whether webp_dec.c file exists])
+        if ! test -f "$srcdir/3rdparty/libwebp/src/dec/webp_dec.c" ; then
+            AC_MSG_RESULT([no])
+            AC_MSG_ERROR([
+    Configured to use built-in webp library, but the required file
+    $srcdir/3rdparty/libwebp/src/dec/webp_dec.c couldn't be found.
+    You might need to run
+
+        git submodule update --init 3rdparty/libwebp
+
+    to fix this.])
+        else
+            AC_MSG_RESULT([yes])
+        fi
+    fi
+fi
+
+dnl ------------------------------------------------------------------------
 dnl Check for tiff library
 dnl ------------------------------------------------------------------------
 
@@ -2595,12 +2660,17 @@ if test "$wxUSE_LIBTIFF" != "no" ; then
             dnl the top-level script to all the other ones called recursively), so
             dnl we need to hack around this
             tiff_jpeg_option=--disable-jpeg
-        else
-            tiff_jpeg_option=--enable-jpeg
+        elif test "$wxUSE_LIBJPEG" = "builtin"; then
+            dnl JPEG support is enabled by default, but make sure that we use
+            dnl our own libjpeg, even if another version of the library is
+            dnl installed system-wide
+            tiff_jpeg_option=--with-jpeg-from-wx
         fi
 
+        dnl if you ever want to enable webp, check if it clashes with the wxUSE_LIBWEBP setting
         AX_SUBDIRS_CONFIGURE([src/tiff],
             [[--disable-jbig],
+             [--disable-lerc],
              [--disable-libdeflate],
              [--disable-webp],
              [--disable-zstd],
@@ -2673,8 +2743,12 @@ if test "$wxUSE_EXPAT" != "no"; then
         wxCFLAGS_C99=$ac_cv_prog_cc_c99
         AC_SUBST(wxCFLAGS_C99)
 
-        dnl Expat needs this:
-        AC_CONFIG_SUBDIRS([src/expat/expat])
+        dnl Don't check for docbook: we don't need to generate the
+        dnl documentation and, worse, Expat configure can actually fail the
+        dnl build if docbook is found but docbook2man is not the expected
+        dnl variant.
+        AX_SUBDIRS_CONFIGURE([src/expat/expat],
+            [[--without-docbook]])
     fi
 
     wxUSE_XML=yes
@@ -2689,6 +2763,16 @@ dnl ------------------------------------------------------------------------
 
 if test "$wxUSE_NANOSVG" = "yes"; then
     AC_DEFINE(wxUSE_NANOSVG)
+fi
+
+dnl ------------------------------------------------------------------------
+dnl Check for LunaSVG libraries
+dnl ------------------------------------------------------------------------
+
+if test "$wxUSE_LUNASVG" = "yes"; then
+    AC_DEFINE(wxUSE_LUNASVG)
+else
+    USE_LUNASVG=0
 fi
 
 dnl ------------------------------------------------------------------------
@@ -2984,6 +3068,48 @@ installed, where VER is 2, 3 or 4.
                            )
             CFLAGS=$save_CFLAGS
         ])
+
+        dnl Also check for wayland-client presence if we use Wayland and its
+        dnl use was not explicitly disabled.
+        if test "$wx_cv_gdk_wayland" = "yes" -a "$wxUSE_WAYLAND" != "no"; then
+            PKG_CHECK_MODULES(WAYLAND_CLIENT, [wayland-client],
+                [
+                    wx_cv_wayland_client=yes
+                    CFLAGS="$WAYLAND_CLIENT_CFLAGS $CFLAGS"
+                    CXXFLAGS="$WAYLAND_CLIENT_CFLAGS $CXXFLAGS"
+                    GUI_TK_LIBRARY="$GUI_TK_LIBRARY $WAYLAND_CLIENT_LIBS"
+                ],
+                [
+                    wx_cv_wayland_client=no
+                ]
+            )
+
+            if test "$wx_cv_wayland_client" = "yes"; then
+                AC_CACHE_CHECK([for wayland-scanner],
+                    wx_cv_wayland_scanner,
+                    [
+                        wx_cv_wayland_scanner=`$PKG_CONFIG --variable=wayland_scanner wayland-scanner 2>/dev/null`
+                    ]
+                )
+                WAYLAND_SCANNER=$wx_cv_wayland_scanner
+            fi
+
+            if test -n "$WAYLAND_SCANNER" ; then
+                AC_DEFINE(wxHAVE_WAYLAND_CLIENT)
+                AC_CONFIG_COMMANDS([wayland-protocols],
+                    [
+                        mkdir -p lib/wx/include/${TOOLCHAIN_FULLNAME}/wx/protocols
+                        $WAYLAND_SCANNER client-header $srcdir/src/unix/protocols/pointer-warp-v1.xml lib/wx/include/${TOOLCHAIN_FULLNAME}/wx/protocols/pointer-warp-v1-client-protocol.h
+                        $WAYLAND_SCANNER private-code $srcdir/src/unix/protocols/pointer-warp-v1.xml lib/wx/include/${TOOLCHAIN_FULLNAME}/wx/protocols/pointer-warp-v1-client-protocol.c
+                    ],
+                    [
+                        WAYLAND_SCANNER=$WAYLAND_SCANNER
+                    ]
+                )
+            else
+                AC_MSG_WARN([Wayland-specific code will be disabled])
+            fi
+        fi
     fi
 
     if test "$wxUSE_DFB" = 1; then
@@ -3164,25 +3290,38 @@ installed, where VER is 2, 3 or 4.
             dnl the name of the directory where the files for this toolkit live
             TOOLKIT_INCLUDE="${TOOLKIT_INCLUDE} -I${QT5_CUSTOM_DIR}/include"
             GUI_TK_LIBRARY="${GUI_TK_LIBRARY} -L${QT5_CUSTOM_DIR}/lib \
-                            -lQt5Core -lQt5Widgets -lQt5Gui -lQt5OpenGL -lQt5Test \
+                            -lQt5Core -lQt5Widgets -lQt5Gui -lQt5OpenGL -lQt5Test -lQt5PrintSupport \
                             -Wl,-rpath,${QT5_CUSTOM_DIR}/lib"
 
         elif test -z "$PKG_CONFIG" ; then
             AC_MSG_ERROR([specify QT5_CUSTOM_DIR or make sure pkg-config is available to search for Qt5 libraries])
 
         else
-            PKG_CHECK_MODULES(QT5,
-                          [Qt5Core Qt5Widgets Qt5Gui Qt5OpenGL Qt5Test],
+            PKG_CHECK_MODULES(QT6,
+                          [Qt6Core Qt6Widgets Qt6Gui Qt6OpenGL Qt6OpenGLWidgets Qt6Test Qt6PrintSupport],
                 [
-                TOOLKIT_INCLUDE="${TOOLKIT_INCLUDE} ${QT5_CFLAGS}"
-                GUI_TK_LIBRARY="${GUI_TK_LIBRARY} ${QT5_LIBS}"
-                if `pkg-config --variable qt_config Qt5Core | grep "reduce_relocations" >/dev/null`; then
+                TOOLKIT_INCLUDE="${TOOLKIT_INCLUDE} ${QT6_CFLAGS}"
+                GUI_TK_LIBRARY="${GUI_TK_LIBRARY} ${QT6_LIBS}"
+                if `pkg-config --variable qt_config Qt6Core | grep "reduce_relocations" >/dev/null`; then
                     dnl build with position independent code if Qt needs it
                     wxUSE_PIC=yes
                 fi
                 ],
                 [
-                    AC_MSG_ERROR([Qt5 libraries are not available])
+                    PKG_CHECK_MODULES(QT5,
+                                  [Qt5Core Qt5Widgets Qt5Gui Qt5OpenGL Qt5Test Qt5PrintSupport],
+                        [
+                        TOOLKIT_INCLUDE="${TOOLKIT_INCLUDE} ${QT5_CFLAGS}"
+                        GUI_TK_LIBRARY="${GUI_TK_LIBRARY} ${QT5_LIBS}"
+                        if `pkg-config --variable qt_config Qt5Core | grep "reduce_relocations" >/dev/null`; then
+                            dnl build with position independent code if Qt needs it
+                            wxUSE_PIC=yes
+                        fi
+                        ],
+                        [
+                            AC_MSG_ERROR([Neither Qt6 nor Qt5 libraries are available])
+                        ]
+                    )
                 ]
             )
         fi
@@ -3315,7 +3454,7 @@ if test "$wxUSE_OPENGL" = "yes" -o "$wxUSE_OPENGL" = "auto"; then
     dnl look in glcanvas.h for the list of platforms supported by wxGlCanvas:
 
     if test "$wxUSE_OSX_COCOA" = 1; then
-        OPENGL_LIBS="-framework OpenGL -framework AGL"
+        OPENGL_LIBS="-framework OpenGL"
     elif test "$wxUSE_MSW" = 1; then
         OPENGL_LIBS="-lopengl32"
     elif test "$wxUSE_X11" = 1 -o "$wxUSE_GTK" = 1 -o "$wxUSE_QT" = 1; then
@@ -3344,34 +3483,35 @@ if test "$wxUSE_OPENGL" = "yes" -o "$wxUSE_OPENGL" = "auto"; then
                       fi
                     fi
 
-                        found_gl=1
-                        OPENGL_LIBS="-lGL"
+                    found_gl=1
+                    OPENGL_LIBS="-lGL"
+                    AC_DEFINE(wxHAS_GLX)
 
-                        if test "$WXGTK3" = 1; then
-                            if test "$wxUSE_GLCANVAS_EGL" != "no"; then
-                                PKG_CHECK_MODULES(EGL, [egl >= 1.5],
-                                    [
-                                        OPENGL_LIBS="$OPENGL_LIBS $EGL_LIBS"
-                                        AC_DEFINE(wxUSE_GLCANVAS_EGL)
-                                        PKG_CHECK_MODULES(WAYLAND_EGL, [wayland-egl],
-                                            [
-                                                if test $wx_cv_gdk_wayland = "yes"; then
-                                                    OPENGL_LIBS="$OPENGL_LIBS $WAYLAND_EGL_LIBS"
-                                                    have_wayland=1
-                                                fi
-                                            ],
-                                            [:]
-                                        )
-                                    ],
-                                    [
-                                        AC_MSG_NOTICE([EGL 1.5+ not available. Will use GLX.])
-                                    ]
-                                )
-                                if test "$have_wayland" != 1; then
-                                    AC_MSG_NOTICE([wxGLCanvas will not have Wayland support])
-                                fi
+                    if test "$WXGTK3" = 1; then
+                        if test "$wxUSE_GLCANVAS_EGL" != "no"; then
+                            PKG_CHECK_MODULES(EGL, [egl >= 1.4],
+                                [
+                                    OPENGL_LIBS="$OPENGL_LIBS $EGL_LIBS"
+                                    AC_DEFINE(wxHAS_EGL)
+                                    PKG_CHECK_MODULES(WAYLAND_EGL, [wayland-egl],
+                                        [
+                                            if test $wx_cv_gdk_wayland = "yes"; then
+                                                OPENGL_LIBS="$OPENGL_LIBS $WAYLAND_EGL_LIBS"
+                                                have_wayland=1
+                                            fi
+                                        ],
+                                        [:]
+                                    )
+                                ],
+                                [
+                                    AC_MSG_NOTICE([EGL 1.4+ not available. Will use GLX.])
+                                ]
+                            )
+                            if test "$have_wayland" != 1; then
+                                AC_MSG_NOTICE([wxGLCanvas will not have Wayland support])
                             fi
                         fi
+                    fi
                 fi
 
                 if test "$found_gl" != 1; then
@@ -3432,8 +3572,88 @@ dnl --- the marker for quick search, leave it here: SHARED_LIB_SETUP ---
 
 if test "$wxUSE_SHARED" = "yes"; then
 
-    dnl use versioned symbols if available on the platform
-    WX_VERSIONED_SYMBOLS([\$(wx_top_builddir)/version-script])
+    dnl use versioned symbols if available on the platform and not disabled
+    if test "$wxUSE_ELF_SYMVER" != "no"; then
+        WX_VERSIONED_SYMBOLS([\$(wx_top_builddir)/version-script])
+    fi
+
+    if test "$wx_cv_version_script" = "yes"; then
+        dnl We only need wxELF_SYMVER etc in stable releases, so don't bother
+        dnl checking for them in the development branch.
+        if test `expr ${wx_minor_version_number} % 2` -eq 0; then
+            dnl We want to use either __symver__ attribute (preferably, as it
+            dnl works with LTO) or .symver, but to avoid checking for both of
+            dnl them, use the header file which can check if the attribute is
+            dnl available. Just remember to pretend that we do have support
+            dnl for this before including it, as it relies on this symbol,
+            dnl which we'll define below only if things do indeed work.
+            saveCppflags="$CPPFLAGS"
+            CPPFLAGS="$saveCppflags -I${srcdir}/include -DwxHAVE_ELF_SYMVER"
+
+            saveLdflags="$LDFLAGS"
+            LDFLAGS="$saveLdflags -Wl,--version-script,conftest.sym"
+
+            AC_CACHE_CHECK([if using multiple ELF symbol versions is supported],
+                wx_cv_elf_symver_multiple,
+                [
+                    echo "lib_new {}; lib_old { *; };" >conftest.sym
+                    AC_LANG_PUSH(C++)
+                    AC_LINK_IFELSE([
+                        AC_LANG_SOURCE([
+                            #include "wx/private/elfversion.h"
+                            extern "C" {
+                            wxELF_SYMVER("_foo","_foo@lib_old")
+                            wxELF_SYMVER("_foo","_foo@@lib_new")
+                            void foo() {}
+                            }
+                            int main() { return 0; }
+                        ])],
+                        wx_cv_elf_symver_multiple=yes,
+                        wx_cv_elf_symver_multiple=no
+                    )
+                    AC_LANG_POP()
+                    rm -f conftest.sym
+                ]
+            )
+
+            if test "$wx_cv_elf_symver_multiple" = "yes"; then
+                wx_cv_elf_symver=yes
+            else
+                AC_CACHE_CHECK([if using ELF symbol versions is supported],
+                    wx_cv_elf_symver,
+                    [
+                        echo "lib_new {}; lib_old { *; };" >conftest.sym
+                        AC_LANG_PUSH(C++)
+                        AC_LINK_IFELSE([
+                            AC_LANG_SOURCE([
+                                #include "wx/private/elfversion.h"
+                                extern "C" {
+                                wxELF_SYMVER("_foo","_foo@@lib_new")
+                                void foo() {}
+                                }
+                                int main() { return 0; }
+                            ])],
+                            wx_cv_elf_symver=yes,
+                            wx_cv_elf_symver=no
+                        )
+                        AC_LANG_POP()
+                        rm -f conftest.sym
+                    ]
+                )
+            fi
+
+            if test "$wx_cv_elf_symver" = "yes"; then
+                AC_DEFINE(wxHAVE_ELF_SYMVER)
+            fi
+
+            if test "$wx_cv_elf_symver_multiple" = "yes"; then
+                AC_DEFINE(wxHAVE_ELF_SYMVER_MULTIPLE)
+            fi
+
+            LDFLAGS="$saveLdflags"
+            CPPFLAGS="$saveCppflags"
+        fi
+    fi
 
     dnl test for GCC's visibility support (sets CFLAGS_VISIBILITY, which is
     dnl assigned to CFLAGS and CXXFLAGS below)
@@ -3492,27 +3712,35 @@ if test "$wxUSE_SHARED" = "yes"; then
         install_name_tool=`which ${HOST_PREFIX}install_name_tool`
         if test "$install_name_tool" -a -x "$install_name_tool"; then
             DYLIB_RPATH_POSTLINK="${HOST_PREFIX}install_name_tool -id \$@ \$@"
+            dnl Note that the script below doesn't use realpath because it's
+            dnl only available since macOS 13 and doesn't even use readlink -f
+            dnl because this is only available since macOS 12, while we still
+            dnl need to support 10.10.
             cat <<EOF >change-install-names
 #!/bin/sh
-libnames=\`cd lib ; ls -1 | grep '\.[[0-9]][[0-9]]*\.dylib\$'\`
+set -e
+[[ -z "\${WXDEBUG_X}" ]] || set -x
+destdir=\$1
+libdir=\$2
+bindir=\$3
+build_libdir=\$4
+libnames=\$(cd \${build_libdir}; printf '%s\n' libwx*-${WX_RELEASE}.dylib)
 changes=''
-for dep in \${libnames} ; do
-    changes="\${changes} -change \${4}/\${dep} \${3}/\${dep}"
+for libname in \${libnames} ; do
+    target=\$(readlink \${build_libdir}/\$(readlink \${build_libdir}/\${libname}))
+    changes="\${changes} -change \${build_libdir}/\${target} \${libdir}/\${target}"
 done
-for i in \${libnames} ; do
-    if test -L \${1}/\${i}; then
-        # skip symbolic links
-        continue
-    fi
-    ${HOST_PREFIX}install_name_tool \${changes} -id \${3}/\${i} \${1}/\${i}
+for libname in \${libnames} ; do
+    target=\$(readlink \${build_libdir}/\$(readlink \${build_libdir}/\${libname}))
+    ${HOST_PREFIX}install_name_tool \${changes} -id \${libdir}/\${libname} \${destdir}\${libdir}/\${target}
 done
 
-if test -f "\${2}/wxrc-${WX_RELEASE}" ; then
-    ${HOST_PREFIX}install_name_tool \${changes} \${2}/wxrc-${WX_RELEASE}
+if test -f \${destdir}\${bindir}/wxrc-${WX_RELEASE} ; then
+    ${HOST_PREFIX}install_name_tool \${changes} \${destdir}\${bindir}/wxrc-${WX_RELEASE}
 fi
 EOF
             chmod +x change-install-names
-            DYLIB_RPATH_INSTALL="\$(wx_top_builddir)/change-install-names \${DESTDIR}\${libdir} \${DESTDIR}\${bindir} \${libdir} \$(wx_top_builddir)/lib"
+            DYLIB_RPATH_INSTALL="\$(wx_top_builddir)/change-install-names \"\${DESTDIR}\" \${libdir} \${bindir} \$(wx_top_builddir)/lib"
         fi
 
         dnl the HEADER_PAD_OPTION is required by some wx samples to avoid the error:
@@ -3630,30 +3858,6 @@ else
     if test "$wx_cv_size_t_is_ulong" = "yes"; then
         AC_DEFINE(wxSIZE_T_IS_ULONG)
     fi
-fi
-
-AC_CACHE_CHECK([if wchar_t is separate type],
-    wx_cv_wchar_t_is_separate_type,
-    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <wchar.h>],
-        [
-            return 0; }
-
-            struct Foo { void foo(wchar_t);
-                         void foo(unsigned short);
-                         void foo(unsigned int);
-                         void foo(unsigned long); };
-
-            int bar() {
-        ])],
-        wx_cv_wchar_t_is_separate_type=yes,
-        wx_cv_wchar_t_is_separate_type=no
-    )
-)
-
-if test "$wx_cv_wchar_t_is_separate_type" = "yes"; then
-    AC_DEFINE(wxWCHAR_T_IS_REAL_TYPE, 1)
-else
-    AC_DEFINE(wxWCHAR_T_IS_REAL_TYPE, 0)
 fi
 
 AC_LANG_POP() dnl C++
@@ -3837,21 +4041,9 @@ if test "$wx_cv_func_vsscanf" = "yes"; then
 fi
 AC_LANG_POP()
 
-dnl also look if we have wide char IO functions, notice that [f]putws are
-dnl declared in special widec.h under Solaris
-wchar_headers="#include <stdio.h>
-#include <wchar.h>"
-case "${host}" in
-    *-*-solaris2* )
-        AC_CHECK_HEADERS(widec.h,,, [AC_INCLUDES_DEFAULT()])
-        if test "$ac_cv_header_widec_h" = "yes"; then
-            wchar_headers="$wchar_headers
-#include <widec.h>"
-        fi
-esac
-
-WX_CHECK_FUNCS(putws fputws wprintf vswprintf vswscanf,,,
-               [$wchar_headers])
+WX_CHECK_FUNCS(fputws wprintf vswprintf vswscanf,,,
+               [#include <stdio.h>
+                #include <wchar.h>])
 
 dnl MinGW has a vswprintf with a different prototype, and
 dnl a _vsnwprintf with the correct prototype, but AC_CHECK_FUNCS
@@ -4419,7 +4611,7 @@ if test "$TOOLKIT" != "MSW"; then
     dnl do other tests only if we are using threads
     if test "$wxUSE_THREADS" = "yes" ; then
         AC_CHECK_FUNCS(pthread_setconcurrency,
-            AC_DEFINE(HAVE_PTHREAD_SET_CONCURRENCY),
+            AC_DEFINE(HAVE_PTHREAD_SETCONCURRENCY),
             [
                 AC_CHECK_FUNCS(thr_setconcurrency,
                     AC_DEFINE(HAVE_THR_SETCONCURRENCY),
@@ -4603,39 +4795,11 @@ dnl AC_CHECK_FUNC(getaddrinfo, AC_DEFINE(HAVE_GETADDRINFO), [
     dnl related functions (taken from python's configure.in)
     dnl sigh -- gethostbyname_r is a mess; it can have 3, 5 or 6 arguments
       AX_FUNC_WHICH_GETHOSTBYNAME_R
-      if test "x$ac_cv_func_which_gethostbyname_r" = "xno" -o \
-              "x$ac_cv_func_which_gethostbyname_r" = "xunknown" ; then
-          AC_CHECK_FUNC(gethostbyname, [ AC_DEFINE(HAVE_GETHOSTBYNAME) ],
-              [
-                  dnl Under HaikuOS it is not yet detected
-                  case "${host}" in
-                  *-*-haiku* )
-                    AC_DEFINE(HAVE_GETHOSTBYNAME)
-                    AC_MSG_WARN([Defining HAVE_GETHOSTBYNAME unconditionally under ${host}.])
-                    ;;
-                  esac
-              ]
-           )
-      fi
       dnl A similar test for getservbyname_r
       dnl I'm tempted to just not do this test which is taking much time and
       dnl do something similar as for gethostbyaddr_r, but OTOH the macro
       dnl doing the test already exists, so using it is easy enough.     - SN
       AC_raf_FUNC_WHICH_GETSERVBYNAME_R
-      if test "x$ac_cv_func_which_getservbyname_r" = "xno" -o \
-              "x$ac_cv_func_which_getservbyname_r" = "xunknown" ; then
-          AC_CHECK_FUNCS(getservbyname,[ AC_DEFINE(HAVE_GETSERVBYNAME) ],
-              [
-                  dnl Under HaikuOS it is not yet detected
-                  case "${host}" in
-                  *-*-haiku* )
-                    AC_DEFINE(HAVE_GETSERVBYNAME)
-                    AC_MSG_WARN([Defining HAVE_GETSERVBYNAME unconditionally under ${host}.])
-                    ;;
-                  esac
-              ]
-           )
-      fi
       dnl For gethostbyaddr_r, we currently do no separate test, instead, we
       dnl silently assume it's available exactly if gethostbyname_r is
       dnl available and always requires two more arguments than
@@ -4778,10 +4942,6 @@ else
     fi
 fi
 
-if test "x$wxUSE_REPRODUCIBLE_BUILD" = "xyes"; then
-    AC_DEFINE(wxUSE_REPRODUCIBLE_BUILD)
-fi
-
 dnl ---------------------------------------------------------------------------
 dnl compatibility level
 dnl ---------------------------------------------------------------------------
@@ -4872,7 +5032,20 @@ else
                     ]
                 )
 
-                AC_CHECK_FUNCS(dl_iterate_phdr)
+                AC_CACHE_CHECK(
+                    [for dl_iterate_phdr],
+                    wx_cv_func_dl_iterate_phdr,
+                    AC_LINK_IFELSE(
+                        [AC_LANG_SOURCE([
+                           #include <link.h>
+                           int main() { return dl_iterate_phdr(0, 0); }])],
+                        [wx_cv_func_dl_iterate_phdr=yes],
+                        [wx_cv_func_dl_iterate_phdr=no]
+                    )
+                )
+                if test "$wx_cv_func_dl_iterate_phdr" = "yes"; then
+                    AC_DEFINE(HAVE_DL_ITERATE_PHDR)
+                fi
             fi
         fi
 
@@ -5005,23 +5178,32 @@ dnl ---------------------------------------------------------------------------
 dnl Secret storage
 dnl ---------------------------------------------------------------------------
 
-if test "$wxUSE_SECRETSTORE" = "yes"; then
+if test "$wxUSE_SECRETSTORE" != "no"; then
     dnl The required APIs are always available under MSW and OS X but we must
     dnl have GNOME libsecret under Unix to be able to compile this class.
     if test "$wxUSE_MSW" != "1" -a "$wxUSE_OSX_COCOA" != 1; then
         PKG_CHECK_MODULES(LIBSECRET, [libsecret-1],
             [
                 CXXFLAGS="$LIBSECRET_CFLAGS $CXXFLAGS"
-                LIBS="$LIBSECRET_LIBS $LIBS"
+                dnl Avoid linking with libsecret-1.so directly, we load this
+                dnl library dynamically in wxSecretStoreLibSecretImpl to avoid
+                dnl requiring it being installed on the target system.
+                LIBS="`echo $LIBSECRET_LIBS | sed s/-lsecret-1//g` $LIBS"
             ],
             [
+                if test "$wxUSE_SECRETSTORE" = "yes"; then
+                    AC_MSG_ERROR([wxSecretStore support requested but libsecret was not found])
+                fi
+
+                dnl By default, i.e. if --enable-secretstore wasn't explicitly
+                dnl specified, continue without it.
                 AC_MSG_WARN([libsecret not found, wxSecretStore won't be available])
                 wxUSE_SECRETSTORE=no
             ]
         )
     fi
 
-    if test "$wxUSE_SECRETSTORE" = "yes"; then
+    if test "$wxUSE_SECRETSTORE" != "no"; then
         if test "$USE_DARWIN" = 1; then
             LIBS="-framework Security $LIBS"
         fi
@@ -5093,6 +5275,9 @@ if test "$USE_UNIX" = 1 ; then
         AC_LINK_IFELSE([AC_LANG_PROGRAM([
                 #include <sys/ioctl.h>
                 #include <sys/soundcard.h>
+                #ifdef HAVE_UNISTD_H
+                # include <unistd.h> /* needed for ioctl() on Solaris */
+                #endif
             ],
             [
                 ioctl(0, SNDCTL_DSP_SPEED, 0);
@@ -5104,6 +5289,9 @@ if test "$USE_UNIX" = 1 ; then
                 AC_LINK_IFELSE([AC_LANG_PROGRAM([
                         #include <sys/ioctl.h>
                         #include <sys/soundcard.h>
+                        #ifdef HAVE_UNISTD_H
+                        # include <unistd.h> /* needed for ioctl() on Solaris */
+                        #endif
                     ],
                     [
                         ioctl(0, SNDCTL_DSP_SPEED, 0);
@@ -5308,7 +5496,11 @@ if test "$wxUSE_FS_ZIP" = "yes"; then
 fi
 
 if test "$wxUSE_FSVOLUME" = "yes"; then
-  AC_DEFINE(wxUSE_FSVOLUME)
+  dnl wxFSVolume is not available under iOS, but it's probably not worth
+  dnl warning about this.
+  if test "$wxUSE_OSX_IPHONE" != 1; then
+    AC_DEFINE(wxUSE_FSVOLUME)
+  fi
 fi
 
 if test "$wxUSE_ON_FATAL_EXCEPTION" = "yes"; then
@@ -5395,7 +5587,11 @@ if test "$wxUSE_CONFIG" = "yes" ; then
     AC_MSG_WARN(wxConfig requires wxTextFile... disabled)
   else
     AC_DEFINE(wxUSE_CONFIG)
-    AC_DEFINE(wxUSE_CONFIG_NATIVE)
+    if test "$wxUSE_MSW" = 1 -a "$wxUSE_REGKEY" != 1; then
+        AC_DEFINE(wxUSE_CONFIG_NATIVE, 0)
+    else
+        AC_DEFINE(wxUSE_CONFIG_NATIVE, 1)
+    fi
     SAMPLES_SUBDIRS="$SAMPLES_SUBDIRS config"
   fi
 fi
@@ -5466,14 +5662,6 @@ if test "$wxUSE_LOG" = "yes"; then
 
     dnl the keyboard sample requires wxUSE_LOG
     SAMPLES_SUBDIRS="$SAMPLES_SUBDIRS keyboard"
-fi
-
-if test "$wxUSE_LONGLONG" = "yes"; then
-  AC_DEFINE(wxUSE_LONGLONG)
-fi
-
-if test "$wxUSE_GEOMETRY" = "yes"; then
-  AC_DEFINE(wxUSE_GEOMETRY)
 fi
 
 if test "$wxUSE_BASE64" = "yes"; then
@@ -6616,7 +6804,7 @@ if test "$wxUSE_PRIVATE_FONTS" = "yes"; then
                               ],
                               [AC_MSG_WARN([run-time font loading won't be supported by wxFont])])
         fi
-    elif test "$wxUSE_MAC" = 1 -o "$wxUSE_MSW" = 1; then
+    elif test "$wxUSE_QT" = 1 -o "$wxUSE_MAC" = 1 -o "$wxUSE_MSW" = 1; then
         dnl In these ports we don't need anything special.
         AC_DEFINE(wxUSE_PRIVATE_FONTS)
     fi
@@ -6756,6 +6944,21 @@ if test "$wxUSE_STC" = "yes"; then
      COND_PYTHON="#"
    fi
    AC_SUBST(COND_PYTHON)
+fi
+
+USE_LUNASVG=0
+if test "$wxUSE_LUNASVG" = "yes"; then
+   if ! test -f "$srcdir/3rdparty/lunasvg/include/lunasvg.h" ; then
+       AC_MSG_ERROR([
+   The required lunasvg header was not found. You probably need to run
+
+       git submodule update --init 3rdparty/lunasvg
+
+   to fix this.])
+   fi
+
+   AC_DEFINE(wxUSE_LUNASVG)
+   USE_LUNASVG=1
 fi
 
 if test "$wxUSE_MENUS" = "yes"; then
@@ -6978,15 +7181,14 @@ Please install it following the instructions in the manual or remove the
         fi
     fi
 
-fi
-
-if test "$wxUSE_WEBVIEW" = "yes"; then
-    USE_WEBVIEW=1
-    AC_DEFINE(wxUSE_WEBVIEW)
-    SAMPLES_SUBDIRS="$SAMPLES_SUBDIRS webview"
-else
-    USE_WEBVIEW=0
-    AC_MSG_WARN([No wxWebView backends found, disabling wxWebView])
+    if test "$wxUSE_WEBVIEW" = "yes"; then
+        USE_WEBVIEW=1
+        AC_DEFINE(wxUSE_WEBVIEW)
+        SAMPLES_SUBDIRS="$SAMPLES_SUBDIRS webview"
+    else
+        USE_WEBVIEW=0
+        AC_MSG_WARN([No wxWebView backends found, disabling wxWebView])
+    fi
 fi
 
 dnl ---------------------------------------------------------------------------
@@ -7124,10 +7326,6 @@ if test "$wxUSE_MSW" = 1 ; then
 
     if test "$wxUSE_TASKBARBUTTON" = "yes"; then
         AC_DEFINE(wxUSE_TASKBARBUTTON)
-    fi
-
-    if test "$wxUSE_UXTHEME" = "yes"; then
-        AC_DEFINE(wxUSE_UXTHEME)
     fi
 
 fi
@@ -7390,12 +7588,14 @@ dnl ---------------------------------------------------------------------------
 dnl wxStyledTextCtrl
 dnl ---------------------------------------------------------------------------
 
-for lib in scintilla lexilla; do
-    WXCONFIG_STC_LIBS="$WXCONFIG_STC_LIBS -lwx${lib}${WX_LIB_FLAVOUR}-${WX_RELEASE}${HOST_SUFFIX}"
-done
+if test "$wxUSE_STC" = "yes" ; then
+    for lib in scintilla lexilla; do
+        WXCONFIG_STC_LIBS="$WXCONFIG_STC_LIBS -lwx${lib}${WX_LIB_FLAVOUR}-${WX_RELEASE}${HOST_SUFFIX}"
+    done
 
-if test "$wxUSE_MSW" = 1 ; then
-    EXTRALIBS_STC="-limm32"
+    if test "$wxUSE_MSW" = 1 ; then
+        EXTRALIBS_STC="-limm32"
+    fi
 fi
 
 dnl ---------------------------------------------------------------------------
@@ -7419,7 +7619,7 @@ STD_BASE_LIBS="base"
 STD_GUI_LIBS=""
 BUILT_WX_LIBS="base"
 
-if test "$wxUSE_SOCKETS" = "yes" ; then
+if test "$wxUSE_SOCKETS" = "yes" -o "$wxUSE_WEBREQUEST" = "yes"; then
     STD_BASE_LIBS="net $STD_BASE_LIBS"
     BUILT_WX_LIBS="net $BUILT_WX_LIBS"
 fi
@@ -7524,8 +7724,8 @@ if test "$wxUSE_MAC" = 1 ; then
         fi
     fi
 fi
-if test "$USE_DARWIN" = 1 -a "$wxUSE_MAC" != 1 -a "$wxUSE_OLD_COCOA" != 1 ; then
-    EXTRA_FRAMEWORKS="$EXTRA_FRAMEWORKS -framework IOKit -framework CoreServices -framework System -framework ApplicationServices -framework Foundation"
+if test "$USE_DARWIN" = 1 -a "$wxUSE_MAC" != 1; then
+    EXTRA_FRAMEWORKS="$EXTRA_FRAMEWORKS -framework AppKit -framework IOKit -framework CoreServices -framework System -framework ApplicationServices -framework Foundation"
 fi
 
 LDFLAGS="$LDFLAGS $EXTRA_FRAMEWORKS"
@@ -7647,12 +7847,12 @@ if test "$SHARED" = 1; then
 fi
 
 LIBS=`echo $LIBS`
-EXTRALIBS="$LDFLAGS $LDFLAGS_VERSIONING $LIBS $PCRE_LINK $DMALLOC_LIBS"
+EXTRALIBS="$LDFLAGS_VERSIONING $PCRE_LINK $DMALLOC_LIBS"
 EXTRALIBS_XML="$EXPAT_LINK"
 EXTRALIBS_HTML="$MSPACK_LINK"
 EXTRALIBS_MEDIA="$GST_LIBS"
 if test "$wxUSE_GUI" = "yes"; then
-    EXTRALIBS_GUI=`echo $GUI_TK_LIBRARY $SDL_LIBS $PNG_LINK $JPEG_LINK $TIFF_LINK $LZMA_LINK $JBIG_LINK $WEBKIT_LINK`
+    EXTRALIBS_GUI=`echo $GUI_TK_LIBRARY $SDL_LIBS $PNG_LINK $JPEG_LINK $TIFF_LINK $LZMA_LINK $JBIG_LINK $WEBP_LINK $WEBKIT_LINK`
 fi
 if test "$wxUSE_OPENGL" = "yes"; then
     EXTRALIBS_OPENGL="$LDFLAGS_GL $OPENGL_LIBS"
@@ -7692,6 +7892,14 @@ if test "$wxUSE_GUI" = "yes"; then
             ;;
         sys)
             WXCONFIG_LIBS="$PNG_LINK $WXCONFIG_LIBS"
+            ;;
+    esac
+    case "$wxUSE_LIBWEBP" in
+        builtin)
+            wxconfig_3rdparty="webp $wxconfig_3rdparty"
+            ;;
+        sys)
+            WXCONFIG_LIBS="$WEBP_LINK $WXCONFIG_LIBS"
             ;;
     esac
 fi
@@ -7755,6 +7963,7 @@ AC_SUBST(wxUSE_XML)
 AC_SUBST(wxUSE_EXPAT)
 AC_SUBST(wxUSE_LIBJPEG)
 AC_SUBST(wxUSE_LIBPNG)
+AC_SUBST(wxUSE_LIBWEBP)
 AC_SUBST(wxUSE_LIBTIFF)
 
 if test $wxUSE_MONOLITHIC = "yes" ; then
@@ -7858,6 +8067,16 @@ if test "$wxUSE_WINE" = "yes"; then
 fi
 
 AC_BAKEFILE([m4_include(autoconf_inc.m4)])
+
+dnl Override some options set by AC_BAKEFILE() above.
+if test "x$wxUSE_REPRODUCIBLE_BUILD" = "xyes"; then
+    AC_DEFINE(wxUSE_REPRODUCIBLE_BUILD)
+    dnl We consider that when --enable-repro-build is used, ar and ranlib
+    dnl support deterministic mode (if they don't, we wouldn't be able to
+    dnl honour this option anyhow).
+    AROPTIONS="rcD"
+    RANLIB="$RANLIB -D"
+fi
 
 dnl make install path absolute (if not already);
 dnl will fail with (some) MSDOS paths
@@ -8122,8 +8341,6 @@ dnl though in this form because AC_CONFIG_LINKS will fail for directories
 dnl on platforms that do not have symlinks.
 dnl AC_CONFIG_LINKS([ include/wx-$WX_RELEASE$WX_FLAVOUR:include ])
 
-if test "$wxWITH_SUBDIRS" != "no"; then
-dnl Configure samples, demos etc. directories, but only if they are present:
 if test "$wxUSE_GUI" = "yes"; then
     SUBDIRS="samples demos utils"
 else
@@ -8136,24 +8353,48 @@ if test "$wxUSE_TESTS_SUBDIR" != "no"; then
     dnl Configure tests directory
     SUBDIRS="$SUBDIRS tests"
 
+    if test "$wxUSE_CATCH2" = "no"; then
+        AC_MSG_ERROR([CATCH is required for building tests, use --disable-tests option to disable them])
+    fi
+
     dnl Check for catch (C++ Automated Test Cases in Headers) availability.
-    AC_MSG_CHECKING([whether catch2/catch.hpp exists])
-    if ! test -f "$srcdir/3rdparty/catch/single_include/catch2/catch.hpp" ; then
-        AC_MSG_RESULT([no])
-        AC_MSG_ERROR([
-    CATCH (C++ Automated Test Cases in Headers) is required, the required file
-    $srcdir/3rdparty/catch/single_include/catch2/catch.hpp couldn't be found.
+    if test "$wxUSE_CATCH2" != "builtin"; then
+        dnl TODO: Support catch2 version 3, which does not
+        dnl ship a catch2/catch.hpp header anymore.
+        PKG_CHECK_MODULES([CATCH2], [catch2 < 3],, [
+            if test "$wxUSE_CATCH2" = "sys"; then
+                AC_MSG_ERROR([system catch2 library not found! \
+Use --with-catch2=builtin to use built-in version])
+            else
+                AC_MSG_WARN([system catch2 library not found, \
+will use built-in instead])
+                wxUSE_CATCH2=builtin
+            fi])
+    fi
+
+    if test "$wxUSE_CATCH2" = "builtin"; then
+        AC_MSG_CHECKING([whether catch2/catch.hpp exists])
+        if ! test -f "$srcdir/3rdparty/catch/single_include/catch2/catch.hpp"; then
+            AC_MSG_RESULT([no])
+            AC_MSG_ERROR([
+    CATCH2 (C++ Automated Test Cases in Headers) is required, but the file
+    $srcdir/3rdparty/catch/single_include/catch2/catch.hpp cannot be found.
 
     You might need to run
 
         git submodule update --init 3rdparty/catch
 
     to fix this.])
-    else
+        fi
         AC_MSG_RESULT([yes])
+        CATCH2_CFLAGS="-I\$(top_srcdir)/3rdparty/catch/single_include"
     fi
+
+    AC_SUBST(CATCH2_CFLAGS)
 fi
 
+dnl Configure samples, demos etc. directories, but only if they are present:
+if test "$wxWITH_SUBDIRS" != "no"; then
 for subdir in $SUBDIRS; do
     if test -d ${srcdir}/${subdir} ; then
         if test "$wxUSE_GUI" = "yes"; then
@@ -8259,6 +8500,7 @@ echo "                                       jpeg               ${wxUSE_LIBJPEG-
 echo "                                       png                ${wxUSE_LIBPNG-none}"
 echo "                                       regex              ${wxUSE_REGEX}"
 echo "                                       tiff               ${wxUSE_LIBTIFF-none}"
+echo "                                       webp               ${wxUSE_LIBWEBP-none}"
 if test "$wxUSE_X11" = 1; then
 echo "                                       xpm                ${wxUSE_LIBXPM-none}"
 fi

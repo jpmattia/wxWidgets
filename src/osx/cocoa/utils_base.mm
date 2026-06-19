@@ -33,9 +33,15 @@ extern WXDLLIMPEXP_BASE wxSocketManager *wxOSXSocketManagerCF;
 wxSocketManager *wxOSXSocketManagerCF = nullptr;
 #endif // wxUSE_SOCKETS
 
+#if (defined(__APPLE__) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 101000) \
+    || (defined(__WXOSX_IPHONE__) && defined(__IPHONE_8_0))
+    #define wxHAS_NSPROCESSINFO 1
+#endif
+
 // our OS version is the same in non GUI and GUI cases
 wxOperatingSystemId wxGetOsVersion(int *verMaj, int *verMin, int *verMicro)
 {
+#ifdef wxHAS_NSPROCESSINFO
     NSOperatingSystemVersion osVer = [NSProcessInfo processInfo].operatingSystemVersion;
 
     if ( verMaj != nullptr )
@@ -46,18 +52,42 @@ wxOperatingSystemId wxGetOsVersion(int *verMaj, int *verMin, int *verMicro)
 
     if ( verMicro != nullptr )
         *verMicro = osVer.patchVersion;
+#else
+    SInt32 maj, min, micro;
 
+    Gestalt(gestaltSystemVersionMajor, &maj);
+    Gestalt(gestaltSystemVersionMinor, &min);
+    Gestalt(gestaltSystemVersionBugFix, &micro);
+
+    if ( verMaj != NULL )
+        *verMaj = maj;
+
+    if ( verMin != NULL )
+        *verMin = min;
+
+    if ( verMicro != NULL )
+        *verMicro = micro;
+#endif
     return wxOS_MAC_OSX_DARWIN;
 }
 
 bool wxCheckOsVersion(int majorVsn, int minorVsn, int microVsn)
 {
+#ifdef wxHAS_NSPROCESSINFO
     NSOperatingSystemVersion osVer;
     osVer.majorVersion = majorVsn;
     osVer.minorVersion = minorVsn;
     osVer.patchVersion = microVsn;
 
     return [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:osVer] != NO;
+#else
+    int majorCur, minorCur, microCur;
+    wxGetOsVersion(&majorCur, &minorCur, &microCur);
+
+    return majorCur > majorVsn
+        || (majorCur == majorVsn && minorCur >= minorVsn)
+        || (majorCur == majorVsn && minorCur == minorVsn && microCur >= microVsn);
+#endif
 }
 
 wxString wxGetOsDescription()
@@ -66,7 +96,7 @@ wxString wxGetOsDescription()
     int majorVer, minorVer;
     wxGetOsVersion(&majorVer, &minorVer);
 
-#ifndef __WXOSX_IPHONE__
+#ifdef __WXDARWIN_OSX__
     // Notice that neither the OS name itself nor the code names seem to be
     // ever translated, OS X itself uses the English words even for the
     // languages not using Roman alphabet.
@@ -77,6 +107,25 @@ wxString wxGetOsDescription()
     {
         switch (minorVer)
         {
+            case 5:
+                osName = "Leopard";
+                osBrand = "Mac OS X";
+                break;
+            case 6:
+                osName = "Snow Leopard";
+                osBrand = "Mac OS X";
+                break;
+            case 7:
+                osName = "Lion";
+                // 10.7 was the last version where the "Mac" prefix was used
+                osBrand = "Mac OS X";
+                break;
+            case 8:
+                osName = "Mountain Lion";
+                break;
+            case 9:
+                osName = "Mavericks";
+                break;
             case 10:
                 osName = "Yosemite";
                 break;
@@ -95,7 +144,7 @@ wxString wxGetOsDescription()
             case 15:
                 osName = "Catalina";
                 break;
-        };
+        }
     }
     else if (majorVer > 10)
     {
@@ -148,7 +197,9 @@ bool wxDateTime::GetFirstWeekDay(wxDateTime::WeekDay *firstDay)
 }
 #endif // wxUSE_DATETIME
 
-#ifndef __WXOSX_IPHONE__
+#ifdef __WXDARWIN_OSX__
+
+#include <AppKit/AppKit.h>
 
 bool wxCocoaLaunch(const char* const* argv, pid_t &pid)
 {
@@ -223,16 +274,21 @@ bool wxCocoaLaunch(const char* const* argv, pid_t &pid)
     }
 
     NSWorkspace *ws = [NSWorkspace sharedWorkspace];
-    
-    
+
+
     NSRunningApplication *app = nil;
-    
-    if ( [params count] > 0 )
-        app = [ws openURLs:params withApplicationAtURL:url
-                   options:NSWorkspaceLaunchAsync
-             configuration:[NSDictionary dictionary]
-                     error:&error];
-    
+
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 101000
+    if ( WX_IS_MACOS_AVAILABLE(10, 10) )
+    {
+        if ( [params count] > 0 )
+            app = [ws openURLs:params withApplicationAtURL:url
+                       options:NSWorkspaceLaunchAsync
+                 configuration:[NSDictionary dictionary]
+                         error:&error];
+    }
+#endif
+
     if ( app == nil )
     {
         app = [ws launchApplicationAtURL:url
@@ -252,7 +308,7 @@ bool wxCocoaLaunch(const char* const* argv, pid_t &pid)
             }
         }
     }
-    
+
     [params release];
 
     if( app != nil )
@@ -274,3 +330,62 @@ int wxCMPFUNC_CONV wxCmpNatural(const wxString& s1, const wxString& s2)
     // expected return values of wxCmpNatural(), so we don't need to convert.
     return [wxCFStringRef(s1).AsNSString() localizedStandardCompare: wxCFStringRef(s2).AsNSString()];
 }
+
+wxMacAutoreleasePool::wxMacAutoreleasePool()
+{
+    m_pool = [[NSAutoreleasePool alloc] init];
+}
+
+wxMacAutoreleasePool::~wxMacAutoreleasePool()
+{
+    [(NSAutoreleasePool*)m_pool release];
+}
+
+// ----------------------------------------------------------------------------
+// NSObject Utils
+// ----------------------------------------------------------------------------
+
+void wxMacCocoaRelease( void* obj )
+{
+    [(NSObject*)obj release];
+}
+
+void wxMacCocoaAutorelease( void* obj )
+{
+    [(NSObject*)obj autorelease];
+}
+
+void* wxMacCocoaRetain( void* obj )
+{
+    [(NSObject*)obj retain];
+    return obj;
+}
+
+//---------------------------------------------------------
+// helper functions for NSString<->wxString conversion
+//---------------------------------------------------------
+
+wxString wxStringWithNSString(NSString *nsstring)
+{
+    return wxString([nsstring UTF8String], wxConvUTF8);
+}
+
+NSString* wxNSStringWithWxString(const wxString &wxstring)
+{
+    return [NSString stringWithUTF8String: wxstring.mb_str(wxConvUTF8)];
+}
+
+//----------------------------------------------------------------------------
+// helper when starting as a command line tool without an NSApp running at all
+//----------------------------------------------------------------------------
+
+#ifdef __WXDARWIN_OSX__
+
+bool wxMacInitCocoa()
+{
+    bool cocoaLoaded = NSApplicationLoad();
+    wxASSERT_MSG(cocoaLoaded,wxT("Couldn't load Cocoa Environment as console app")) ;
+    return cocoaLoaded;
+}
+
+#endif // __WXDARWIN_OSX__

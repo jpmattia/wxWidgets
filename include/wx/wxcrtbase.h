@@ -19,6 +19,7 @@
    ------------------------------------------------------------------------- */
 
 #include "wx/chartype.h"
+#include "wx/dlimpexp.h"
 
 /*
     Standard headers we need here.
@@ -367,24 +368,22 @@ WXDLLIMPEXP_BASE wchar_t *wxCRT_StrtokW(wchar_t *psz, const wchar_t *delim, wcha
 #endif
 
 /* supply strtoll and strtoull, if needed */
-#ifdef wxLongLong_t
-    #ifndef wxCRT_StrtollA
-        WXDLLIMPEXP_BASE wxLongLong_t wxCRT_StrtollA(const char* nptr,
-                                                     char** endptr,
-                                                     int base);
-        WXDLLIMPEXP_BASE wxULongLong_t wxCRT_StrtoullA(const char* nptr,
-                                                       char** endptr,
-                                                       int base);
-    #endif
-    #ifndef wxCRT_StrtollW
-        WXDLLIMPEXP_BASE wxLongLong_t wxCRT_StrtollW(const wchar_t* nptr,
-                                                     wchar_t** endptr,
-                                                     int base);
-        WXDLLIMPEXP_BASE wxULongLong_t wxCRT_StrtoullW(const wchar_t* nptr,
-                                                       wchar_t** endptr,
-                                                       int base);
-    #endif
-#endif /* wxLongLong_t */
+#ifndef wxCRT_StrtollA
+    WXDLLIMPEXP_BASE wxLongLong_t wxCRT_StrtollA(const char* nptr,
+                                                 char** endptr,
+                                                 int base);
+    WXDLLIMPEXP_BASE wxULongLong_t wxCRT_StrtoullA(const char* nptr,
+                                                   char** endptr,
+                                                   int base);
+#endif
+#ifndef wxCRT_StrtollW
+    WXDLLIMPEXP_BASE wxLongLong_t wxCRT_StrtollW(const wchar_t* nptr,
+                                                 wchar_t** endptr,
+                                                 int base);
+    WXDLLIMPEXP_BASE wxULongLong_t wxCRT_StrtoullW(const wchar_t* nptr,
+                                                   wchar_t** endptr,
+                                                   int base);
+#endif
 
 
 /* -------------------------------------------------------------------------
@@ -434,9 +433,6 @@ WXDLLIMPEXP_BASE wchar_t *wxCRT_StrtokW(wchar_t *psz, const wchar_t *delim, wcha
 #endif
 #ifdef HAVE_FPUTWS
     #define wxCRT_FputsW  fputws
-#endif
-#ifdef HAVE_PUTWS
-    #define wxCRT_PutsW   putws
 #endif
 #ifdef HAVE_FPUTWC
     #define wxCRT_FputcW  fputwc

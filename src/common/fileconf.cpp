@@ -339,11 +339,6 @@ wxFileConfig::MigrateLocalFile(const wxString& name, int newStyle, int oldStyle)
             m_tempPath = tempPath;
         }
 
-        void Dismiss()
-        {
-            m_tempPath.clear();
-        }
-
         ~RenameBackOnError()
         {
             if ( !m_tempPath.empty() )
@@ -2155,8 +2150,8 @@ static wxString FilterInValue(const wxString& str)
             }
             else if ( i != end - 1 )
             {
-                wxLogWarning(_("unexpected \" at position %d in '%s'."),
-                             i - str.begin(), str);
+                wxLogWarning(_("unexpected \" at position %zu in '%s'."),
+                             i - str.begin() + 1, str);
             }
             //else: it's the last quote of a quoted string, ok
         }
@@ -2246,9 +2241,7 @@ static wxString FilterOutEntryName(const wxString& str)
   wxString strResult;
   strResult.Alloc(str.Len());
 
-  for ( const wxChar *pc = str.c_str(); *pc != wxT('\0'); pc++ ) {
-    const wxChar c = *pc;
-
+  for ( wxUniChar c : str ) {
     // NB: note that wxCONFIG_IMMUTABLE_PREFIX and wxCONFIG_PATH_SEPARATOR
     //     should *not* be quoted
     if ( !wxIsalnum(c) && !wxStrchr(wxT("@_/-!.*%()"), c) )

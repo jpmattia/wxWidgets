@@ -112,7 +112,6 @@ public:
 
     virtual void SetWindowStyleFlag(long style) override;
     virtual void SetExtraStyle(long exStyle) override;
-    virtual bool SetCursor( const wxCursor &cursor ) override;
     virtual bool SetFont( const wxFont &font ) override;
 
     virtual bool IsTransparentBackgroundSupported(wxString* reason = nullptr) const override;
@@ -207,6 +206,8 @@ public:
 
     // implementation from now on
     // ==========================
+
+    virtual void WXUpdateCursor() override;
 
     // event handlers
     // --------------
@@ -390,6 +391,9 @@ public:
     bool HandleRotateGesture(const wxPoint& pt, WXDWORD angleArgument, WXDWORD flags);
     bool HandleTwoFingerTap(const wxPoint& pt, WXDWORD flags);
     bool HandlePressAndTap(const wxPoint& pt, WXDWORD flags);
+    bool HandleTouch(WXWPARAM wParam, WXLPARAM lParam);
+    bool HandlePointer(WXUINT message, WXWPARAM wParam, WXLPARAM lParam);
+
 
     bool HandleChar(WXWPARAM wParam, WXLPARAM lParam);
     bool HandleKeyDown(WXWPARAM wParam, WXLPARAM lParam);
@@ -407,6 +411,7 @@ public:
 
     bool HandlePower(WXWPARAM wParam, WXLPARAM lParam, bool *vetoed);
 
+    bool HandleEnterIdle(WXWPARAM wParam, WXLPARAM lParam);
 
     // The main body of common window proc for all wxWindow objects. It tries
     // to handle the given message and returns true if it was handled (the
@@ -552,13 +557,9 @@ public:
     virtual bool IsDoubleBuffered() const override;
 
     // Ensure that neither this window itself nor any of its parents use
-    // WS_EX_COMPOSITED: this is used by the native wxListCtrl which is
-    // incompatible with this style.
+    // WS_EX_COMPOSITED: this may only be necessary after calling
+    // SetDoubleBuffered() which sets this style.
     void MSWDisableComposited();
-
-    // This function is called for all child windows when compositing is
-    // disabled for their parent.
-    virtual void MSWOnDisabledComposited() { }
 
     // synthesize a wxEVT_LEAVE_WINDOW event and set m_mouseInWindow to false
     void GenerateMouseLeave();
@@ -616,6 +617,35 @@ protected:
     MSWBeforeDPIChangedEvent(const wxDPIChangedEvent& WXUNUSED(event))
     {
     }
+
+    // Struct used for MSWGetDarkModeSupport() below.
+    // This specifies the arguments to the SetWindowTheme API for dark mode.
+    struct MSWDarkModeSupport
+    {
+        // The name of the theme to use (also called "app name").
+        const wchar_t* themeName = nullptr;
+
+        // The theme IDs to use. If neither this field nor the theme name is
+        // set, no theme is applied to the window.
+        const wchar_t* themeId = nullptr;
+    };
+
+    virtual void MSWGetDarkModeSupport(MSWDarkModeSupport& support) const;
+
+    // The reason for calling MSWSetDarkOrLightMode below.
+    enum class SetMode
+    {
+        // Set dark mode for a newly created window.
+        Initial,
+
+        // Set dark mode or light mode for an existing window.
+        Change
+    };
+
+    // Configure a window for dark mode settings immediately after creation or
+    // upon switching into or out of dark mode. This function is not called
+    // unless dark mode was enabled, or is being enabled.
+    virtual void MSWSetDarkOrLightMode(SetMode setmode);
 
     // Translate wxBORDER_THEME to a standard border style or return it as is
     // if themed border should be used, depending on CanApplyThemeBorder().
@@ -763,6 +793,8 @@ private:
     // if the message was handled by it.
     bool MSWSafeIsDialogMessage(WXMSG* msg);
 #endif // __WXUNIVERSAL__
+
+    int MSWGetBorderThickness() const;
 
     static inline bool MSWIsPositionDirectlySupported(int x, int y)
     {

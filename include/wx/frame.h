@@ -74,6 +74,11 @@ public:
     // if the frame has a toolbar) in client coordinates
     virtual wxPoint GetClientAreaOrigin() const override;
 
+    // frame modality
+    // ------------------
+
+    // Changing the frame modality after it has been shown has no effect
+    virtual void SetWindowModality(wxWindowMode modality);
 
     // menu bar functions
     // ------------------
@@ -178,6 +183,8 @@ public:
     virtual void DoGiveHelp(const wxString& text, bool show);
 #endif
 
+    virtual void RemoveChild(wxWindowBase *child) override;
+
     virtual bool IsClientAreaChild(const wxWindow *child) const override
     {
         return !IsOneOfBars(child) && wxTopLevelWindow::IsClientAreaChild(child);
@@ -212,7 +219,7 @@ protected:
     static bool ShouldUpdateMenuFromIdle();
 
 #if wxUSE_MENUBAR
-    wxMenuBar *m_frameMenuBar;
+    wxMenuBar *m_frameMenuBar = nullptr;
 #endif // wxUSE_MENUBAR
 
 #if wxUSE_STATUSBAR && (wxUSE_MENUS || wxUSE_TOOLBAR)
@@ -233,19 +240,22 @@ protected:
     // return false if there is no help for such item
     bool ShowMenuHelp(int helpid);
 
-    wxStatusBar *m_frameStatusBar;
+    wxStatusBar *m_frameStatusBar = nullptr;
 #endif // wxUSE_STATUSBAR
 
 
-    int m_statusBarPane;
+    int m_statusBarPane = 0;
 
 #if wxUSE_TOOLBAR
     // override to update status bar position (or anything else) when
     // something changes
     virtual void PositionToolBar() { }
 
-    wxToolBar *m_frameToolBar;
+    wxToolBar *m_frameToolBar = nullptr;
 #endif // wxUSE_TOOLBAR
+
+    // The frame is not modal by default.
+    wxWindowMode m_modality = wxWindowMode::Normal;
 
 #if wxUSE_MENUS
     wxDECLARE_EVENT_TABLE();

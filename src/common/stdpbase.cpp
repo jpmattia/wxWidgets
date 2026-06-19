@@ -26,6 +26,7 @@
 
 #include "wx/filename.h"
 #include "wx/stdpaths.h"
+#include "wx/utils.h"
 
 // ----------------------------------------------------------------------------
 // module globals
@@ -54,10 +55,7 @@ static wxStandardPathsDefault gs_stdPaths;
 /* static */
 wxStandardPaths& wxStandardPathsBase::Get()
 {
-    wxAppTraits * const traits = wxApp::GetTraitsIfExists();
-    wxCHECK_MSG( traits, gs_stdPaths, wxT("create wxApp before calling this") );
-
-    return traits->GetStandardPaths();
+    return wxApp::GetValidTraits().GetStandardPaths();
 }
 
 wxString wxStandardPathsBase::GetExecutablePath() const
@@ -101,6 +99,18 @@ wxStandardPathsBase::~wxStandardPathsBase()
     // nothing to do here
 }
 
+wxString wxStandardPathsBase::GetDataDir() const
+{
+    // allow to override the location of the data directory by setting
+    // WX_APPNAME_DATA_DIR environment variable: this is very useful in
+    // practice for running well-written (and so using wxStandardPaths to find
+    // their files) wx applications without installing them
+    wxString envOverride;
+    wxGetEnv("WX_" + wxTheApp->GetAppName().Upper() + "_DATA_DIR", &envOverride);
+
+    return envOverride;
+}
+
 wxString wxStandardPathsBase::GetLocalDataDir() const
 {
     return GetDataDir();
@@ -142,7 +152,7 @@ wxStandardPathsBase::AppendPathComponent(const wxString& dir,
     {
         if ( !component.empty() )
         {
-            const wxChar ch = *(subdir.end() - 1);
+            const wxUniChar ch = *(subdir.end() - 1);
             if ( !wxFileName::IsPathSeparator(ch) && ch != wxT('.') )
                 subdir += wxFileName::GetPathSeparator();
 

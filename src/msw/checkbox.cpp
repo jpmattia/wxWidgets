@@ -31,8 +31,13 @@
 #include "wx/renderer.h"
 #include "wx/msw/uxtheme.h"
 #include "wx/msw/private/button.h"
+#include "wx/msw/private/darkmode.h"
 #include "wx/private/window.h"
 #include "wx/msw/missing.h"
+
+#if wxUSE_ACCESSIBILITY
+    #include "wx/msw/private/accessible.h"
+#endif
 
 // ============================================================================
 // implementation
@@ -87,16 +92,12 @@ WXDWORD wxCheckBox::MSWGetStyle(long style, WXDWORD *exstyle) const
     return msStyle;
 }
 
-bool wxCheckBox::MSWGetDarkModeSupport(MSWDarkModeSupport& support) const
+void wxCheckBox::MSWSetDarkOrLightMode(SetMode setmode)
 {
-    // Just as radio buttons, check boxes have some dark theme support, but we
-    // still need to change their foreground manually to make it readable in
-    // dark mode.
-    wxCheckBoxBase::MSWGetDarkModeSupport(support);
+    wxCheckBoxBase::MSWSetDarkOrLightMode(setmode);
 
-    support.setForeground = true;
-
-    return true;
+    // Use owner-draw mode if needed for dark mode or custom text colour
+    MSWMakeOwnerDrawn(wxMSWDarkMode::IsActive() || m_hasFgCol);
 }
 
 // ----------------------------------------------------------------------------
@@ -122,7 +123,6 @@ wxSize wxCheckBox::DoGetBestClientSize() const
     if ( !str.empty() )
     {
         wxInfoDC dc(const_cast<wxCheckBox *>(this));
-        dc.SetFont(GetFont());
         dc.GetMultiLineTextExtent(GetLabelText(str), &wCheckbox, &hCheckbox);
         wCheckbox += checkSize + GetCharWidth();
 
@@ -189,6 +189,9 @@ wxCOMPILE_TIME_ASSERT(wxCHK_UNCHECKED == BST_UNCHECKED
 
 void wxCheckBox::DoSet3StateValue(wxCheckBoxState state)
 {
+    if ( m_state == state )
+        return;
+
     m_state = state;
     if ( !IsOwnerDrawn() )
         ::SendMessage(GetHwnd(), BM_SETCHECK, (WPARAM) state, 0);
@@ -274,5 +277,53 @@ void wxCheckBox::MSWDrawButtonBitmap(wxDC& dc, const wxRect& rect, int flags)
 {
     wxRendererNative::Get().DrawCheckBox(this, dc, rect, flags);
 }
+
+#if wxUSE_ACCESSIBILITY
+
+namespace
+{
+
+// When the checkbox is owner-drawn (e.g. in dark mode), the native BS_CHECKBOX
+// style is replaced with BS_OWNERDRAW, causing the standard Windows accessible
+// object to report the control as a generic button. This custom accessible
+// ensures the correct role and checked state are always reported.
+class wxCheckBoxAccessible
+    : public wxOwnerDrawnAccessible<wxCheckBox, wxROLE_SYSTEM_CHECKBUTTON>
+{
+public:
+    explicit wxCheckBoxAccessible(wxCheckBox* win)
+        : wxOwnerDrawnAccessible(win)
+    {
+    }
+
+protected:
+    long MSWGetCheckedState(wxCheckBox* cb) const override
+    {
+        switch ( cb->Get3StateValue() )
+        {
+            case wxCHK_CHECKED:
+                return wxACC_STATE_SYSTEM_CHECKED;
+
+            case wxCHK_UNDETERMINED:
+                return wxACC_STATE_SYSTEM_MIXED;
+
+            case wxCHK_UNCHECKED:
+                return 0;
+        }
+
+        wxFAIL_MSG( wxT("unexpected Get3StateValue() return value") );
+
+        return 0;
+    }
+};
+
+} // anonymous namespace
+
+wxAccessible* wxCheckBox::CreateAccessible()
+{
+    return new wxCheckBoxAccessible(this);
+}
+
+#endif // wxUSE_ACCESSIBILITY
 
 #endif // wxUSE_CHECKBOX

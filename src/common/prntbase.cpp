@@ -16,9 +16,6 @@
 #include "wx/dcprint.h"
 
 #ifndef WX_PRECOMP
-    #if defined(__WXMSW__)
-        #include "wx/msw/wrapcdlg.h"
-    #endif // MSW
     #include "wx/utils.h"
     #include "wx/dc.h"
     #include "wx/app.h"
@@ -63,12 +60,6 @@
 #include "wx/generic/prntdlgg.h"
 #include "wx/dcps.h"
 #endif
-
-#ifdef __WXMSW__
-    #ifndef __WIN32__
-        #include <print.h>
-    #endif
-#endif // __WXMSW__
 
 // The value traditionally used as the default max page number and meaning
 // "infinitely many". It should probably be documented and exposed, but for now
@@ -383,12 +374,15 @@ bool wxPrinter::Print(wxWindow *parent, wxPrintout *printout, bool prompt)
         // If the dialog is not shown, set the pages range to print everything
         // by default (as otherwise we wouldn't print anything at all which is
         // certainly not a reasonable default behaviour).
-        int minPage, maxPage, selFrom, selTo;
-        printout->GetPageInfo(&minPage, &maxPage, &selFrom, &selTo);
+        wxPrintPageRanges ranges;
+        const auto all = printout->GetPagesInfo(ranges);
+        if ( ranges.empty() )
+        {
+            // If the printout didn't specify any pages neither, print them all.
+            ranges.push_back(all);
+        }
 
-        wxPrintDialogData& pdd = m_pimpl->GetPrintDialogData();
-        pdd.SetFromPage(minPage);
-        pdd.SetToPage(maxPage);
+        m_pimpl->GetPrintDialogData().SetPageRanges(ranges);
     }
 
     return m_pimpl->Print( parent, printout, prompt );
@@ -531,13 +525,13 @@ wxPrintAbortDialog::wxPrintAbortDialog(wxWindow *parent,
     mainSizer->Add(new wxStaticText(this, wxID_ANY, _("Please wait while printing...")),
                    wxSizerFlags().Expand().DoubleBorder());
 
-    wxFlexGridSizer *gridSizer = new wxFlexGridSizer(2, wxSize(20, 0));
+    wxFlexGridSizer *gridSizer = new wxFlexGridSizer(2, FromDIP(wxSize(20, 0)));
     gridSizer->Add(new wxStaticText(this, wxID_ANY, _("Document:")));
     gridSizer->AddGrowableCol(1);
     gridSizer->Add(new wxStaticText(this, wxID_ANY, documentTitle));
     gridSizer->Add(new wxStaticText(this, wxID_ANY, _("Progress:")));
     m_progress = new wxStaticText(this, wxID_ANY, _("Preparing"));
-    m_progress->SetMinSize(wxSize(250, -1));
+    m_progress->SetMinSize(FromDIP(wxSize(250, -1)));
     gridSizer->Add(m_progress);
     mainSizer->Add(gridSizer, wxSizerFlags().Expand().DoubleBorder(wxLEFT | wxRIGHT));
 
@@ -631,9 +625,25 @@ void wxPrintout::GetPageInfo(int *minPage, int *maxPage, int *fromPage, int *toP
     *toPage = 1;
 }
 
-bool wxPrintout::IsPageSelected(int WXUNUSED(page))
+wxPrintPageRange wxPrintout::GetPagesInfo(wxPrintPageRanges& ranges)
 {
-    return false;
+    int minPage = 0;
+    int maxPage = 0;
+    int fromPage = 0;
+    int toPage = 0;
+
+    GetPageInfo(&minPage, &maxPage, &fromPage, &toPage);
+
+    // We intentionally ignore fromPage and toPage here as we want to keep
+    // using the page ranges as they were set by the user in the print dialog
+    // but existing code dating from before support for multiple print ranges
+    // always returns something from its GetPageInfo() -- which is incompatible
+    // with multiple pages ranges selection (in fact, it's not even compatible
+    // with a single range selection because the values returned in these
+    // parameters used to be ignored in at least wxMSW anyhow).
+    wxUnusedVar(ranges);
+
+    return { minPage, maxPage };
 }
 
 bool wxPrintout::SetUp(wxDC& dc)
@@ -1718,10 +1728,6 @@ wxFrame(parent, wxID_ANY, title, pos, size, style, name),
     m_initialSize(size)
 {
     m_printPreview = preview;
-    m_controlBar = nullptr;
-    m_previewCanvas = nullptr;
-    m_windowDisabler = nullptr;
-    m_modalityKind = wxPreviewFrame_NonModal;
 
     // Give the application icon
 #ifdef __WXMSW__
@@ -1748,24 +1754,6 @@ wxPreviewFrame::~wxPreviewFrame()
 
 void wxPreviewFrame::OnCloseWindow(wxCloseEvent& WXUNUSED(event))
 {
-    // Reenable any windows we disabled by undoing whatever we did in our
-    // Initialize().
-    switch ( m_modalityKind )
-    {
-        case wxPreviewFrame_AppModal:
-            delete m_windowDisabler;
-            m_windowDisabler = nullptr;
-            break;
-
-        case wxPreviewFrame_WindowModal:
-            if ( GetParent() )
-                GetParent()->Enable();
-            break;
-
-        case wxPreviewFrame_NonModal:
-            break;
-    }
-
     Destroy();
 }
 
@@ -1803,32 +1791,7 @@ void wxPreviewFrame::InitializeWithModality(wxPreviewFrameModalityKind kind)
     // vertically is also quite reasonable.
     SetSizeHints(ClientToWindowSize(m_controlBar->GetBestSize()));
 
-    m_modalityKind = kind;
-    switch ( m_modalityKind )
-    {
-        case wxPreviewFrame_AppModal:
-            // Disable everything.
-            m_windowDisabler = new wxWindowDisabler( this );
-            break;
-
-        case wxPreviewFrame_WindowModal:
-            // Disable our parent if we have one.
-            if ( GetParent() )
-                GetParent()->Disable();
-            break;
-
-        case wxPreviewFrame_NonModal:
-            // Nothing to do, we don't need to disable any windows.
-            break;
-    }
-
-    if ( m_modalityKind != wxPreviewFrame_NonModal )
-    {
-        // Behave like modal dialogs, don't show in taskbar. This implies
-        // removing the minimize box, because minimizing windows without
-        // taskbar entry is confusing.
-        SetWindowStyle((GetWindowStyle() & ~wxMINIMIZE_BOX) | wxFRAME_NO_TASKBAR);
-    }
+    SetWindowModality(kind);
 
     m_printPreview->AdjustScrollbars(m_previewCanvas);
     m_previewCanvas->SetFocus();
@@ -2052,8 +2015,11 @@ bool wxPrintPreviewBase::RenderPageIntoDC(wxDC& dc, int pageNum)
         m_printingPrepared = true;
 
         m_previewPrintout->OnPreparePrinting();
-        int selFrom, selTo;
-        m_previewPrintout->GetPageInfo(&m_minPage, &m_maxPage, &selFrom, &selTo);
+
+        wxPrintPageRanges ranges;
+        const auto all = m_previewPrintout->GetPagesInfo(ranges);
+        m_minPage = all.fromPage;
+        m_maxPage = all.toPage;
 
         // Update the wxPreviewControlBar page range display.
         if ( m_previewFrame )
@@ -2178,8 +2144,7 @@ void wxPrintPreviewBase::SetZoom(int percent)
     if (m_previewCanvas)
     {
         AdjustScrollbars(m_previewCanvas);
-        ((wxScrolledWindow *) m_previewCanvas)->Scroll(0, 0);
-        m_previewCanvas->ClearBackground();
+        m_previewCanvas->Scroll(0, 0);
         m_previewCanvas->Refresh();
         m_previewCanvas->SetFocus();
     }

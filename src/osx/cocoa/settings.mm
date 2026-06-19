@@ -15,6 +15,7 @@
 #ifndef WX_PRECOMP
     #include "wx/utils.h"
     #include "wx/gdicmn.h"
+    #include "wx/math.h"
 #endif
 
 #include "wx/osx/core/private.h"
@@ -87,7 +88,7 @@ bool wxSystemAppearance::IsDark() const
 wxColour wxSystemSettingsNative::GetColour(wxSystemColour index)
 {
     wxOSXEffectiveAppearanceSetter helper;
-    
+
     NSColor* sysColor = nil;
     switch( index )
     {
@@ -111,6 +112,9 @@ wxColour wxSystemSettingsNative::GetColour(wxSystemColour index)
         break;
     case wxSYS_COLOUR_WINDOW:
         sysColor = [NSColor controlBackgroundColor];
+        break;
+    case wxSYS_COLOUR_GRIDLINES:
+        sysColor = [NSColor gridColor];
         break;
     case wxSYS_COLOUR_BTNFACE:
         if ( WX_IS_MACOS_AVAILABLE(10, 14 ) )
@@ -151,6 +155,18 @@ wxColour wxSystemSettingsNative::GetColour(wxSystemColour index)
         break;
     case wxSYS_COLOUR_LISTBOXHIGHLIGHTTEXT:
         sysColor = [NSColor alternateSelectedControlTextColor];
+        break;
+    case wxSYS_COLOUR_LISTBOXHIGHLIGHT:
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_14
+        if ( WX_IS_MACOS_AVAILABLE(10, 14) )
+        {
+            sysColor = [NSColor selectedContentBackgroundColor];
+        }
+        else
+#endif
+        {
+            sysColor = [NSColor selectedTextBackgroundColor];
+        }
         break;
     case wxSYS_COLOUR_INFOBK:
         // tooltip (bogus)
@@ -221,6 +237,19 @@ wxFont wxSystemSettingsNative::GetFont(wxSystemFont index)
 // system metrics/features
 // ----------------------------------------------------------------------------
 
+static float GetCursorScale()
+{
+    NSDictionary *dict = [[NSUserDefaults standardUserDefaults] persistentDomainForName:@"com.apple.universalaccess"];
+
+    /* See https://developer.apple.com/documentation/devicemanagement/accessibility?language=objc */
+    if ([dict objectForKey: @"mouseDriverCursorSize"])
+    {
+        return [dict[@"mouseDriverCursorSize"] floatValue];
+    }
+
+    return 1.0f;
+}
+
 // Get a system metric, e.g. scrollbar size
 int wxSystemSettingsNative::GetMetric(wxSystemMetric index, const wxWindow* WXUNUSED(win))
 {
@@ -233,14 +262,17 @@ int wxSystemSettingsNative::GetMetric(wxSystemMetric index, const wxWindow* WXUN
 
         // TODO case wxSYS_BORDER_X:
         // TODO case wxSYS_BORDER_Y:
-        // TODO case wxSYS_CURSOR_X:
-        // TODO case wxSYS_CURSOR_Y:
         // TODO case wxSYS_DCLICK_X:
         // TODO case wxSYS_DCLICK_Y:
         // TODO case wxSYS_DRAG_X:
         // TODO case wxSYS_DRAG_Y:
         // TODO case wxSYS_EDGE_X:
         // TODO case wxSYS_EDGE_Y:
+
+        case wxSYS_CURSOR_X:
+            return wxRound(float([[[NSCursor arrowCursor] image] size].width) * GetCursorScale());
+        case wxSYS_CURSOR_Y:
+            return wxRound(float([[[NSCursor arrowCursor] image] size].height) * GetCursorScale());
 
         case wxSYS_HSCROLL_ARROW_X:
             return 16;
@@ -324,9 +356,9 @@ int wxSystemSettingsNative::GetMetric(wxSystemMetric index, const wxWindow* WXUN
              return -1;
 
         default:
-            return -1;  // unsupported metric
+            break;
     }
-    return 0;
+    return -1;  // unsupported metric
 }
 
 bool wxSystemSettingsNative::HasFeature(wxSystemFeature index)

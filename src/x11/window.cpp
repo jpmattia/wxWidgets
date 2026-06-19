@@ -515,6 +515,9 @@ bool wxWindowX11::Show(bool show)
 // Raise the window to the top of the Z order
 void wxWindowX11::Raise()
 {
+    if (!IsShown())
+        return;
+
     if (m_mainWindow)
         XRaiseWindow( wxGlobalDisplay(), (Window) m_mainWindow );
 }
@@ -1654,14 +1657,6 @@ wxWindow *wxWindowBase::GetCapture()
 }
 
 
-// Find the wxWindow at the current mouse position, returning the mouse
-// position.
-wxWindow* wxFindWindowAtPointer(wxPoint& pt)
-{
-    pt = wxGetMousePosition();
-    return wxFindWindowAtPoint(pt);
-}
-
 void wxGetMouseState(int& rootX, int& rootY, unsigned& maskReturn)
 {
 #if wxUSE_NANOX
@@ -1680,16 +1675,6 @@ void wxGetMouseState(int& rootX, int& rootY, unsigned& maskReturn)
                    &childReturn,
                    &rootX, &rootY, &winX, &winY, &maskReturn);
 #endif
-}
-
-// Get the current mouse position.
-wxPoint wxGetMousePosition()
-{
-    int x, y;
-    unsigned mask;
-
-    wxGetMouseState(x, y, mask);
-    return wxPoint(x, y);
 }
 
 wxMouseState wxGetMouseState()

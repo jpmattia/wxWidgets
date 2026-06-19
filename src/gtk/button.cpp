@@ -19,7 +19,6 @@
 
 #include "wx/gtk/private.h"
 #include "wx/gtk/private/list.h"
-#include "wx/gtk/private/image.h"
 
 // ----------------------------------------------------------------------------
 // GTK callbacks
@@ -102,10 +101,6 @@ bool wxButton::Create(wxWindow *parent,
     else // no label, suppose we will have a bitmap
     {
         m_widget = gtk_button_new();
-
-        GtkWidget* image = wxGtkImage::New(this);
-        gtk_widget_show(image);
-        gtk_container_add(GTK_CONTAINER(m_widget), image);
     }
 
     g_object_ref(m_widget);
@@ -140,7 +135,7 @@ bool wxButton::Create(wxWindow *parent,
     if (style & wxNO_BORDER)
        gtk_button_set_relief( GTK_BUTTON(m_widget), GTK_RELIEF_NONE );
 
-    if ( useLabel && (style & wxBU_EXACTFIT) )
+    if (style & wxBU_EXACTFIT)
     {
 #ifdef __WXGTK3__
         GTKApplyCssStyle("* { padding:0 }");

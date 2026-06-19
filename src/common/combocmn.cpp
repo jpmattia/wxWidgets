@@ -116,7 +116,7 @@ wxCONSTRUCTOR_5( wxComboBox, wxWindow*, Parent, wxWindowID, Id, \
 
 #define BMP_BUTTON_MARGIN                       4
 
-#define DEFAULT_POPUP_HEIGHT                    400
+#define DEFAULT_POPUP_ITEMS                     21
 
 #define DEFAULT_TEXT_INDENT                     3
 
@@ -1386,18 +1386,15 @@ bool wxComboCtrlBase::SetForegroundColour(const wxColour& colour)
 
 bool wxComboCtrlBase::SetBackgroundColour(const wxColour& colour)
 {
+    if ( !wxControl::SetBackgroundColour(colour) )
+        return false;
+
     if ( m_mainWindow )
         m_mainWindow->SetBackgroundColour(colour);
+
     m_tcBgCol = colour;
     m_hasTcBgCol = true;
     return true;
-}
-
-wxColour wxComboCtrlBase::GetBackgroundColour() const
-{
-    if ( m_mainWindow )
-        return m_mainWindow->GetBackgroundColour();
-    return m_tcBgCol;
 }
 
 // ----------------------------------------------------------------------------
@@ -1808,7 +1805,7 @@ void wxComboCtrlBase::HandleNormalMouseEvent( wxMouseEvent& event )
             // relay (some) mouse events to the popup
             m_popup->GetEventHandler()->ProcessEvent(event);
         }
-        else if ( event.GetWheelAxis() == 0 &&
+        else if ( event.GetWheelAxis() == wxMOUSE_WHEEL_VERTICAL &&
                   event.GetWheelRotation() != 0 &&
                   event.GetModifiers() == 0 )
         {
@@ -2159,8 +2156,13 @@ void wxComboCtrlBase::ShowPopup()
 
     wxASSERT( !m_popup || m_popup == popup ); // Consistency check.
 
+    int heightPopup = m_heightPopup;
+    if (heightPopup <= 0)
+        // estimated height for a row containig text
+        heightPopup = DEFAULT_POPUP_ITEMS * (GetCharHeight() + FromDIP(4));
+
     wxSize adjustedSize = m_popupInterface->GetAdjustedSize(widthPopup,
-                                                            m_heightPopup<=0?DEFAULT_POPUP_HEIGHT:m_heightPopup,
+                                                            heightPopup,
                                                             maxHeightPopup);
 
     popup->SetSize(adjustedSize);

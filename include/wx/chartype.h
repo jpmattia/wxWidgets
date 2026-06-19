@@ -25,64 +25,39 @@
    checks for it. It's always 1 and can't be changed. */
 #define wxUSE_WCHAR_T 1
 
-/*
-   non Unix compilers which do have wchar.h (but not tchar.h which is included
-   below and which includes wchar.h anyhow).
-
-   Actually MinGW has tchar.h, but it does not include wchar.h
- */
-#if defined(__MINGW32__)
-    #ifndef HAVE_WCHAR_H
-        #define HAVE_WCHAR_H
+/* the current (as of Nov 2002) version of cygwin has a bug in its */
+/* wchar.h -- there is no extern "C" around the declarations in it */
+/* and this results in linking errors later; also, at least on some */
+/* Cygwin versions, wchar.h requires sys/types.h */
+#ifdef __CYGWIN__
+    #include <sys/types.h>
+    #ifdef __cplusplus
+        extern "C" {
     #endif
-#endif
+#endif /* Cygwin */
 
-#ifdef HAVE_WCHAR_H
-    /* the current (as of Nov 2002) version of cygwin has a bug in its */
-    /* wchar.h -- there is no extern "C" around the declarations in it */
-    /* and this results in linking errors later; also, at least on some */
-    /* Cygwin versions, wchar.h requires sys/types.h */
-    #ifdef __CYGWIN__
-        #include <sys/types.h>
-        #ifdef __cplusplus
-            extern "C" {
-        #endif
-    #endif /* Cygwin */
+#include <wchar.h>
 
-    #include <wchar.h>
+#if defined(__CYGWIN__) && defined(__cplusplus)
+    }
+#endif /* Cygwin and C++ */
 
-    #if defined(__CYGWIN__) && defined(__cplusplus)
+/* the current (as of Mar 2014) version of Android (up to api level 19) */
+/* doesn't include some declarations (wscdup, wcslen, wcscasecmp, etc.) */
+/* (moved out from __CYGWIN__ block) */
+#if defined(__WXQT__) && !defined(wcsdup) && defined(__ANDROID__)
+    #ifdef __cplusplus
+        extern "C" {
+    #endif
+        extern wchar_t *wcsdup(const wchar_t *);
+        extern size_t wcslen (const wchar_t *);
+        extern size_t wcsnlen (const wchar_t *, size_t );
+        extern int wcscasecmp (const wchar_t *, const wchar_t *);
+        extern int wcsncasecmp (const wchar_t *, const wchar_t *, size_t);
+    #ifdef __cplusplus
         }
-    #endif /* Cygwin and C++ */
-
-    /* the current (as of Mar 2014) version of Android (up to api level 19) */
-    /* doesn't include some declarations (wscdup, wcslen, wcscasecmp, etc.) */
-    /* (moved out from __CYGWIN__ block) */
-    #if defined(__WXQT__) && !defined(wcsdup) && defined(__ANDROID__)
-        #ifdef __cplusplus
-            extern "C" {
-        #endif
-            extern wchar_t *wcsdup(const wchar_t *);
-            extern size_t wcslen (const wchar_t *);
-            extern size_t wcsnlen (const wchar_t *, size_t );
-            extern int wcscasecmp (const wchar_t *, const wchar_t *);
-            extern int wcsncasecmp (const wchar_t *, const wchar_t *, size_t);
-        #ifdef __cplusplus
-            }
-        #endif
-    #endif /* Android */
-
-#elif defined(HAVE_WCSTR_H)
-    /* old compilers have relevant declarations here */
-    #include <wcstr.h>
-#elif defined(__FreeBSD__) || defined(__DARWIN__)
-    /* include stdlib.h for wchar_t */
-    #include <stdlib.h>
-#endif /* HAVE_WCHAR_H */
-
-#ifdef HAVE_WIDEC_H
-    #include <widec.h>
-#endif
+    #endif
+#endif /* Android */
 
 /* -------------------------------------------------------------------------- */
 /* define wxHAVE_TCHAR_SUPPORT for the compilers which support the TCHAR type */
@@ -153,6 +128,25 @@ typedef wchar_t wxUChar;
     typedef char wxStringCharType;
 #endif
 
+/* Define wxChar16 and wxChar32                                              */
+
+#ifdef __cplusplus
+
+#if SIZEOF_WCHAR_T == 2
+    #define wxWCHAR_T_IS_WXCHAR16
+    typedef wchar_t wxChar16;
+#else
+    typedef char16_t wxChar16;
+#endif
+
+#if SIZEOF_WCHAR_T == 4
+    #define wxWCHAR_T_IS_WXCHAR32
+    typedef wchar_t wxChar32;
+#else
+    typedef char32_t wxChar32;
+#endif
+
+#endif /* __cplusplus */
 
 /* ------------------------------------------------------------------------- */
 /* define wxT() and related macros                                           */

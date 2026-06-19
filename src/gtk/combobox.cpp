@@ -158,8 +158,6 @@ bool wxComboBox::Create( wxWindow *parent, wxWindowID id, const wxString& value,
     if ( entry )
         m_focusWidget = GTK_WIDGET( entry );
 
-    PostCreation(size);
-
     if ( entry )
     {
         if (style & wxCB_READONLY)
@@ -181,6 +179,8 @@ bool wxComboBox::Create( wxWindow *parent, wxWindowID id, const wxString& value,
         GTKConnectInsertTextSignal(entry);
         GTKConnectClipboardSignals(GTK_WIDGET(entry));
     }
+
+    PostCreation(size);
 
     g_signal_connect_after (m_widget, "changed",
                         G_CALLBACK (gtkcombobox_changed_callback), this);
@@ -264,7 +264,7 @@ void wxComboBox::GTKEnableEvents()
         (gpointer)gtkcombobox_popupshown_callback, this);
 }
 
-GtkWidget* wxComboBox::GetConnectWidget()
+GtkWidget* wxComboBox::GetConnectWidget() const
 {
     return GTK_WIDGET( GetEntry() );
 }

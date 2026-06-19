@@ -199,9 +199,12 @@ wxRect wxGenericHyperlinkCtrl::GetLabelRect() const
 void wxGenericHyperlinkCtrl::OnPaint(wxPaintEvent& WXUNUSED(event))
 {
     wxPaintDC dc(this);
-    dc.SetFont(GetFont());
-    dc.SetTextForeground(GetForegroundColour());
-    dc.SetTextBackground(GetBackgroundColour());
+
+    if ( !IsThisEnabled() )
+    {
+        // Grey out the control when it is disabled.
+        dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
+    }
 
     dc.DrawText(GetLabel(), GetLabelRect().GetTopLeft());
     if (HasFocus())

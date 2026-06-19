@@ -1460,11 +1460,7 @@ void FormMain::PopulateWithExamples ()
     pg->Append( new wxPointProperty( "PointProperty", "Position", GetPosition() ) );
 
     // UInt samples
-#if wxUSE_LONGLONG
     pg->Append( new wxUIntProperty( "UIntProperty", wxPG_LABEL, wxULongLong(wxULL(0xFEEEFEEEFEEE))));
-#else
-    pg->Append( new wxUIntProperty( "UIntProperty", wxPG_LABEL, 0xFEEEFEEE));
-#endif
     pg->SetPropertyAttribute( "UIntProperty", wxPG_UINT_PREFIX, wxPG_PREFIX_NONE );
     pg->SetPropertyAttribute( "UIntProperty", wxPG_UINT_BASE, wxPG_BASE_HEX );
     //pg->SetPropertyAttribute( "UIntProperty", wxPG_UINT_PREFIX, wxPG_PREFIX_NONE );
@@ -1712,7 +1708,6 @@ void FormMain::PopulateWithLibraryConfig ()
     ADD_WX_LIB_CONF( wxUSE_STD_IOSTREAM )
 
     ADD_WX_LIB_CONF_GROUP("Non-GUI Features")
-    ADD_WX_LIB_CONF( wxUSE_LONGLONG )
     ADD_WX_LIB_CONF( wxUSE_FILE )
     ADD_WX_LIB_CONF( wxUSE_FFILE )
     ADD_WX_LIB_CONF( wxUSE_FSVOLUME )
@@ -2166,11 +2161,11 @@ FormMain::FormMain(const wxString& title)
     wxBoxSizer* btnSizer = new wxBoxSizer(wxHORIZONTAL);
     btnSizer->Add(new wxButton(m_panel, wxID_ANY,
         "Should be able to move here with Tab"),
-        wxSizerFlags(1).Border(wxALL, 10));
+        wxSizerFlags(1).DoubleBorder(wxALL));
     btnSizer->Add(new wxButton(m_panel, ID_SHOWPOPUP,
         "Show Popup"),
-        wxSizerFlags(1).Border(wxALL, 10));
-    m_topSizer->Add(btnSizer, wxSizerFlags(0).Border(wxALL, 5).Expand());
+        wxSizerFlags(1).DoubleBorder(wxALL));
+    m_topSizer->Add(btnSizer, wxSizerFlags(0).Border(wxALL).Expand());
 
     m_panel->SetSizer(m_topSizer);
     m_topSizer->SetSizeHints(m_panel);
@@ -2787,7 +2782,7 @@ void FormMain::OnColourScheme( wxCommandEvent& event )
         m_propGridManager->Freeze();
         m_propGridManager->GetGrid()->SetMarginColour( my_grey_1 );
         m_propGridManager->GetGrid()->SetCaptionBackgroundColour( my_grey_1 );
-        m_propGridManager->GetGrid()->SetLineColour( my_grey_1 );
+        m_propGridManager->GetGrid()->SetLineColour( my_grey_2 );
         m_propGridManager->Thaw();
     }
     else if ( id == ID_COLOURSCHEME4 )

@@ -405,6 +405,10 @@ When using SVG file you must also specify @c default_size attribute
 @code
 <bitmap default_size="32,32">new.svg</bitmap>
 @endcode
+Note that, unlike most of the other sizes in XRC, this size is expressed in
+DPI-independent pixels and is not scaled by DPI scaling factor. Because of
+this, it can't be specified in dialog units, which are, by definition,
+DPI-dependent, but only in pixels as shown above.
 
 Alternatively, it is possible to specify the bitmap using wxArtProvider IDs.
 In this case, the property element has no textual value (filename) and instead
@@ -727,6 +731,9 @@ wxAuiPaneInfo objects have the following properties:
     Sets the ideal size for the pane.}
 @row3col{floating_size, @ref overview_xrcformat_type_size,
     Sets the size of the floating pane.}
+@row3col{floating_client_size, @ref overview_xrcformat_type_size,
+    Sets the client size of the floating pane. This has precedence over
+    floating_size. This attribute is available since wxWidgets 3.3.1.}
 @row3col{min_size, @ref overview_xrcformat_type_size,
     Sets the minimum size of the pane.}
 @row3col{max_size, @ref overview_xrcformat_type_size,
@@ -763,9 +770,11 @@ wxAuiPaneInfo objects have the following properties:
 @beginTable
 @hdr3col{property, type, description}
 @row3col{art-provider, @ref overview_xrcformat_type_string,
-    One of @c default for wxAuiDefaultTabArt or @c simple for wxAuiSimpleTabArt
-    (default: @c default).
-    @since 3.2.0}
+    One of @c default for wxAuiDefaultTabArt, @c native for wxAuiNativeTabArt,
+    @c flat for wxAuiFlatTabArt, @c generic for wxAuiGenericTabArt or @c simple
+    for wxAuiSimpleTabArt (default: @c default). This attribute and its
+    "default" and "simple" values are available since wxWidgets 3.2.0, the
+    values "native", "flat" and "generic" are available since wxWidgets 3.3.0.}
 @endTable
 
 A wxAuiNotebook can have one or more child objects of the @c notebookpage
@@ -1372,6 +1381,14 @@ page.
 @endTable
 
 
+@subsubsection xrc_wxgenerichyperlinkctrl wxGenericHyperlinkCtrl
+
+This handler is identical to the one for @ref xrc_wxhyperlinkctrl
+"wxHyperlinkCtrl", please see it for more information. The only difference is
+that, for the platforms with a native wxHyperlinkCtrl implementation, using
+this handler creates a generic control rather than a native one.
+
+
 @subsubsection xrc_wxinfobar wxInfoBar
 
 @beginTable
@@ -1388,11 +1405,21 @@ page.
      this property is of class "button" has name (can be one of standard
      button ID) and has optional label property. If no buttons are added
      to the info bar, the default "Close" button will be shown.}
+@row3col{checkboxlabel, @ref overview_xrcformat_type_text,
+     Shows a checkbox at the bottom of the infobar with the specified label.
+     Note that specifying this attribute automatically turns on @c
+     wxINFOBAR_CHECKBOX style (optional). @since 3.3.0.}
+@row3col{checked, @ref overview_xrcformat_type_bool,
+     If showing the checkbox, indicates whether it should be checked by
+     default (optional). @since 3.3.0.}
 @endTable
 
 Example:
 @code
 <object class="wxInfoBar">
+    <style>wxINFOBAR_CHECKBOX</style>
+    <checkboxlabel>Do not show this again</checkboxlabel>
+    <checked>1</checked>
     <effectduration>1000</effectduration>
     <showeffect>wxSHOW_EFFECT_EXPAND</showeffect>
     <hideeffect>wxSHOW_EFFECT_SLIDE_TO_RIGHT</hideeffect>

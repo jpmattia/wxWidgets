@@ -207,8 +207,8 @@ private:
 
         int xScrollUnits, xOrigin;
 
-        m_owner->GetViewStart( &xOrigin, 0 );
-        m_owner->GetScrollPixelsPerUnit( &xScrollUnits, 0 );
+        m_owner->GetViewStart( &xOrigin, nullptr );
+        m_owner->GetScrollPixelsPerUnit( &xScrollUnits, nullptr );
         dc.SetDeviceOrigin( -xOrigin * xScrollUnits, 0 );
 
         dc.DrawText("Column 1", 5, 5);
@@ -242,8 +242,8 @@ private:
 
         int yScrollUnits, yOrigin;
 
-        m_owner->GetViewStart( 0, &yOrigin );
-        m_owner->GetScrollPixelsPerUnit( 0, &yScrollUnits );
+        m_owner->GetViewStart( nullptr, &yOrigin );
+        m_owner->GetScrollPixelsPerUnit( nullptr, &yScrollUnits );
         dc.SetDeviceOrigin( 0, -yOrigin * yScrollUnits );
 
         dc.DrawText("Row 1", 5, 5);
@@ -792,7 +792,7 @@ MySizerScrolledWindow::MySizerScrolledWindow(wxWindow *parent)
     m_button = new wxButton( this, wxID_RESIZE_FRAME, "Press me",
                              wxDefaultPosition, SMALL_BUTTON );
 
-    sizer->Add(m_button, wxSizerFlags().Centre().Border(wxALL, 20));
+    sizer->Add(m_button, wxSizerFlags().Centre().Border(wxALL, FromDIP(20)));
     sizer->Add(new wxStaticText(this, wxID_ANY, "This is just"),
                wxSizerFlags().Centre());
     sizer->Add(new wxStaticText(this, wxID_ANY, "some decoration"),

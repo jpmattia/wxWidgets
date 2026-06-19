@@ -282,11 +282,11 @@ AC_DEFUN([AC_BAKEFILE_SHARED_LD],
       ;;
 
       *-*-darwin* )
-        SHARED_LD_MODULE_CC="\${CC} -bundle -single_module -headerpad_max_install_names -o"
-        SHARED_LD_MODULE_CXX="\${CXX} -bundle -single_module -headerpad_max_install_names -o"
+        SHARED_LD_MODULE_CC="\${CC} -bundle -headerpad_max_install_names -o"
+        SHARED_LD_MODULE_CXX="\${CXX} -bundle -headerpad_max_install_names -o"
 
-        SHARED_LD_CC="\${CC} -dynamiclib -single_module -headerpad_max_install_names -o"
-        SHARED_LD_CXX="\${CXX} -dynamiclib -single_module -headerpad_max_install_names -o"
+        SHARED_LD_CC="\${CC} -dynamiclib -headerpad_max_install_names -o"
+        SHARED_LD_CXX="\${CXX} -dynamiclib -headerpad_max_install_names -o"
 
         if test "x$GCC" = "xyes"; then
             PIC_FLAG="-dynamic -fPIC"
@@ -519,7 +519,7 @@ AC_DEFUN([AC_BAKEFILE_CHECK_BASIC_STUFF],
     if test "x$SUNCXX" = "xyes"; then
         dnl Sun C++ compiler requires special way of creating static libs;
         dnl see here for more details:
-        dnl https://github.com/wxWidgets/wxWidgets/issues/2639
+        dnl https://github.com/wxWidgets/wxWidgets/issues/22004
         AR=$CXX
         AROPTIONS="-xar -o"
         AC_SUBST(AR)

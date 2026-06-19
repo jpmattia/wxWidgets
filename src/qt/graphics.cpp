@@ -14,11 +14,11 @@
 #if wxUSE_GRAPHICS_CONTEXT
 
 #include <QApplication>
-#include <QDesktopWidget>
 #include <QBitmap>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPicture>
+#include <QWidget>
 
 #ifndef WX_PRECOMP
     #include "wx/bitmap.h"
@@ -84,7 +84,7 @@ private:
         for ( size_t i = 0; i < stops.GetCount(); ++i )
         {
             const wxGraphicsGradientStop stop = stops.Item(i);
-            qstops.append(QGradientStop(stop.GetPosition(),
+            qstops.append(QGradientStop(double(stop.GetPosition()),
                                         stop.GetColour().GetQColor()));
         }
 
@@ -103,6 +103,7 @@ public:
         : wxGraphicsObjectRefData(renderer),
           m_pen(CreatePenFromInfo(info))
     {
+        m_pen.setWidthF(info.GetWidth());
     }
 
     const QPen& GetPen() const
@@ -113,7 +114,7 @@ public:
 private:
     static QPen CreatePenFromInfo(const wxGraphicsPenInfo& info)
     {
-        wxPen wxpen(info.GetColour(), info.GetWidth(), info.GetStyle());
+        wxPen wxpen(info.GetColour(), 1, info.GetStyle());
         wxpen.SetDashes(info.GetDashCount(), info.GetDash());
         wxpen.SetJoin(info.GetJoin());
         wxpen.SetCap(info.GetCap());
@@ -719,7 +720,7 @@ class WXDLLIMPEXP_CORE wxQtGraphicsContext : public wxGraphicsContext
     void SetInitialClipping()
     {
         m_qtPainter->setWorldMatrixEnabled(false);
-        m_qtPainter->setClipRect(0, 0, m_width, m_height);
+        m_qtPainter->setClipRect(QRectF(0, 0, m_width, m_height));
         m_qtPainter->setWorldMatrixEnabled(true);
     }
 
@@ -728,11 +729,11 @@ class WXDLLIMPEXP_CORE wxQtGraphicsContext : public wxGraphicsContext
     public:
         OffsetHelper(bool shouldOffset, QPainter* qpainter)
         {
+            m_qtPainter = qpainter;
             m_shouldOffset = shouldOffset;
             if ( !m_shouldOffset )
                 return;
 
-            m_qtPainter = qpainter;
             m_qtPainter->translate(0.5, 0.5);
         }
 
@@ -837,7 +838,7 @@ public:
     // clips drawings to the rect
     virtual void Clip(wxDouble x, wxDouble y, wxDouble w, wxDouble h) override
     {
-        m_qtPainter->setClipRect(x, y, w, h, Qt::IntersectClip);
+        m_qtPainter->setClipRect(QRectF(x, y, w, h), Qt::IntersectClip);
     }
 
     // resets the clipping to original extent
@@ -1004,7 +1005,7 @@ public:
     virtual void
     ClearRectangle(wxDouble x, wxDouble y, wxDouble w, wxDouble h) override
     {
-        m_qtPainter->fillRect(x, y, w, h, QBrush(QColor(0, 0, 0, 0)));
+        m_qtPainter->fillRect(QRectF(x, y, w, h), QBrush(QColor(0, 0, 0, 0)));
     }
 
     virtual void Translate(wxDouble dx, wxDouble dy) override
@@ -1070,7 +1071,7 @@ public:
                wxDouble x, wxDouble y, wxDouble w, wxDouble h) override
     {
         const auto pixmap = wxQtBitmapData::GetPixmapFromBitmap(bmp);
-        m_qtPainter->drawPixmap(x, y, w, h, pixmap);
+        m_qtPainter->drawPixmap(QRectF(x, y, w, h), pixmap, QRectF());
     }
 
     virtual void
@@ -1188,6 +1189,16 @@ protected:
         const wxQtFontData*
             fontData = static_cast<wxQtFontData*>(m_font.GetRefData());
 
+        const bool isRTL = m_qtPainter->layoutDirection() == Qt::RightToLeft;
+
+        if ( isRTL )
+        {
+            m_qtPainter->save();
+            // text is not mirrored
+            m_qtPainter->scale(-1, 1);
+            x = -x;
+        }
+
         m_qtPainter->setFont(fontData->GetFont());
         m_qtPainter->setPen(QPen(fontData->GetColor()));
 
@@ -1197,9 +1208,12 @@ protected:
         while ( tokenizer.HasMoreTokens() )
         {
             const wxString line = tokenizer.GetNextToken();
-            m_qtPainter->drawText(x, y + metrics.ascent(), wxQtConvertString(line));
+            m_qtPainter->drawText(x, y, 1, 1, Qt::TextDontClip, wxQtConvertString(line));
             y += metrics.lineSpacing();
         }
+
+        if ( isRTL )
+            m_qtPainter->restore();
     }
 
     void
@@ -1212,7 +1226,7 @@ protected:
         if (useMask && bmp.GetMask() && bmp.GetMask()->GetHandle())
             pix.setMask(*bmp.GetMask()->GetHandle());
 
-        m_qtPainter->drawPixmap(x, y, w, h, pix);
+        m_qtPainter->drawPixmap(QRectF(x, y, w, h), pix, QRectF());
     }
 
     QPainter*  m_qtPainter;
@@ -1240,22 +1254,26 @@ class wxQtImageContext : public wxQtGraphicsContext
 public:
     wxQtImageContext(wxGraphicsRenderer* renderer, wxImage& image) :
         wxQtGraphicsContext(renderer),
-        m_image(image)
+        m_image(image),
+        m_bitmap(GetRenderer(), wxBitmap(image))
     {
-        const wxBitmap wxbitmap(image);
-        m_pixmap = *wxbitmap.GetHandle();
-        AttachPainter(new QPainter(&m_pixmap));
+        auto pixmap = static_cast<QPixmap*>(m_bitmap.GetNativeBitmap());
+        AttachPainter(new QPainter(pixmap));
     }
 
     ~wxQtImageContext()
     {
-        wxQtBitmapData bitmap(GetRenderer(), m_pixmap);
-        m_image = bitmap.ConvertToImage();
+        // Finish the painting on the pixmap so we can access it below.
+        m_qtPainter->end();
+
+        m_image = m_bitmap.ConvertToImage();
     }
 
 private:
-    QPixmap m_pixmap;
     wxImage& m_image;
+    wxQtBitmapData m_bitmap;
+
+    wxDECLARE_NO_COPY_CLASS(wxQtImageContext);
 };
 
 //-----------------------------------------------------------------------------
@@ -1448,7 +1466,7 @@ wxGraphicsBrush wxQtGraphicsRenderer::CreateBrush(const wxBrush& brush)
 wxGraphicsBrush wxQtGraphicsRenderer::CreateLinearGradientBrush(
     wxDouble x1, wxDouble y1,
     wxDouble x2, wxDouble y2,
-    const wxGraphicsGradientStops& stops, 
+    const wxGraphicsGradientStops& stops,
     const wxGraphicsMatrix& WXUNUSED(matrix))
 {
     wxGraphicsBrush p;
@@ -1461,7 +1479,7 @@ wxGraphicsBrush wxQtGraphicsRenderer::CreateLinearGradientBrush(
 wxGraphicsBrush wxQtGraphicsRenderer::CreateRadialGradientBrush(
     wxDouble startX, wxDouble startY,
     wxDouble endX, wxDouble endY, wxDouble r,
-    const wxGraphicsGradientStops& stops, 
+    const wxGraphicsGradientStops& stops,
     const wxGraphicsMatrix& WXUNUSED(matrix))
 {
     wxGraphicsBrush p;
@@ -1557,12 +1575,14 @@ wxQtGraphicsRenderer::CreateSubBitmap(const wxGraphicsBitmap& bitmap,
     const int srcHeight = sourcePixmap.height();
     const int dstWidth = wxRound(w);
     const int dstHeight = wxRound(h);
+    const int dstX = wxRound(x);
+    const int dstY = wxRound(y);
 
-    wxCHECK_MSG(x >= 0.0 && y >= 0.0 && dstWidth > 0 && dstHeight > 0 &&
-            x + dstWidth <= srcWidth && y + dstHeight <= srcHeight,
+    wxCHECK_MSG(dstX >= 0 && dstY >= 0 && dstWidth > 0 && dstHeight > 0 &&
+            dstX + dstWidth <= srcWidth && dstY + dstHeight <= srcHeight,
             wxNullGraphicsBitmap, wxS("Invalid bitmap region"));
 
-    QPixmap subPixmap = sourcePixmap.copy(x, y, w, h);
+    QPixmap subPixmap = sourcePixmap.copy(dstX, dstY, dstWidth, dstHeight);
 
     wxGraphicsBitmap bmpRes;
     bmpRes.SetRefData(new wxQtBitmapData(this, subPixmap));

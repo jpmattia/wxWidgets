@@ -10,12 +10,16 @@
 #ifndef _WX_AUI_BARART_MSW_H_
 #define _WX_AUI_BARART_MSW_H_
 
+#include "wx/aui/auibar.h"
+
+#if wxUSE_AUI
+
 class WXDLLIMPEXP_AUI wxAuiMSWToolBarArt : public wxAuiGenericToolBarArt
 {
 public:
     wxAuiMSWToolBarArt();
 
-    virtual wxAuiToolBarArt* Clone() override;
+    wxNODISCARD virtual wxAuiToolBarArt* Clone() override;
 
     virtual void DrawBackground(
         wxDC& dc,
@@ -72,9 +76,6 @@ public:
         wxWindow* wnd,
         const wxAuiToolBarItem& item) override;
 
-    virtual int GetElementSize(int element) override;
-    virtual void SetElementSize(int elementId, int size) override;
-
     virtual int ShowDropDown(wxWindow* wnd,
         const wxAuiToolBarItemArray& items) override;
 
@@ -82,5 +83,7 @@ private:
     bool m_themed;
     wxSize m_buttonSize;
 };
+
+#endif // wxUSE_AUI
 
 #endif // _WX_AUI_BARART_MSW_H_

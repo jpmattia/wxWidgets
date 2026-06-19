@@ -35,8 +35,6 @@ public:
 
     virtual void SetTitle(const wxString& title) override;
 
-    virtual void SetInvokingWindow(wxWindow* win) override;
-
     bool ProcessCommand(wxCommandEvent& event);
 
     // get the menu handle
@@ -66,12 +64,6 @@ public:
     // at given position belongs. Return false if there is no radio group
     // containing this position.
     bool OSXGetRadioGroupRange(int pos, int *start, int *end) const;
-
-#if wxUSE_MENUBAR
-    virtual void Attach(wxMenuBarBase *menubar) override;
-#endif
-
-    void SetupBitmaps();
 
 protected:
     // hide special menu items like exit, preferences etc
@@ -159,6 +151,10 @@ public:
 
     wxMenu *OSXGetAppleMenu() const { return m_appleMenu; }
 
+#if wxOSX_USE_IPHONE
+    void OSXOnBuildMenu( WX_NSObject builder ) ;
+#endif
+
     static void SetAutoWindowMenu( bool enable ) { s_macAutoWindowMenu = enable ; }
     static bool GetAutoWindowMenu() { return s_macAutoWindowMenu ; }
 
@@ -167,10 +163,6 @@ public:
     static wxMenuBar* MacGetInstalledMenuBar() { return s_macInstalledMenuBar ; }
     static void MacSetCommonMenuBar(wxMenuBar* menubar) { s_macCommonMenuBar=menubar; }
     static wxMenuBar* MacGetCommonMenuBar() { return s_macCommonMenuBar; }
-
-    virtual void Attach(wxFrame *frame) override;
-    void SetupBitmaps();
-
 
     static WXHMENU MacGetWindowMenuHMenu() { return s_macWindowMenuHandle ; }
 

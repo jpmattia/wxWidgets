@@ -53,6 +53,10 @@
     #include "wx/msw/missing.h"
 #endif
 
+#ifdef __MINGW32__
+    #include <map>
+#endif
+
 #include <memory>
 #include <unordered_set>
 
@@ -85,11 +89,6 @@ namespace
 
 #if wxUSE_LOG_TRACE
 
-void LogTraceArray(const char* prefix, const wxArrayString& arr)
-{
-    wxLogTrace(TRACE_I18N, "%s: [%s]", prefix, wxJoin(arr, ','));
-}
-
 void LogTraceArray(const char *prefix, const wxVector<wxString>& arr)
 {
     wxString s;
@@ -116,56 +115,12 @@ void LogTraceLargeArray(const wxString& prefix, const wxArrayString& arr)
 
 #endif // wxUSE_LOG_TRACE/!wxUSE_LOG_TRACE
 
-wxString GetPreferredUILanguage(const wxArrayString& available)
+wxString GetPreferredUILanguage(const wxVector<wxString>& available)
 {
-    wxVector<wxString> preferred = wxUILocale::GetPreferredUILanguages();
+    const wxVector<wxString>& preferred = wxUILocale::GetPreferredUILanguages();
     LogTraceArray(" - system preferred languages", preferred);
 
-    wxString langNoMatchRegion;
-    for ( wxVector<wxString>::const_iterator j = preferred.begin();
-          j != preferred.end();
-          ++j )
-    {
-        // try exact match first:
-        if (available.Index(*j, /*bCase=*/false) != wxNOT_FOUND)
-            return *j;
-
-        // try looking up as a POSIX locale:
-        wxLocaleIdent localeId = wxLocaleIdent::FromTag(*j);
-        wxString lang = localeId.GetTag(wxLOCALE_TAGTYPE_POSIX);
-
-        if (available.Index(lang, /*bCase=*/false) != wxNOT_FOUND)
-            return lang;
-
-        size_t pos = lang.find('_');
-        if (pos != wxString::npos)
-        {
-            lang = lang.substr(0, pos);
-            if (available.Index(lang, /*bCase=*/false) != wxNOT_FOUND)
-                return lang;
-        }
-
-        if (langNoMatchRegion.empty())
-        {
-            // lang now holds only the language
-            // check for an available language with potentially non-matching region
-            for ( wxArrayString::const_iterator k = available.begin();
-                  k != available.end();
-                  ++k )
-            {
-                if ((*k).Lower().StartsWith(lang.Lower()))
-                {
-                    langNoMatchRegion = *k;
-                    break;
-                }
-            }
-        }
-    }
-
-    if (!langNoMatchRegion.empty())
-        return langNoMatchRegion;
-
-    return wxString();
+    return wxLocaleIdent::GetBestMatch(preferred, available);
 }
 
 } // anonymous namespace
@@ -918,7 +873,7 @@ private:
         const wxMsgTableEntry * const ent = pTable + n;
 
         // this check could fail for a corrupt message catalog
-        size_t32 ofsString = Swap(ent->ofsString);
+        wxULongLong_t ofsString = Swap(ent->ofsString);
         if ( ofsString + Swap(ent->nLen) > m_data.length())
         {
             return nullptr;
@@ -1495,19 +1450,105 @@ wxString wxTranslations::DoGetBestAvailableTranslation(const wxString& domain, c
         return lang;
     }
 
-    wxLogTrace(TRACE_I18N, "choosing best language for domain '%s'", domain);
-    LogTraceArray(" - available translations", available);
-    const wxString lang = GetPreferredUILanguage(available);
+    const wxString lang = GetPreferredUILanguage(available.AsVector());
     wxLogTrace(TRACE_I18N, " => using language '%s'", lang);
     return lang;
 }
+
+namespace
+{
+
+// We use this container to store all strings known not to have translations.
+// It is thread-specific to avoid using mutexes for every untranslated string
+// access.
+using UntranslatedStrings = std::unordered_set<wxString>;
+
+/*
+    As of October 2025, MinGW still has a long-standing bug in its thread_local
+    variables implementation: their memory is de-allocated *before* their
+    destructor is called, see https://github.com/msys2/MINGW-packages/issues/2519
+
+    The UntranslatedStringHolder class works around this issue, by storing data
+    in global variables outside of this class and only relying on the dtor to
+    be executed when any thread (not necessarily created by wxWidgets) exits to
+    ensure that we always perform the required cleanup.
+
+    thread_local seems to work correctly in MSYS2 MinGW as of May 2026,
+    see https://www.msys2.org/news/#2026-05-11-native-thread-local-storage-tls-with-gcc-16
+    Around that same time the major version was incremented to 15, so use that
+    to check if thread_local can be used.
+ */
+#if defined(__MINGW32__) && \
+    (!defined(__MINGW64_VERSION_MAJOR) || __MINGW64_VERSION_MAJOR < 15)
+
+class UntranslatedStringHolder
+{
+private:
+    static wxCriticalSection ms_criticalSection;
+    static std::map<wxThreadIdType, UntranslatedStrings> ms_setsMap;
+
+    // This will be set to point to an element of ms_setsMap.
+    UntranslatedStrings* m_holder = nullptr;
+
+public:
+    UntranslatedStringHolder() = default;
+
+    const wxString& get(const wxString& str)
+    {
+        if ( m_holder == nullptr )
+        {
+            wxCriticalSectionLocker locker(ms_criticalSection);
+            m_holder = &ms_setsMap[wxThread::GetCurrentId()];
+        }
+
+        return *m_holder->insert(str).first;
+    }
+
+    ~UntranslatedStringHolder()
+    {
+        // This code is run after this object memory has been deallocated so we
+        // cannot access any member variables, but we can access global ones.
+        wxCriticalSectionLocker locker(ms_criticalSection);
+        ms_setsMap.erase(wxThread::GetCurrentId());
+    }
+
+    wxDECLARE_NO_COPY_CLASS(UntranslatedStringHolder);
+};
+
+wxCriticalSection UntranslatedStringHolder::ms_criticalSection;
+
+std::map<wxThreadIdType, UntranslatedStrings> UntranslatedStringHolder::ms_setsMap;
+
+#else // !__MINGW32__
+
+// When not using MinGW, thread_local variables to work correctly but we still
+// define this class, even if it's trivial, to use the same code below.
+class UntranslatedStringHolder
+{
+private:
+    UntranslatedStrings m_holder;
+
+public:
+    UntranslatedStringHolder() = default;
+
+    const wxString& get(const wxString& str)
+    {
+        return *m_holder.insert(str).first;
+    }
+
+    wxDECLARE_NO_COPY_CLASS(UntranslatedStringHolder);
+};
+
+#endif // __MINGW32__/!__MINGW32__
+
+} // Anonymous namespace
 
 
 /* static */
 const wxString& wxTranslations::GetUntranslatedString(const wxString& str)
 {
-    thread_local std::unordered_set<wxString> wxPerThreadStrings;
-    return *wxPerThreadStrings.insert(str).first;
+    thread_local UntranslatedStringHolder wxPerThreadStrings;
+    return wxPerThreadStrings.get(str);
 }
 
 
@@ -1843,7 +1884,7 @@ wxMsgCatalog *wxResourceTranslationsLoader::LoadCatalog(const wxString& domain,
     wxString lang_sanitized = lang;
     for ( wxString::iterator it = lang_sanitized.begin(); it != lang_sanitized.end(); ++it )
     {
-        const wxChar c = *it;
+        const wxUniChar c = *it;
         if ( !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) )
             *it = '_';
     }

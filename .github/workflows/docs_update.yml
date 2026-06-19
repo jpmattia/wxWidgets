@@ -23,16 +23,24 @@ permissions:
 
 jobs:
   update:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     name: Update Online Documentation
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install doxygen
+        env:
+          DOXYGEN_VERSION: '1.15.0'
         run: |
-          sudo apt-get -q -o=Dpkg::Use-Pty=0 -y install doxygen graphviz
+          wget --progress=dot:mega https://github.com/doxygen/doxygen/releases/download/Release_${DOXYGEN_VERSION//./_}/doxygen-${DOXYGEN_VERSION}.linux.bin.tar.gz
+          tar xzvf doxygen-${DOXYGEN_VERSION}.linux.bin.tar.gz
+          cd doxygen-${DOXYGEN_VERSION}
+          sudo make install
+          cd ..
+          rm -rf doxygen-${DOXYGEN_VERSION}* # Clean up
+          sudo apt-get -q -o=Dpkg::Use-Pty=0 -y install graphviz
 
       - name: Customize for online docs
         working-directory: docs/doxygen

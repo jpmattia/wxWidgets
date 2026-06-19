@@ -18,10 +18,6 @@
 // for compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-// Define this as soon as possible and before string.h is included to get
-// memset_s() declaration from it if available.
-#define __STDC_WANT_LIB_EXT1__ 1
-
 #include "wx/utils.h"
 
 #if !defined(HAVE_SETENV) && defined(HAVE_PUTENV)
@@ -148,6 +144,7 @@
 
 #if defined(__DARWIN__)
     #include <sys/sysctl.h>
+    #include <AvailabilityMacros.h>
 #endif
 
 // ----------------------------------------------------------------------------
@@ -223,7 +220,8 @@ void wxSecureZeroMemory(void* v, size_t n)
     // but may be found in a non-standard header file, or in a library that is
     // not linked by default.
     explicit_bzero(v, n);
-#elif defined(__DARWIN__) || defined(__STDC_LIB_EXT1__)
+#elif (defined(__DARWIN__) && (MAC_OS_X_VERSION_MIN_REQUIRED >= 1090)) || \
+    defined(__STDC_LIB_EXT1__)
     // memset_s() is available since OS X 10.9, and may be available on
     // other platforms.
     memset_s(v, n, 0, n);
@@ -491,7 +489,7 @@ private:
 // wxExecute implementations
 // ----------------------------------------------------------------------------
 
-#if defined(__DARWIN__) && !defined(__WXOSX_IPHONE__)
+#ifdef __WXDARWIN_OSX__
 bool wxCocoaLaunch(const char* const* argv, pid_t &pid);
 #endif
 
@@ -612,7 +610,7 @@ long wxExecute(const char* const* argv, int flags, wxProcess* process,
                     wxT("wxExecute() can be called only from the main thread") );
 #endif // wxUSE_THREADS
     pid_t pid;
-#if defined(__DARWIN__) && !defined(__WXOSX_IPHONE__)
+#ifdef __WXDARWIN_OSX__
     pid = -1;
     // wxCocoaLaunch() only executes app bundles and only does it asynchronously.
     // It returns false if the target is not an app bundle, thus falling
@@ -896,11 +894,10 @@ long wxExecute(const char* const* argv, int flags, wxProcess* process,
 const wxChar* wxGetHomeDir( wxString *home  )
 {
     *home = wxGetUserHome();
-    wxString tmp;
     if ( home->empty() )
         *home = wxT("/");
 #ifdef __VMS
-    tmp = *home;
+    wxString tmp = *home;
     if ( tmp.Last() != wxT(']'))
         if ( tmp.Last() != wxT('/')) *home << wxT('/');
 #endif
@@ -934,7 +931,7 @@ wxString wxGetUserHome( const wxString &user )
     }
     else
     {
-      who = getpwnam (user.mb_str());
+      who = getpwnam (user.mb_str(wxConvWhateverWorks));
     }
 
     return wxSafeConvertMB2WX(who ? who->pw_dir : nullptr);
@@ -1256,11 +1253,81 @@ wxOperatingSystemId wxGetOsVersion(int *verMaj, int *verMin, int *verMicro)
     return wxPlatformInfo::GetOperatingSystemId(kernel);
 }
 
+static bool
+wxGetDescFromOSRelease(wxString* distName, wxString* version)
+{
+#if wxUSE_CONFIG
+    // Read /etc/os-release and fall back to /usr/lib/os-release per below
+    // https://www.freedesktop.org/software/systemd/man/os-release.html
+    static const char* const osReleasePaths[] =
+    {
+        "/etc/os-release",
+        "/usr/lib/os-release"
+    };
+
+    for ( const auto& fileName : osReleasePaths )
+    {
+        if ( wxFileName::Exists(fileName) )
+        {
+            // No app, no vendor, no global file path, just the local config
+            // file to read the values from.
+            wxFileConfig fc({}, {}, {}, fileName);
+
+            // Default value suggested by the spec
+            *distName = fc.Read("NAME", "Linux");
+
+            *version = fc.Read("VERSION");
+
+            return true;
+        }
+    }
+#endif // wxUSE_CONFIG
+
+    return false;
+}
+
 wxString wxGetOsDescription()
 {
 #ifdef __VMS
     return wxGetCommandOutput(wxT("uname -s -v -m"));
 #else
+    wxString distName, version;
+    if ( wxGetDescFromOSRelease(&distName, &version) )
+    {
+        wxString osDesc = distName;
+        if ( !version.empty() )
+        {
+            osDesc += " " + version;
+        }
+        osDesc += ",";
+
+        const wxString unameSystem = wxGetCommandOutput(wxT("uname -s"));
+        const wxString unameRelease = wxGetCommandOutput(wxT("uname -r"));
+        const wxString unameMachine = wxGetCommandOutput(wxT("uname -m"));
+
+        // If any of the strings above is already present in the info
+        // read from os-release, avoid repeating the values to keep
+        // the description relatively short. Also do not repeat
+        // e.g. the machine type if it is already part of the kernel
+        // version number.
+
+        if ( osDesc.Find(unameSystem) == wxNOT_FOUND )
+        {
+            osDesc += " " + unameSystem;
+        }
+        if ( osDesc.Find(unameRelease) == wxNOT_FOUND )
+        {
+            osDesc += " " + unameRelease;
+        }
+        if ( osDesc.Find(unameMachine) == wxNOT_FOUND )
+        {
+            osDesc += " " + unameMachine;
+        }
+
+        osDesc.Trim(false);
+        return osDesc;
+    }
+
     return wxGetCommandOutput(wxT("uname -s -r -m"));
 #endif
 }
@@ -1427,15 +1494,12 @@ wxIMPLEMENT_DYNAMIC_CLASS(wxSetEnvModule, wxModule);
 
 bool wxGetEnv(const wxString& var, wxString *value)
 {
-    // wxGetenv is defined as getenv()
-    char *p = wxGetenv(var);
+    char *p = wxGetenv(var.mb_str(wxConvWhateverWorks));
     if ( !p )
         return false;
 
     if ( value )
-    {
-        *value = p;
-    }
+        value->assign(wxScopedCharBuffer::CreateNonOwned(p), wxConvWhateverWorks);
 
     return true;
 }
@@ -1448,21 +1512,21 @@ static bool wxDoSetEnv(const wxString& variable, const char *value)
 #ifdef HAVE_UNSETENV
         // don't test unsetenv() return value: it's void on some systems (at
         // least Darwin)
-        unsetenv(variable.mb_str());
+        unsetenv(variable.mb_str(wxConvWhateverWorks));
         return true;
 #else
         value = ""; // we can't pass nullptr to setenv()
 #endif
     }
 
-    return setenv(variable.mb_str(), value, 1 /* overwrite */) == 0;
+    return setenv(variable.mb_str(wxConvWhateverWorks), value, 1 /* overwrite */) == 0;
 #elif defined(HAVE_PUTENV)
     wxString s = variable;
     if ( value )
         s << wxT('=') << value;
 
     // transform to ANSI
-    const wxWX2MBbuf p = s.mb_str();
+    const wxWX2MBbuf p = s.mb_str(wxConvWhateverWorks);
 
     char *buf = (char *)malloc(strlen(p) + 1);
     strcpy(buf, p);
@@ -1487,7 +1551,7 @@ static bool wxDoSetEnv(const wxString& variable, const char *value)
 
 bool wxSetEnv(const wxString& variable, const wxString& value)
 {
-    return wxDoSetEnv(variable, value.mb_str());
+    return wxDoSetEnv(variable, value.mb_str(wxConvWhateverWorks));
 }
 
 bool wxUnsetEnv(const wxString& variable)

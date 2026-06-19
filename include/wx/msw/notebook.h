@@ -81,8 +81,8 @@ public:
     // remove all pages
   bool DeleteAllPages() override;
 
-    // inserts a new page to the notebook (it will be deleted ny the notebook,
-    // don't delete it yourself). If bSelect, this page becomes active.
+    // inserts a new page to the notebook (it will be deleted by the notebook,
+    // don't delete it yourself). If bSelect is true,  this page becomes active.
   bool InsertPage(size_t nPage,
                   wxNotebookPage *pPage,
                   const wxString& strText,
@@ -127,12 +127,10 @@ public:
 
   virtual bool SetBackgroundColour(const wxColour& colour) override;
 
-#if wxUSE_UXTHEME
   // draw child background
   virtual bool MSWPrintChild(WXHDC hDC, wxWindow *win) override;
 
   virtual bool MSWHasInheritableBackground() const override { return true; }
-#endif // wxUSE_UXTHEME
 
   // translate wxWin styles to the Windows ones
   virtual WXDWORD MSWGetStyle(long flags, WXDWORD *exstyle = nullptr) const override;
@@ -140,6 +138,8 @@ public:
 protected:
   // common part of all ctors
   void Init();
+
+  virtual void MSWSetDarkOrLightMode(SetMode setmode) override;
 
   virtual int MSWGetToolTipMessage() const override;
 
@@ -161,7 +161,6 @@ protected:
   // set the size of the given page to fit in the notebook
   void AdjustPageSize(wxNotebookPage *page);
 
-#if wxUSE_UXTHEME
   virtual void MSWAdjustBrushOrg(int *xOrg, int* yOrg) const override
   {
       *xOrg -= m_bgBrushAdj.x;
@@ -177,26 +176,24 @@ protected:
 
   // creates the brush to be used for drawing the tab control background
   void UpdateBgBrush();
-#endif // wxUSE_UXTHEME
 
   // these function are used for reducing flicker on notebook resize
   void OnEraseBackground(wxEraseEvent& event);
   void OnPaint(wxPaintEvent& event);
 
-  // Paint the notebook ourselves on the provided DC.
-  void MSWNotebookPaint(wxDC& dc);
+  // Paint the notebook ourselves using wxPaintDC (so this can be only called
+  // from wxEVT_PAINT handler).
+  void MSWNotebookPaint();
 
 
   // true if we have already subclassed our updown control
   bool m_hasSubclassedUpdown;
 
-#if wxUSE_UXTHEME
   // background brush used to paint the tab control
   WXHBRUSH m_hbrBackground;
 
   // offset for MSWAdjustBrushOrg()
   wxPoint m_bgBrushAdj;
-#endif // wxUSE_UXTHEME
 
 private:
   // This function is used instead of TCM_HITTEST for implementing HitTest()

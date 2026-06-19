@@ -53,11 +53,13 @@ public:
 
     virtual WXDWORD MSWGetStyle(long style, WXDWORD *exstyle) const override;
 
+#if wxUSE_ACCESSIBILITY
+    virtual wxAccessible* CreateAccessible() override;
+#endif
+
 protected:
     virtual wxBorder GetDefaultBorder() const override { return wxBORDER_NONE; }
     virtual wxSize DoGetBestSize() const override;
-
-    virtual bool MSWGetDarkModeSupport(MSWDarkModeSupport& support) const override;
 
     // Implement wxMSWOwnerDrawnButtonBase methods.
     virtual int MSWGetButtonStyle() const override;
@@ -66,6 +68,7 @@ protected:
     virtual void
         MSWDrawButtonBitmap(wxDC& dc, const wxRect& rect, int flags) override;
 
+    virtual void MSWSetDarkOrLightMode(SetMode setmode) override;
 
 private:
     // common part of all ctors

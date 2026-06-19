@@ -15,12 +15,12 @@
 // ----------------------------------------------------------------------------
 
 #include "wx/object.h"
-#include "wx/list.h"
 #include "wx/filefn.h"
 #include "wx/versioninfo.h"
 #include "wx/meta/implicitconversion.h"
 
 #if wxUSE_GUI
+    #include "wx/busycursor.h"
     #include "wx/gdicmn.h"
     #include "wx/mousestate.h"
     #include "wx/vector.h"
@@ -47,8 +47,6 @@ class WXDLLIMPEXP_FWD_BASE wxArrayInt;
     #include <dirent.h>
     #include <unistd.h>
 #endif
-
-#include <stdio.h>
 
 #include <unordered_map>
 
@@ -107,11 +105,7 @@ wxClip(T1 a, T2 b, T3 c)
 // wxGetFreeMemory can return huge amount of memory on 32-bit platforms as well
 // so to always use long long for its result type on all platforms which
 // support it
-#if wxUSE_LONGLONG
-    typedef wxLongLong wxMemorySize;
-#else
-    typedef long wxMemorySize;
-#endif
+typedef wxLongLong wxMemorySize;
 
 // ----------------------------------------------------------------------------
 // Miscellaneous functions
@@ -125,7 +119,7 @@ WXDLLIMPEXP_CORE void wxBell();
 WXDLLIMPEXP_CORE void wxInfoMessageBox(wxWindow* parent);
 #endif // wxUSE_MSGDLG
 
-WXDLLIMPEXP_CORE wxVersionInfo wxGetLibraryVersionInfo();
+WXDLLIMPEXP_BASE wxVersionInfo wxGetLibraryVersionInfo();
 
 // Get OS description as a user-readable string
 WXDLLIMPEXP_BASE wxString wxGetOsDescription();
@@ -563,11 +557,7 @@ WXDLLIMPEXP_BASE const wxChar* wxGetHomeDir(wxString *pstr);
 WXDLLIMPEXP_BASE wxString wxGetUserHome(const wxString& user = wxEmptyString);
 
 
-#if wxUSE_LONGLONG
-    typedef wxLongLong wxDiskspaceSize_t;
-#else
-    typedef long wxDiskspaceSize_t;
-#endif
+typedef wxLongLong wxDiskspaceSize_t;
 
 // get number of total/free bytes on the disk where path belongs
 WXDLLIMPEXP_BASE bool wxGetDiskSpace(const wxString& path,
@@ -691,6 +681,19 @@ public:
     // ctor disables all windows except the given one(s)
     explicit wxWindowDisabler(wxWindow *winToSkip, wxWindow *winToSkip2 = nullptr);
 
+    // move ctor so we can put objects of this class in a container.
+    wxWindowDisabler(wxWindowDisabler&& other) noexcept
+        : m_windowsToSkip(std::move(other.m_windowsToSkip)),
+          m_disabled(other.m_disabled)
+    {
+        other.m_disabled = false;
+
+    #if defined(__WXOSX__) && wxOSX_USE_COCOA
+        m_modalEventLoop = other.m_modalEventLoop;
+        other.m_modalEventLoop = nullptr;
+    #endif
+    }
+
     // dtor enables back all windows disabled by the ctor
     ~wxWindowDisabler();
 
@@ -707,39 +710,15 @@ private:
     wxVector<wxWindow*> m_windowsToSkip;
     bool m_disabled;
 
+    // move assignment deleted as it doesn't make sense for this class
+    wxWindowDisabler& operator=(wxWindowDisabler&& other) = delete;
+
     wxDECLARE_NO_COPY_CLASS(wxWindowDisabler);
 };
 
 // ----------------------------------------------------------------------------
-// Cursors
+// Miscellaneous GUI functions
 // ----------------------------------------------------------------------------
-
-// Set the cursor to the busy cursor for all windows
-WXDLLIMPEXP_CORE void wxBeginBusyCursor(const wxCursor *cursor = wxHOURGLASS_CURSOR);
-
-// Restore cursor to normal
-WXDLLIMPEXP_CORE void wxEndBusyCursor();
-
-// true if we're between the above two calls
-WXDLLIMPEXP_CORE bool wxIsBusy();
-
-// Convenience class so we can just create a wxBusyCursor object on the stack
-class WXDLLIMPEXP_CORE wxBusyCursor
-{
-public:
-    wxBusyCursor(const wxCursor* cursor = wxHOURGLASS_CURSOR)
-        { wxBeginBusyCursor(cursor); }
-    ~wxBusyCursor()
-        { wxEndBusyCursor(); }
-
-    // FIXME: These two methods are currently only implemented (and needed?)
-    //        in wxGTK.  BusyCursor handling should probably be moved to
-    //        common code since the wxGTK and wxMSW implementations are very
-    //        similar except for wxMSW using HCURSOR directly instead of
-    //        wxCursor..  -- RL.
-    static const wxCursor &GetStoredCursor();
-    static const wxCursor GetBusyCursor();
-};
 
 void WXDLLIMPEXP_CORE wxGetMousePosition( int* x, int* y );
 

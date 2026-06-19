@@ -226,6 +226,11 @@ wxCursor::wxCursor()
 {
 }
 
+wxCursor::wxCursor(const wxBitmap& bitmap, int hotSpotX, int hotSpotY)
+{
+    InitFromBitmap(bitmap, hotSpotX, hotSpotY);
+}
+
 #if wxUSE_IMAGE
 wxCursor::wxCursor( const wxImage &image )
 {
@@ -253,15 +258,11 @@ WXHCURSOR wxCursor::GetHCURSOR() const
     return (M_CURSORDATA ? M_CURSORDATA->m_hCursor : nullptr);
 }
 
-#if wxUSE_IMAGE
-
-void wxCursor::InitFromImage(const wxImage & image)
+void wxCursor::InitFromBitmap(const wxBitmap& bmp, int hotSpotX, int hotSpotY)
 {
     m_refData = new wxCursorRefData;
-    int hotSpotX = image.GetOptionInt(wxIMAGE_OPTION_CUR_HOTSPOT_X);
-    int hotSpotY = image.GetOptionInt(wxIMAGE_OPTION_CUR_HOTSPOT_Y);
+
 #if wxOSX_USE_COCOA
-    wxBitmap bmp( image );
     CGImageRef cgimage = bmp.CreateCGImage();
     if ( cgimage )
     {
@@ -269,6 +270,15 @@ void wxCursor::InitFromImage(const wxImage & image)
         CFRelease( cgimage );
     }
 #endif
+}
+
+#if wxUSE_IMAGE
+
+void wxCursor::InitFromImage(const wxImage & image)
+{
+    int hotSpotX = image.GetOptionInt(wxIMAGE_OPTION_CUR_HOTSPOT_X);
+    int hotSpotY = image.GetOptionInt(wxIMAGE_OPTION_CUR_HOTSPOT_Y);
+    InitFromBitmap(image, hotSpotX, hotSpotY);
 }
 
 #endif //wxUSE_IMAGE
@@ -341,10 +351,21 @@ void wxCursor::MacInstall() const
 #endif
 }
 
+wxPoint wxCursor::GetHotSpot() const
+{
+#if wxOSX_USE_COCOA
+    if ( IsOk() )
+        return wxMacCocoaGetCursorHotSpot( M_CURSORDATA->m_hCursor );
+#endif
+
+    return wxDefaultPosition;
+}
+
 // Global cursor setting
 wxCursor gGlobalCursor;
-void wxSetCursor(const wxCursor& cursor)
+void wxSetCursor( const wxCursorBundle& cursors )
 {
+    wxCursor cursor = cursors.GetCursorForMainWindow();
     cursor.MacInstall() ;
     gGlobalCursor = cursor;
 }

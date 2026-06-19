@@ -76,7 +76,7 @@ public:
 
     // Implement this to make wxVariant::UnShare work. Returns
     // a copy of the data.
-    virtual wxVariantData* Clone() const { return nullptr; }
+    wxNODISCARD virtual wxVariantData* Clone() const { return nullptr; }
 
 #if wxUSE_ANY
     // Converts value to wxAny, if possible. Return true if successful.
@@ -295,7 +295,6 @@ public:
     void operator= (wxObject* value);
     wxObject* GetWxObjectPtr() const;
 
-#if wxUSE_LONGLONG
     // wxLongLong
     wxVariant(wxLongLong, const wxString& name = wxEmptyString);
     bool operator==(wxLongLong value) const;
@@ -311,7 +310,6 @@ public:
     void operator=(wxULongLong value);
     operator wxULongLong() const { return GetULongLong(); }
     wxULongLong GetULongLong() const;
-#endif
 
     // ------------------------------
     // list operations
@@ -359,10 +357,8 @@ public:
 #if wxUSE_DATETIME
     bool Convert(wxDateTime* value) const;
 #endif // wxUSE_DATETIME
-#if wxUSE_LONGLONG
     bool Convert(wxLongLong* value) const;
     bool Convert(wxULongLong* value) const;
-  #ifdef wxLongLong_t
     bool Convert(wxLongLong_t* value) const
     {
         wxLongLong temp;
@@ -379,13 +375,11 @@ public:
         *value = temp.GetValue();
         return true;
     }
-  #endif // wxLongLong_t
-#endif // wxUSE_LONGLONG
 
 // Attributes
 protected:
     virtual wxObjectRefData *CreateRefData() const override;
-    virtual wxObjectRefData *CloneRefData(const wxObjectRefData *data) const override;
+    wxNODISCARD virtual wxObjectRefData *CloneRefData(const wxObjectRefData *data) const override;
 
     wxString        m_name;
 
@@ -511,7 +505,7 @@ public:\
     virtual wxString GetType() const override; \
     virtual wxClassInfo* GetValueClassInfo() override; \
 \
-    virtual wxVariantData* Clone() const override { return new classname##VariantData(m_value); } \
+    wxNODISCARD virtual wxVariantData* Clone() const override { return new classname##VariantData(m_value); } \
 \
     DECLARE_WXANY_CONVERSION() \
 protected:\

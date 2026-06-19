@@ -10,6 +10,8 @@
 #ifndef _WX_DIALUP_H
 #define _WX_DIALUP_H
 
+#include "wx/defs.h"
+
 #if wxUSE_DIALUP_MANAGER
 
 #include "wx/event.h"
@@ -175,7 +177,7 @@ public:
     bool IsOwnEvent() const { return m_id != 0; }
 
     // implement the base class pure virtual
-    virtual wxEvent *Clone() const override { return new wxDialUpEvent(*this); }
+    wxNODISCARD virtual wxEvent *Clone() const override { return new wxDialUpEvent(*this); }
 
 private:
     wxDECLARE_NO_ASSIGN_DEF_COPY(wxDialUpEvent);

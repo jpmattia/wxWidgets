@@ -12,11 +12,11 @@
 
 #include "wx/defs.h"
 #include "wx/bmpbndl.h"
+#include "wx/event.h"
 #include "wx/icon.h"
 #include "wx/imaglist.h"
 #include "wx/vector.h"
-
-class WXDLLIMPEXP_FWD_CORE wxWindow;
+#include "wx/window.h"
 
 // ----------------------------------------------------------------------------
 // wxWithImages: mix-in for classes using indices for image access
@@ -49,7 +49,7 @@ public:
         if ( !m_images.empty() )
         {
             // Cast is safe, we don't risk having more than INT_MAX images.
-            return static_cast<int>(m_images.size());
+            return wxSsize(m_images);
         }
 
         return m_imageList ? m_imageList->GetImageCount() : 0;
@@ -183,33 +183,12 @@ public:
         return window->FromPhys(GetImageSize(window));
     }
 
-    // Return logical size of the image to use or (0, 0) if there are none.
-    wxSize GetImageLogicalSize(const wxWindow* window, int iconIndex) const
-    {
-        wxSize size;
-
-        if ( iconIndex != NO_IMAGE )
-        {
-            if ( !m_images.empty() )
-            {
-                size = m_images.at(iconIndex).GetPreferredLogicalSizeFor(window);
-            }
-            else if ( m_imageList )
-            {
-                // All images in the image list are of the same size.
-                size = window->FromPhys(m_imageList->GetSize());
-            }
-        }
-
-        return size;
-    }
-
     // Overload provided to facilitate transition from the existing code using
     // wxImageList::GetSize() -- don't use it in the new code.
-    void GetImageLogicalSize(const wxWindow* window, int iconIndex,
+    void GetImageLogicalSize(const wxWindow* window,
                              int& width, int& height) const
     {
-        const wxSize size = GetImageLogicalSize(window, iconIndex);
+        const wxSize size = GetImageLogicalSize(window);
         width = size.x;
         height = size.y;
     }
@@ -262,6 +241,15 @@ public:
     }
 
 protected:
+    // This is the same as HasImages() for all controls except for wxTreeCtrl
+    // which has a special "state image list" in addition to the normal one and
+    // this function takes it into account, unlike HasImages() itself, which
+    // doesn't and can't be modified to do so for compatibility reasons.
+    virtual bool HasAnyImages() const
+    {
+        return HasImages();
+    }
+
     // This function is called when the images associated with the control
     // change, due to either SetImages() or SetImageList() being called.
     //
@@ -274,7 +262,7 @@ protected:
     // and simply calls OnImagesChanged() to refresh the images when it happens.
     void WXHandleDPIChanged(wxDPIChangedEvent& event)
     {
-        if ( HasImages() )
+        if ( HasAnyImages() )
             OnImagesChanged();
 
         event.Skip();

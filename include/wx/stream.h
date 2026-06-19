@@ -14,7 +14,6 @@
 
 #if wxUSE_STREAMS
 
-#include <stdio.h>
 #include "wx/object.h"
 #include "wx/string.h"
 #include "wx/filefn.h"  // for wxFileOffset, wxInvalidOffset and wxSeekMode
@@ -134,6 +133,10 @@ public:
     // copy the entire contents of this stream into streamOut, stopping only
     // when EOF is reached or an error occurs
     wxInputStream& Read(wxOutputStream& streamOut);
+
+    // copy the entire contents of this stream into buffer, stopping only
+    // when EOF is reached or an error occurs
+    bool Read(std::vector<wxUint8>& buffer);
 
 
     // status functions

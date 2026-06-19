@@ -23,6 +23,7 @@
 #include "wx/string.h"
 #include "wx/private/bmpbndl.h"
 #include "wx/osx/private.h"
+#include "wx/osx/private/available.h"
 
 //
 // controller
@@ -86,7 +87,20 @@
     if (!initialized)
     {
         initialized = YES;
-        wxOSXCocoaClassAddWXMethods( self );
+
+        // On macOS 26 Tahoe, the mere presence of drawRect: in derived class,
+        // even if it just calls super's implementation, triggers legacy
+        // rendering of NSTabView.
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_VERSION_26_0
+        if (WX_IS_MACOS_AVAILABLE(26, 0))
+        {
+            wxOSXCocoaClassAddWXMethods(self, wxOSXSKIP_DRAW);
+        }
+        else
+#endif
+        {
+            wxOSXCocoaClassAddWXMethods(self);
+        }
     }
 }
 
@@ -224,7 +238,7 @@ public:
             return [slf indexOfTabViewItem:selectedItem]+1;
     }
 
-    void SetMaximum( wxInt32 maximum ) override
+    void SetupTabs( const wxNotebook& notebook) override
     {
         wxNSTabView* slf = (wxNSTabView*) m_osxView;
         int cocoacount = [slf numberOfTabViewItems ];
@@ -232,11 +246,23 @@ public:
         wxTabViewController* controller = [slf delegate];
         [slf setDelegate:nil];
 
+        // Update the existing pages in case their label or image changed.
+        const int maximum = notebook.GetPageCount();
+        for ( int i = 0; i < wxMin(maximum, cocoacount); ++i )
+        {
+            SetupTabItem(notebook, i,
+                         [(wxNSTabView*) m_osxView tabViewItemAtIndex:i]);
+
+        }
+
+        // Next also add new pages or delete the no more existing ones.
         if ( maximum > cocoacount )
         {
             for ( int i = cocoacount ; i < maximum ; ++i )
             {
                 NSTabViewItem* item = [[WXCTabViewImageItem alloc] init];
+                SetupTabItem(notebook, i, item);
+
                 [slf addTabViewItem:item];
                 [item release];
             }
@@ -252,38 +278,16 @@ public:
         [slf setDelegate:controller];
     }
 
-    void SetupTabs( const wxNotebook& notebook) override
-    {
-        int pcount = notebook.GetPageCount();
-
-        SetMaximum( pcount );
-
-        for ( int i = 0 ; i < pcount ; ++i )
-        {
-            wxNotebookPage* page = notebook.GetPage(i);
-            NSTabViewItem* item = [(wxNSTabView*) m_osxView tabViewItemAtIndex:i];
-            [item setView:page->GetHandle() ];
-            wxCFStringRef cf( page->GetLabel() );
-            [item setLabel:cf.AsNSString()];
-
-            const wxBitmapBundle bitmap = notebook.GetPageBitmapBundle(i);
-            if ( bitmap.IsOk() )
-            {
-                [(WXCTabViewImageItem*) item setImage: wxOSXGetImageFromBundle(bitmap)];
-            }
-        }
-    }
-
     int TabHitTest(const wxPoint & pt, long* flags) override
     {
         int retval = wxNOT_FOUND;
-        
+
         NSPoint nspt = wxToNSPoint( m_osxView, pt );
-        
+
         wxNSTabView* slf = (wxNSTabView*) m_osxView;
-        
+
         NSTabViewItem* hitItem = [slf tabViewItemAtPoint:nspt];
-        
+
         if (!hitItem) {
             if ( flags )
                 *flags = wxBK_HITTEST_NOWHERE;
@@ -292,8 +296,23 @@ public:
             if ( flags )
                 *flags = wxBK_HITTEST_ONLABEL;
         }
-        
-        return retval; 
+
+        return retval;
+    }
+
+private:
+    void SetupTabItem(const wxNotebook& notebook, int i, NSTabViewItem* item)
+    {
+        wxNotebookPage* page = notebook.GetPage(i);
+        [item setView:page->GetHandle() ];
+        wxCFStringRef cf( wxControl::RemoveMnemonics(notebook.GetPageText(i)) );
+        [item setLabel:cf.AsNSString()];
+
+        const wxBitmapBundle bitmap = notebook.GetPageBitmapBundle(i);
+        if ( bitmap.IsOk() )
+        {
+            [(WXCTabViewImageItem*) item setImage: wxOSXGetImageFromBundle(bitmap)];
+        }
     }
 };
 

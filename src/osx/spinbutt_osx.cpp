@@ -13,6 +13,7 @@
 
 #include "wx/spinbutt.h"
 #include "wx/osx/private.h"
+#include "wx/osx/private/available.h"
 
 
 wxSpinButton::wxSpinButton()
@@ -23,7 +24,7 @@ wxSpinButton::wxSpinButton()
 bool wxSpinButton::Create( wxWindow *parent,
     wxWindowID id, const wxPoint& pos, const wxSize& size,
     long style, const wxString& name )
-{    
+{
     DontCreatePeer();
     if ( !wxSpinButtonBase::Create( parent, id, pos, size, style, wxDefaultValidator, name ) )
         return false;
@@ -80,7 +81,16 @@ bool wxSpinButton::OSXHandleClicked( double WXUNUSED(timestampsec) )
 
 wxSize wxSpinButton::DoGetBestSize() const
 {
-    return wxSize( 16, 24 );
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_VERSION_26_0
+    if ( WX_IS_MACOS_AVAILABLE(26, 0) )
+    {
+        return wxSize(21, 28);
+    }
+    else
+#endif
+    {
+        return wxSize(13, 22);
+    }
 }
 
 void wxSpinButton::TriggerScrollEvent(wxEventType scrollEvent)
@@ -136,7 +146,7 @@ void wxSpinButton::TriggerScrollEvent(wxEventType scrollEvent)
 
     SetValue( newValue );
 
-    // send a thumbtrack event if EVT_SPIN_UP/DOWN wasn't vetoed 
+    // send a thumbtrack event if EVT_SPIN_UP/DOWN wasn't vetoed
     if ( newValue != oldValue )
         SendThumbTrackEvent() ;
 }

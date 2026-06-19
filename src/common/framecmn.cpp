@@ -28,7 +28,10 @@
     #include "wx/dcclient.h"
     #include "wx/toolbar.h"
     #include "wx/statusbr.h"
+    #include "wx/utils.h"
 #endif // WX_PRECOMP
+
+#include <stack>
 
 extern WXDLLEXPORT_DATA(const char) wxFrameNameStr[] = "frame";
 extern WXDLLEXPORT_DATA(const char) wxStatusLineNameStr[] = "status_line";
@@ -48,23 +51,18 @@ wxBEGIN_EVENT_TABLE(wxFrameBase, wxTopLevelWindow)
 #endif // wxUSE_STATUSBAR
 wxEND_EVENT_TABLE()
 
-/* static */
-bool wxFrameBase::ShouldUpdateMenuFromIdle()
-{
-    // Usually this is determined at compile time and is determined by whether
-    // the platform supports wxEVT_MENU_OPEN, however in wxGTK we need to also
-    // check if we're using the global menu bar as we don't get EVT_MENU_OPEN
-    // for it and need to fall back to idle time updating even if normally
-    // wxUSE_IDLEMENUUPDATES is set to 0 for wxGTK.
-#ifdef __WXGTK__
-    if ( wxApp::GTKIsUsingGlobalMenu() )
-        return true;
-#endif // !__WXGTK__
-
-    return wxUSE_IDLEMENUUPDATES != 0;
-}
-
 #endif // wxUSE_MENUS
+
+// ----------------------------------------------------------------------------
+// globals
+// ----------------------------------------------------------------------------
+namespace
+{
+// Global stack used to track all active wxWindowDisablers for the wxFrames
+// currently shown modally (those with wxWindowMode::AppModal flag).
+// E.g.: a frame shown modally from another modal frame.
+std::stack<wxWindowDisabler> gs_windowDisablers;
+} // anonymous namespace
 
 // ============================================================================
 // implementation
@@ -144,19 +142,41 @@ wxCONSTRUCTOR_6( wxFrame, wxWindow*, Parent, wxWindowID, Id, wxString, Title, \
 
 wxFrameBase::wxFrameBase()
 {
-#if wxUSE_MENUBAR
-    m_frameMenuBar = nullptr;
-#endif // wxUSE_MENUS
+#ifndef __WXQT__
+    // To avoid keeping other windows disabled longer than necessary, connect
+    // to the wxEVT_SHOW event. This allows us to end the frame's modality as
+    // soon as it becomes hidden, rather than when it is actually destroyed
+    // (which typically occurs during the next event loop iteration for TLWs)
+    Bind(wxEVT_SHOW, [this](wxShowEvent& event)
+        {
+            event.Skip();
 
-#if wxUSE_TOOLBAR
-    m_frameToolBar = nullptr;
-#endif // wxUSE_TOOLBAR
+            if ( !event.IsShown() )
+            {
+                switch ( m_modality )
+                {
+                    case wxWindowMode::AppModal:
+                        if ( !gs_windowDisablers.empty() )
+                        {
+                            gs_windowDisablers.pop();
+                            break;
 
-#if wxUSE_STATUSBAR
-    m_frameStatusBar = nullptr;
-#endif // wxUSE_STATUSBAR
+                        }
 
-    m_statusBarPane = 0;
+                        wxFAIL_MSG("Must have wxWindowDisabler if app modal");
+                        break;
+
+                    case wxWindowMode::WindowModal:
+                        if ( GetParent() )
+                            GetParent()->Enable();
+                        break;
+
+                    case wxWindowMode::Normal:
+                        break;
+                }
+            }
+        });
+#endif // __WXQT__
 }
 
 wxFrameBase::~wxFrameBase()
@@ -246,6 +266,62 @@ wxPoint wxFrameBase::GetClientAreaOrigin() const
     return pt;
 }
 
+void wxFrameBase::RemoveChild(wxWindowBase *child)
+{
+#if wxUSE_STATUSBAR
+    if ( child == m_frameStatusBar )
+    {
+        m_frameStatusBar = nullptr;
+    }
+#endif // wxUSE_STATUSBAR
+
+#if wxUSE_TOOLBAR
+    if ( child == m_frameToolBar )
+    {
+        m_frameToolBar = nullptr;
+    }
+#endif // wxUSE_STATUSBAR
+
+    wxTopLevelWindow::RemoveChild(child);
+}
+
+void wxFrameBase::SetWindowModality(wxWindowMode modality)
+{
+    wxCHECK_RET( !IsShown(),
+                 "SetWindowModality() must be called before showing the window" );
+
+    m_modality = modality;
+
+    bool isModal = false;
+    switch ( m_modality )
+    {
+        case wxWindowMode::AppModal:
+            // Disable everything for this frame.
+            gs_windowDisablers.emplace(wxWindowDisabler( this ));
+            isModal = true;
+            break;
+
+        case wxWindowMode::WindowModal:
+            // Disable our parent if we have one.
+            if ( GetParent() )
+                GetParent()->Disable();
+            isModal = true;
+            break;
+
+        case wxWindowMode::Normal:
+            // Nothing to do, we don't need to disable any window.
+            break;
+    }
+
+    if ( isModal )
+    {
+        // Behave like modal dialogs, don't show in taskbar. This implies
+        // removing the minimize box, because minimizing windows without
+        // taskbar entry is confusing.
+        SetWindowStyle((GetWindowStyle() & ~wxMINIMIZE_BOX) | wxFRAME_NO_TASKBAR);
+    }
+}
+
 // ----------------------------------------------------------------------------
 // misc
 // ----------------------------------------------------------------------------
@@ -326,6 +402,22 @@ void wxFrameBase::UpdateWindowUI(long flags)
 
 #if wxUSE_MENUS
 
+/* static */
+bool wxFrameBase::ShouldUpdateMenuFromIdle()
+{
+    // Usually this is determined at compile time and is determined by whether
+    // the platform supports wxEVT_MENU_OPEN, however in wxGTK we need to also
+    // check if we're using the global menu bar as we don't get EVT_MENU_OPEN
+    // for it and need to fall back to idle time updating even if normally
+    // wxUSE_IDLEMENUUPDATES is set to 0 for wxGTK.
+#ifdef __WXGTK__
+    if ( wxApp::GTKIsUsingGlobalMenu() )
+        return true;
+#endif // !__WXGTK__
+
+    return wxUSE_IDLEMENUUPDATES != 0;
+}
+
 void wxFrameBase::OnMenuOpen(wxMenuEvent& event)
 {
     event.Skip();
@@ -343,7 +435,14 @@ void wxFrameBase::OnMenuHighlight(wxMenuEvent& event)
 {
     event.Skip();
 
-    (void)ShowMenuHelp(event.GetMenuId());
+    if ( wxMenuItem* menuItem = event.GetMenuItem() )
+    {
+        DoGiveHelp(menuItem->GetHelp(), true);
+    }
+    else
+    {
+        (void)ShowMenuHelp(event.GetMenuId());
+    }
 }
 
 void wxFrameBase::OnMenuClose(wxMenuEvent& event)

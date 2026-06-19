@@ -24,7 +24,7 @@
 // Objective C++, but it's also still compiled by the makefiles directly as C++
 // source because we can't easily exclude it, so check for this and only
 // compile the rest of this file once
-#if !defined(__WXOSX_COCOA__) || defined(__OBJC__)
+#if !defined(__DARWIN__) || defined(__OBJC__)
 
 // for all others, include the necessary headers
 #ifndef WX_PRECOMP
@@ -250,7 +250,7 @@ public:
 class NativeWidgetsPage : public WidgetsPage
 {
 public:
-    NativeWidgetsPage(WidgetsBookCtrl *book, wxImageList *imaglist);
+    NativeWidgetsPage(WidgetsBookCtrl *book, wxVector<wxBitmapBundle>& imaglist);
 
     virtual wxWindow *GetWidget() const override { return m_nativeWindow; }
     virtual void RecreateWidget() override;
@@ -275,7 +275,7 @@ private:
 
 IMPLEMENT_WIDGETS_PAGE(NativeWidgetsPage, "Native", NATIVE_CTRLS);
 
-NativeWidgetsPage::NativeWidgetsPage(WidgetsBookCtrl *book, wxImageList *imaglist)
+NativeWidgetsPage::NativeWidgetsPage(WidgetsBookCtrl *book, wxVector<wxBitmapBundle>& imaglist)
                  : WidgetsPage(book, imaglist, native_xpm)
 {
     m_nativeWindow = nullptr;

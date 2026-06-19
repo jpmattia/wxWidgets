@@ -146,8 +146,8 @@ bool wxButtonToolBar::Create(wxWindow *parent,
     {
         wxInfoDC dc(this);
         dc.SetFont(font);
-        int w, h;
-        dc.GetTextExtent(wxT("X"), & w, & h);
+        int h;
+        dc.GetTextExtent(wxT("X"), nullptr, &h);
         m_labelHeight = h;
     }
     return true;
@@ -409,12 +409,11 @@ void wxButtonToolBar::DoLayout()
                     if (!tool->GetShortHelp().empty())
                     {
                         wxInfoDC dc(this);
-                        dc.SetFont(GetFont());
-                        int tw, th;
-                        dc.GetTextExtent(tool->GetShortHelp(), & tw, & th);
+                        int tw;
+                        dc.GetTextExtent(tool->GetShortHelp(), &tw, nullptr);
 
                         // If the label is bigger than the icon, the label width
-                        // becomes the new tool width, and we need to centre the
+                        // becomes the new tool width, and we need to centre
                         // the bitmap in this box.
                         if (tw > sz.x)
                         {
@@ -495,7 +494,6 @@ void wxButtonToolBar::OnPaint(wxPaintEvent& WXUNUSED(event))
 {
     wxPaintDC dc(this);
 
-    dc.SetFont(GetFont());
     dc.SetBackgroundMode(wxBRUSHSTYLE_TRANSPARENT);
 
     for ( wxToolBarToolsList::compatibility_iterator node = m_tools.GetFirst();
@@ -517,9 +515,6 @@ void wxButtonToolBar::OnPaint(wxPaintEvent& WXUNUSED(event))
 
         if (m_labelHeight > 0 && !tool->GetShortHelp().empty())
         {
-            int tw, th;
-            dc.GetTextExtent(tool->GetShortHelp(), & tw, & th);
-
             int x = tool->m_x;
             dc.DrawText(tool->GetShortHelp(), x, tool->m_y + tool->GetButton()->GetSize().y + m_labelMargin);
         }
@@ -545,10 +540,10 @@ void wxButtonToolBar::OnLeftUp(wxMouseEvent& event)
         wxButtonToolBarTool* tool = (wxButtonToolBarTool*) FindToolForPosition(event.GetX(), event.GetY());
         if (tool && tool->GetButton() && (event.GetY() > (tool->m_y + tool->GetButton()->GetSize().y)))
         {
-            wxCommandEvent event(wxEVT_BUTTON, tool->GetId());
-            event.SetEventObject(tool->GetButton());
-            if (!GetEventHandler()->ProcessEvent(event))
-                event.Skip();
+            wxCommandEvent evt(wxEVT_BUTTON, tool->GetId());
+            evt.SetEventObject(tool->GetButton());
+            if (!GetEventHandler()->ProcessEvent(evt))
+                evt.Skip();
         }
     }
 }

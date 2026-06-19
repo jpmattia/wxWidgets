@@ -24,6 +24,7 @@
 #ifndef WX_PRECOMP
     #include "wx/dynarray.h"
     #include "wx/log.h"
+    #include "wx/math.h"
     #include "wx/string.h"
     #include "wx/gdicmn.h"
     #include "wx/nonownedwnd.h"
@@ -105,6 +106,7 @@ public:
     virtual wxRect GetClientArea() const override;
     virtual int GetDepth() const override;
     virtual double GetScaleFactor() const override;
+    virtual wxSize GetRawPPI() const override;
 
     virtual wxArrayVideoModes GetModes(const wxVideoMode& mode) const override;
     virtual wxVideoMode GetCurrentMode() const override;
@@ -310,6 +312,21 @@ double wxDisplayImplMacOSX::GetScaleFactor() const
     return wxGetScaleFactor(m_id);
 }
 
+wxSize wxDisplayImplMacOSX::GetRawPPI() const
+{
+    auto const sizeInMM = CGDisplayScreenSize(m_id);
+
+    // Don't use manifestly invalid values.
+    if ( sizeInMM.width <= 0 && sizeInMM.height <= 0 )
+        return wxDisplay::GetStdPPI();
+
+    const wxRect geometry = GetGeometry();
+    const double ppiX = geometry.width * 25.4 / sizeInMM.width;
+    const double ppiY = geometry.height * 25.4 / sizeInMM.height;
+
+    return wxSize(wxRound(ppiX), wxRound(ppiY));
+}
+
 static int wxOSXCGDisplayModeGetBitsPerPixel( CGDisplayModeRef theValue )
 {
     wxCFRef<CFStringRef> pixelEncoding( CGDisplayModeCopyPixelEncoding(theValue) );
@@ -320,7 +337,7 @@ static int wxOSXCGDisplayModeGetBitsPerPixel( CGDisplayModeRef theValue )
         depth = 16;
     else if ( CFStringCompare( pixelEncoding, CFSTR(IO8BitIndexedPixels) , kCFCompareCaseInsensitive) == kCFCompareEqualTo )
         depth = 8;
-    
+
     return depth;
 }
 
@@ -329,17 +346,17 @@ wxArrayVideoModes wxDisplayImplMacOSX::GetModes(const wxVideoMode& mode) const
     wxArrayVideoModes resultModes;
 
     wxCFRef<CFArrayRef> theArray(CGDisplayCopyAllDisplayModes( m_id ,nullptr ) );
-    
-    for (CFIndex i = 0; i < CFArrayGetCount(theArray); ++i)
+    const CFIndex count = theArray ? CFArrayGetCount(theArray) : 0;
+    for (CFIndex i = 0; i < count; ++i)
     {
         CGDisplayModeRef theValue = static_cast<CGDisplayModeRef>(const_cast<void*>(CFArrayGetValueAtIndex(theArray, i)));
-        
+
         wxVideoMode theMode(
                             CGDisplayModeGetWidth(theValue),
                             CGDisplayModeGetHeight(theValue),
                             wxOSXCGDisplayModeGetBitsPerPixel(theValue),
                             int(CGDisplayModeGetRefreshRate(theValue)));
-        
+
         if (theMode.Matches( mode ))
             resultModes.Add( theMode );
     }
@@ -350,7 +367,7 @@ wxArrayVideoModes wxDisplayImplMacOSX::GetModes(const wxVideoMode& mode) const
 wxVideoMode wxDisplayImplMacOSX::GetCurrentMode() const
 {
     wxCFRef<CGDisplayModeRef> theValue( CGDisplayCopyDisplayMode( m_id ) );
-    
+
     return wxVideoMode(
                        CGDisplayModeGetWidth(theValue),
                        CGDisplayModeGetHeight(theValue),
@@ -370,20 +387,20 @@ bool wxDisplayImplMacOSX::ChangeMode( const wxVideoMode& mode )
 
     wxCHECK_MSG( mode.GetWidth() && mode.GetHeight(), false,
                 wxT("at least the width and height must be specified") );
-    
+
     bool bOK = false;
     wxCFRef<CFArrayRef> theArray(CGDisplayCopyAllDisplayModes( m_id ,nullptr ) );
-    
+
     for (CFIndex i = 0; i < CFArrayGetCount(theArray); ++i)
     {
         CGDisplayModeRef theValue = static_cast<CGDisplayModeRef>(const_cast<void*>(CFArrayGetValueAtIndex(theArray, i)));
-        
+
         wxVideoMode theMode(
                             CGDisplayModeGetWidth(theValue),
                             CGDisplayModeGetHeight(theValue),
                             wxOSXCGDisplayModeGetBitsPerPixel(theValue),
                             int(CGDisplayModeGetRefreshRate(theValue)));
-        
+
         if ( theMode.GetWidth() == mode.GetWidth() && theMode.GetHeight() == mode.GetHeight() &&
             ( mode.GetDepth() == 0 || theMode.GetDepth() == mode.GetDepth() ) &&
             ( mode.GetRefresh() == 0 || theMode.GetRefresh() == mode.GetRefresh() ) )
@@ -393,7 +410,7 @@ bool wxDisplayImplMacOSX::ChangeMode( const wxVideoMode& mode )
             break;
         }
     }
-    
+
     return bOK;
 }
 

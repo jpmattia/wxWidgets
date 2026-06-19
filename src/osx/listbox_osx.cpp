@@ -72,9 +72,6 @@ bool wxListBox::Create(
     DontCreatePeer();
     m_blockEvents = false;
 
-    if ( ! (style & wxNO_BORDER) )
-        style = (style & ~wxBORDER_MASK) | wxSUNKEN_BORDER ;
-
     wxASSERT_MSG( !(style & wxLB_MULTIPLE) || !(style & wxLB_EXTENDED),
                   wxT("only a single listbox selection mode can be specified") );
 
@@ -131,10 +128,10 @@ void wxListBox::FreeData()
 
 void wxListBox::DoSetFirstItem(int n)
 {
-    // osx actually only has an implementation for ensuring the visibility of a row, it does so  
+    // osx actually only has an implementation for ensuring the visibility of a row, it does so
     // by scrolling the minimal amount necessary from the current scrolling position.
-    // in order to get the same behaviour I'd have to make sure first that the last line is visible, 
-    // followed by a scrollRowToVisible for the desired line 
+    // in order to get the same behaviour I'd have to make sure first that the last line is visible,
+    // followed by a scrollRowToVisible for the desired line
     GetListPeer()->ListScrollTo( GetCount()-1 );
     GetListPeer()->ListScrollTo( n );
 }
@@ -255,15 +252,14 @@ wxSize wxListBox::DoGetBestSize() const
 
     {
         wxInfoDC dc(const_cast<wxListBox*>(this));
-        dc.SetFont(GetFont());
 
         // Find the widest line
         for (unsigned int i = 0; i < GetCount(); i++)
         {
             wxString str( GetString( i ) );
 
-            wxCoord width, height ;
-            dc.GetTextExtent( str , &width, &height);
+            wxCoord width;
+            dc.GetTextExtent(str, &width, nullptr);
             lbWidth = wxMax( lbWidth, width );
         }
 
@@ -273,8 +269,8 @@ wxSize wxListBox::DoGetBestSize() const
         // And just a bit more
         int cy = 12;
 
-        wxCoord width, height ;
-        dc.GetTextExtent( wxT("XX") , &width, &height);
+        wxCoord width;
+        dc.GetTextExtent(wxT("XX"), &width, nullptr);
         int cx = width ;
         lbWidth += cx;
 

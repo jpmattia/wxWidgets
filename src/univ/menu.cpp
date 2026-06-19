@@ -450,7 +450,7 @@ void wxPopupMenuWindow::Popup(wxWindow *focus)
         // if we're shown, the parent menu must be also shown
         wxCHECK_RET( win, wxT("parent menu is not shown?") );
 
-        if ( !::SetWindowPos(GetHwndOf(win), GetHwnd(),
+        if ( !::SetWindowPos(GetHwnd(), GetHwndOf(win),
                              0, 0, 0, 0,
                              SWP_NOMOVE | SWP_NOSIZE | SWP_NOREDRAW) )
         {
@@ -1297,7 +1297,7 @@ void wxMenu::Attach(wxMenuBarBase *menubar)
 
     // unfortunately, we can't use m_menuBar->GetEventHandler() here because,
     // if the menubar is currently showing a menu, its event handler is a
-    // temporary one installed by wxPopupWindow and so will disappear soon any
+    // temporary one installed by wxPopupWindow and so will disappear soon and
     // any attempts to use it from the newly attached menu would result in a
     // crash
     //

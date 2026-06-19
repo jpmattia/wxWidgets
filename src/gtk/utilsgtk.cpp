@@ -19,7 +19,6 @@
 
 #include "wx/apptrait.h"
 #include "wx/process.h"
-#include "wx/sysopt.h"
 #include "wx/vector.h"
 
 #include "wx/gtk/private/timer.h"
@@ -27,6 +26,10 @@
 
 #include "wx/gtk/private/wrapgdk.h"
 #include "wx/gtk/private/backend.h"
+#include "wx/gtk/private/error.h"
+#include "wx/gtk/private/object.h"
+
+#include <gio/gio.h>
 
 #if wxDEBUG_LEVEL
     #include "wx/gtk/assertdlg_gtk.h"
@@ -42,12 +45,6 @@
 #include <sys/types.h>
 #ifdef __UNIX__
 #include <unistd.h>
-#endif
-
-#if wxUSE_DETECT_SM
-    #include <X11/SM/SMlib.h>
-
-    #include "wx/unix/utilsx11.h"
 #endif
 
 GdkWindow* wxGetTopLevelGDK();
@@ -165,6 +162,13 @@ wxPortId wxGUIAppTraits::GetToolkitVersion(int *verMaj,
     return wxPORT_GTK;
 }
 
+wxString wxGUIAppTraits::GetPlatformDescription() const {
+    return wxString::Format("Compile-time GTK+ version is %d.%d.%d.\n",
+                            GTK_MAJOR_VERSION,
+                            GTK_MINOR_VERSION,
+                            GTK_MICRO_VERSION);
+}
+
 #if wxUSE_TIMER
 
 wxTimerImpl *wxGUIAppTraits::CreateTimerImpl(wxTimer *timer)
@@ -173,42 +177,6 @@ wxTimerImpl *wxGUIAppTraits::CreateTimerImpl(wxTimer *timer)
 }
 
 #endif // wxUSE_TIMER
-
-#if wxUSE_DETECT_SM
-static wxString GetSM()
-{
-    wxX11Display dpy;
-    if ( !dpy )
-        return wxEmptyString;
-
-    char smerr[256];
-    char *client_id;
-    SmcConn smc_conn = SmcOpenConnection(nullptr, nullptr,
-                                         999, 999,
-                                         0 /* mask */, nullptr /* callbacks */,
-                                         nullptr, &client_id,
-                                         WXSIZEOF(smerr), smerr);
-
-    if ( !smc_conn )
-    {
-        // Don't report error if there is no session manager at all
-        if (getenv("SESSION_MANAGER"))
-        {
-            wxLogDebug("Failed to connect to session manager: %s", smerr);
-        }
-        return wxEmptyString;
-    }
-
-    char *vendor = SmcVendor(smc_conn);
-    wxString ret = wxString::FromAscii( vendor );
-    free(vendor);
-
-    SmcCloseConnection(smc_conn, 0, nullptr);
-    free(client_id);
-
-    return ret;
-}
-#endif // wxUSE_DETECT_SM
 
 
 //-----------------------------------------------------------------------------
@@ -370,41 +338,19 @@ bool wxGUIAppTraits::ShowAssertDialog(const wxString& msg)
     return wxAppTraitsBase::ShowAssertDialog(msg);
 }
 
-#endif // __UNIX__
-
-#if defined(__UNIX__)
-
-wxString wxGUIAppTraits::GetDesktopEnvironment() const
+bool wxMoveToTrash(const wxString& path)
 {
-    wxString de = wxSystemOptions::GetOption(wxT("gtk.desktop"));
-    if (!de.empty())
-        return de;
+    wxGtkError err;
+    wxGtkObject<GFile> file(g_file_new_for_path(path.utf8_str()));
 
-    de = wxGetenv(wxS("XDG_CURRENT_DESKTOP"));
-    if (!de.empty())
+    bool ok = g_file_trash(file, nullptr, err.Out());
+    if ( !ok )
     {
-        // Can be a colon separated list according to
-        // https://wiki.archlinux.org/title/Environment_variables#Examples
-        de = de.BeforeFirst(':');
+        wxLogError(_("'%s' couldn't be moved to trash: %s"),
+                   path, err ? err.GetMessage() : _("unknown error"));
     }
-#if wxUSE_DETECT_SM
-    if ( de.empty() )
-    {
-        static const wxString s_SM(GetSM());
-        de = s_SM;
-        de.Replace(wxS("-session"), wxString());
-    }
-#endif // wxUSE_DETECT_SM
 
-    de.MakeUpper();
-    if (de.Contains(wxS("GNOME")))
-        de = wxS("GNOME");
-    else if (de.Contains(wxS("KDE")))
-        de = wxS("KDE");
-    else if (de.Contains(wxS("XFCE")))
-        de = wxS("XFCE");
-
-    return de;
+    return ok;
 }
 
 #endif // __UNIX__

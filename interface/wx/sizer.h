@@ -337,6 +337,46 @@ public:
     virtual wxSize CalcMin() = 0;
 
     /**
+        May be overridden by sizers whose minimal size depends on the layout
+        direction.
+
+        It may be useful to override it if the sizer minimal size varies
+        depending on its size in some direction. For example, wxWrapSizer uses
+        it to determine the smallest size it can use and still show all of its
+        items when the size in some direction is fixed, e.g. it returns the
+        width of the widest control when @a direction is wxVERTICAL or the
+        total height of all controls wrapped at the given width when @a
+        direction is wxHORIZONTAL.
+
+        If the sizer minimal size doesn't depend on the size known in the given
+        direction, this function should return wxDefaultSize to avoid
+        unnecessary re-layouts.
+
+        The default implementation simply returns wxDefaultSize (after calling
+        InformFirstDirection() for backward compatibility).
+
+        @param direction
+            The direction in which the size is fixed, either ::wxHORIZONTAL or
+            ::wxVERTICAL.
+        @param size
+            The size in the direction given by the @a direction parameter,
+            always valid, i.e. positive.
+        @param availableOtherDir
+            The size available in the other direction, may be -1 if the
+            available size is not known.
+        @return
+            The minimal size of the sizer when its size in the given
+            @a direction is fixed to @a size or ::wxDefaultSize if the minimum
+            size doesn't depend on the layout direction and is always the same.
+
+        @since 3.3.2
+    */
+    virtual wxSize
+    CalcMinSizeFromKnownDirection(int direction,
+                                  int size,
+                                  int availableOtherDir);
+
+    /**
         Detaches all children from the sizer.
 
         If @a delete_windows is @true then child windows will also be deleted.
@@ -400,15 +440,38 @@ public:
     virtual bool Detach(wxSizer* sizer);
 
     /**
-        Detach an item at position @a index from the sizer without destroying it.
+        Detach the child sizer or window in item at position @a index without
+        destroying the child object.
 
         This method does not cause any layout or resizing to take place, call Layout()
         to update the layout "on screen" after detaching a child from the sizer.
+
         Returns @true if the child item was found and detached, @false otherwise.
+
+        Note that the sizer item containing the child sizer or window is
+        deleted by this function, see DetachItem() if you want to prevent this
+        from happening.
 
         @see Remove()
     */
     virtual bool Detach(int index);
+
+    /**
+        Detach the item at position @a index without destroying it.
+
+        This method does not cause any layout or resizing to take place, call Layout()
+        to update the layout "on screen" after detaching a child from the sizer.
+
+        Returns the item if it was found and detached, @nullptr otherwise.
+
+        The caller takes ownership of the returned pointer, i.e. must either
+        delete it or add it back to this or another sizer later.
+
+        @see Remove(), Add()
+
+        @since 3.3.3
+     */
+    virtual wxSizerItem *DetachItem(size_t index);
 
     /**
         Tell the sizer to resize the @a window so that its client area matches the
@@ -433,9 +496,10 @@ public:
     void FitInside(wxWindow* window);
 
     /**
-       Inform sizer about the first direction that has been decided (by
-       parent item).  Returns true if it made use of the information (and
-       recalculated min size).
+        Compatibility function called by CalcMinSizeFromKnownDirection().
+
+        This function shouldn't be used in the new code, please override
+        CalcMinSizeFromKnownDirection() instead.
     */
     virtual bool InformFirstDirection(int direction, int size, int availableOtherDir);
 
@@ -1042,6 +1106,46 @@ public:
     void Realize();
 
     /**
+        Returns the affirmative button for the sizer.
+
+        Affirmative buttons are those added with ID @c wxID_OK, @c wxID_YES
+        or @c wxID_SAVE. They can have other ID if they were added calling
+        wxStdDialogButtonSizer::SetAffirmativeButton.
+    */
+    wxButton* GetAffirmativeButton() const;
+
+    /**
+        Returns the apply button for the sizer.
+
+        Apply buttons are those added with ID @c wxID_APPLY.
+    */
+    wxButton* GetApplyButton() const;
+
+    /**
+        Returns the negative button for the sizer.
+
+        Negative buttons are those added with ID @c wxID_NO. They can have other
+        ID if they were added calling wxStdDialogButtonSizer::SetNegativeButton.
+    */
+    wxButton* GetNegativeButton() const;
+
+    /**
+        Returns the cancel button for the sizer.
+
+        Cancel buttons are those added with ID @c wxID_CANCEL or @c wxID_CLOSE.
+        They can have other ID if they were added calling
+        wxStdDialogButtonSizer::SetCancelButton.
+    */
+    wxButton* GetCancelButton() const;
+
+    /**
+        Returns the help button for the sizer.
+
+        Help buttons are those added with ID @c wxID_HELP or @c wxID_CONTEXT_HELP.
+    */
+    wxButton* GetHelpButton() const;
+
+    /**
         Sets the affirmative button for the sizer.
 
         This allows you to use identifiers other than the standard identifiers
@@ -1225,7 +1329,7 @@ public:
     /**
         Get the rectangle of the item on the parent window, excluding borders.
     */
-    virtual wxRect GetRect();
+    virtual wxRect GetRect() const;
 
     /**
         Get the current size of the item, as set in the last Layout.
@@ -1375,7 +1479,7 @@ public:
     you can now write
 
     @code
-    sizer->Add(ctrl, wxSizerFlags().Expand().Border(wxALL, 10));
+    sizer->Add(ctrl, wxSizerFlags().Expand().DoubleBorder(wxALL));
     @endcode
 
     This is more readable and also allows you to create wxSizerFlags objects which
@@ -1383,7 +1487,7 @@ public:
 
     @code
     wxSizerFlags flagsExpand(1);
-        flagsExpand.Expand().Border(wxALL, 10);
+        flagsExpand.Expand().DoubleBorder(wxALL);
 
         sizer->Add(ctrl1, flagsExpand);
         sizer->Add(ctrl2, flagsExpand);
@@ -1611,7 +1715,7 @@ public:
     wxSizerFlags& Right();
 
     /**
-        Set the @c wx_SHAPED flag which indicates that the elements should
+        Sets the @c wxSHAPED flag which indicates that the elements should
         always keep the fixed width to height ratio equal to its original value.
     */
     wxSizerFlags& Shaped();
@@ -1888,6 +1992,9 @@ public:
         This will depend on the number of children the sizer has if
         the sizer is automatically adjusting the number of columns/rows.
 
+        Note that if the sizer is not empty, the number of rows must have been
+        set, otherwise this function triggers an assert failure and returns 0.
+
         @since 2.9.1
     */
     int GetEffectiveColsCount() const;
@@ -1897,6 +2004,9 @@ public:
 
         This will depend on the number of children the sizer has if
         the sizer is automatically adjusting the number of columns/rows.
+
+        Note that if the sizer is not empty, the number of columns must have been
+        set, otherwise this function triggers an assert failure and returns 0.
 
         @since 2.9.1
     */
@@ -2076,5 +2186,12 @@ public:
             arguments had to be overridden in the derived classes instead.
     */
     virtual void RepositionChildren(const wxSize& minSize);
+
+    /**
+       Inform sizer about the first direction that has been decided (by
+       parent item).  Returns true if it made use of the information (and
+       recalculated min size).
+    */
+    virtual bool InformFirstDirection(int direction, int size, int availableOtherDir);
 };
 

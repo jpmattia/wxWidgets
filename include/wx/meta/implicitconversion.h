@@ -51,24 +51,20 @@ WX_TYPE_HIERARCHY_LEVEL( 5, int);
 WX_TYPE_HIERARCHY_LEVEL( 6, unsigned int);
 WX_TYPE_HIERARCHY_LEVEL( 7, long);
 WX_TYPE_HIERARCHY_LEVEL( 8, unsigned long);
-#ifdef wxLongLong_t
 WX_TYPE_HIERARCHY_LEVEL( 9, wxLongLong_t);
 WX_TYPE_HIERARCHY_LEVEL(10, wxULongLong_t);
-#endif
 WX_TYPE_HIERARCHY_LEVEL(11, float);
 WX_TYPE_HIERARCHY_LEVEL(12, double);
 WX_TYPE_HIERARCHY_LEVEL(13, long double);
 
-#if wxWCHAR_T_IS_REAL_TYPE
-    #if SIZEOF_WCHAR_T == SIZEOF_SHORT
-      template<> struct TypeHierarchy<wchar_t> : public TypeHierarchy<short> {};
-    #elif SIZEOF_WCHAR_T == SIZEOF_INT
-      template<> struct TypeHierarchy<wchar_t> : public TypeHierarchy<int> {};
-    #elif SIZEOF_WCHAR_T == SIZEOF_LONG
-      template<> struct TypeHierarchy<wchar_t> : public TypeHierarchy<long> {};
-    #else
-      #error "weird wchar_t size, please update this code"
-    #endif
+#if SIZEOF_WCHAR_T == SIZEOF_SHORT
+  template<> struct TypeHierarchy<wchar_t> : public TypeHierarchy<short> {};
+#elif SIZEOF_WCHAR_T == SIZEOF_INT
+  template<> struct TypeHierarchy<wchar_t> : public TypeHierarchy<int> {};
+#elif SIZEOF_WCHAR_T == SIZEOF_LONG
+  template<> struct TypeHierarchy<wchar_t> : public TypeHierarchy<long> {};
+#else
+  #error "weird wchar_t size, please update this code"
 #endif
 
 #undef WX_TYPE_HIERARCHY_LEVEL

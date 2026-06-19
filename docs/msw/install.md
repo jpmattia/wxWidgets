@@ -47,18 +47,24 @@ All makefiles and project are located in `build\msw` directory.
 Microsoft Visual C++ Compilation       {#msw_build_msvs}
 ----------------------------------------------------------------
 
+Note. All the instructions for building wxWidgets and using it in
+applications with Microsoft Visual Studio (MSVS) assume that Microsoft
+Visual C++ (MSVC) is being used as the C++ compiler (not Clang/LLVM).
+
 ### From the IDE
 
-Ready to use project files are provided for VC++ versions 2015, 2017, 2019 and 2022.
+Ready to use project files are provided for MSVS versions 2015, 2017, 2019,
+2022 and 2026.
 
-Simply open `wx_vcN.sln` (for N=14, 15, 16 or 17) file,
+Simply open `wx_vcN.sln` (for N=14, 15, 16 or 17 matching MSVS versions
+between 2015 and 2022) or `wx_vc18.slnx` (for MSVS 2026) file,
 select the appropriate configuration (Debug or Release, static or DLL)
 and build the solution. Notice that when building a DLL configuration,
 you may need to perform the build several times because the projects
 are not always built in the correct order, and this may result in link
 errors. Simply do the build again, up to 3 times, to fix this.
 
-Note that targeting ARM64 requires VC++ 2017 or newer, while ARM64EC and ARM64X
+Note that targeting ARM64 requires MSVS 2017 or newer, while ARM64EC and ARM64X
 require 2019 or newer and SDK 10.0.22621.0 or newer.
 
 The custom build steps have not yet been tailored to support ARM64X, but it
@@ -72,30 +78,37 @@ seems to work well if you build with `Platform=ARM64` first and then
 wxWidgets can also be built from the command line using the provided makefiles.
 
 This needs to be done from the "Visual Studio Command Prompt" window, which can
-be opened using a shortcut installed to the "Start" menu or the "Start" screen
-by MSVS installation.
+be opened using a shortcut installed to the "Start" menu by MSVS installation.
 
-In this window, change directory to `%%WXWIN%\build\msw` and type
+In this window, change directory to `%%WXWIN%\build\msw` and type (use the
+solution matching your MSVS version, the example uses wx_vc17.sln for MSVS 2022)
+
+        > msbuild /m /p:Configuration=Debug /p:Platform=x64 wx_vc17.sln
+
+to build wxWidgets in the debug configuration as a static library.
+Use `Release` configuration instead of `Debug` for the release version build.
+Similarly, use configurations `"DLL Debug"` and `"DLL Release"` for dynamic builds
+(the quotes around the configuration name are needed because it contains a space).
+
+After the build completes, open the appropriate sample solution in `%%WXWIN%\samples\`
+and try building and running the minimal sample to verify that your build is
+functional.
+
+
+### From the command line using nmake (legacy)
+
+Note that using MSBuild is strongly recommended, as it can use multiple
+processors for building, resulting in significant speedup, but it is also
+possible to use `nmake` with the provided makefiles. For example, use
 
         > nmake /f makefile.vc
 
 to build wxWidgets in the default debug configuration as a static library. You
-can also do
+can specify `BUILD=release`, `SHARED=1` and `TARGET_CPU=X86` to choose the
+release, DLL and 32-bit builds respectively.
 
-        > nmake /f makefile.vc BUILD=release
-
-to build a release version or
-
-        > nmake /f makefile.vc BUILD=release SHARED=1 TARGET_CPU=X86
-
-to build a 32 bit release DLL version from an x86 command prompt, or
-
-        > nmake /f makefile.vc BUILD=release SHARED=1 TARGET_CPU=X64
-
-to build a 64 bit release DLL version from an x64 command prompt.
-
-TARGET_CPU=ARM64 is supported while TARGET_CPU=ARM64EC is, at present, not
-supported.
+Note that `TARGET_CPU=ARM64` is supported while `TARGET_CPU=ARM64EC` is, at
+present, not supported here.
 
 See [Make Parameters](#msw_build_make_params) for more information about the
 additional parameters that can be specified on the command line.
@@ -125,9 +138,9 @@ contributors. If the version is out of date, please [create an issue or pull req
 
 
 
-### Special notes for Visual Studio
+### Special notes for MSVS
 
-For Visual Studio solutions it is possible to customize the build by
+For MSVS solutions it is possible to customize the build by
 creating a `wx_local.props` file in the `build\msw` directory which is used, if it
 exists, by the projects. The settings in that file override the default values
 for the properties such as wxCfg (corresponding to the CFG makefile variable
@@ -135,15 +148,15 @@ described below) or wxVendor (corresponding to VENDOR). The typical way to
 make the file is to copy `wx_setup.props` to `wx_local.props` and then edit local.
 
 For example, if you are building wxWidgets libraries using multiple versions
-of Visual Studio you could change wxCompilerPrefix to include the toolset:
+of MSVS you could change wxCompilerPrefix to include the toolset:
 
     -    <wxCompilerPrefix>vc</wxCompilerPrefix>
     +    <wxCompilerPrefix>vc$(PlatformToolsetVersion)</wxCompilerPrefix>
 
-Following that example if you are using Visual Studio 2015 and open
+Following that example if you are using MSVS 2015 and open
 `wx_vc14.sln` it will build using the "vc140" prefix for the build directories
 so to allow its build files to coexist with the files produced by the other
-MSVC versions.
+MSVS versions.
 
 Keep in mind that by using a separate local props file you ensure that your
 changes won't be lost when updating to a future wxWidgets version. But if
@@ -152,12 +165,12 @@ updated with it. For example the version information in `wx_setup.props` could
 change and the information in your `wx_local.props` would be outdated. It is
 your responsibility to monitor for such situations.
 
-### Improve debugging for Visual Studio
+### Improve debugging for MSVS
 
 Debug visualizers which make inspecting various wxWidgets classes easier to view
 while debugging are provided in file `%%WXWIN%\misc\msvc\wxWidgets.natvis`.
 The visualisers can be either added to a project or installed system-wide.
-See the [Visual Studio documentation](https://learn.microsoft.com/en-us/visualstudio/debugger/create-custom-views-of-native-objects)
+See the [MSVS documentation](https://learn.microsoft.com/en-us/visualstudio/debugger/create-custom-views-of-native-objects)
 for more information.
 
 
@@ -340,11 +353,11 @@ The full list of the build settings follows:
 
 * `RUNTIME_LIBS=static`
 
-  (VC++ only.) Links static version of C and C++ runtime libraries into the
+  (MSVC only.) Links static version of the CRT into the
   executable, so that the program does not depend on DLLs provided with the
   compiler.
 
-  Caution: Do not use static runtime libraries when building DLL (SHARED=1)!
+  Caution: Do not use the static CRT when building DLL (SHARED=1)!
 
 * `DEBUG_FLAG=0`
 * `DEBUG_FLAG=1`
@@ -370,18 +383,18 @@ The full list of the build settings follows:
 * `DEBUG_RUNTIME_LIBS=0`
 * `DEBUG_RUNTIME_LIBS=1`
 
-  (VC++ only.) If set to 1, msvcrtd.dll is used, if to 0, msvcrt.dll
-  is used. By default msvcrtd.dll is used only if the executable
-  contains debug info and msvcrt.dll if it doesn't. It is sometimes
+  (MSVC only.) If set to 1, the debug CRT is used, if to 0, the release CRT
+  is used. By default the former is used only if the executable
+  contains debug info and the latter if it doesn't. It is sometimes
   desirable to build with debug info and still link against msvcrt.dll
   (e.g. when you want to ship the app to customers and still have
   usable .pdb files with debug information) and this setting makes it
   possible.
 
-* `TARGET_CPU=X64|ARM|ARM64|IA64`
+* `TARGET_CPU=X64|ARM|ARM64`
 
-  (VC++ only.) Set this variable to build for x86_64 systems. If unset, x86
-  build is performed.
+  (MSVC only.) Set this variable to build for the target architecture. If unset,
+  then the default architecture for the active Developer Command Prompt is used.
 
 * `VENDOR=<your company name>`
 
@@ -389,9 +402,9 @@ The full list of the build settings follows:
   distribute wxWidgets DLLs with your application. Default value is 'custom'.
   This string is included as part of DLL name. wxWidgets DLLs contain compiler
   name, version information and vendor name in them. For example
-  `wxmsw311u_core_vc_custom.dll` is one of DLLs build using Visual C++ with
+  `wxmsw331u_core_vc_x64_custom.dll` is one of DLLs built using MSVC with
   default settings. If you set VENDOR=mycorp, the name will change to
-  `wxmsw311u_core_vc_mycorp.dll.`
+  `wxmsw331u_core_vc_x64_mycorp.dll.`
 
 * `CFG=<configuration name>`
 
@@ -428,7 +441,7 @@ Building Applications Using wxWidgets  {#msw_build_apps}
 Note: If you want to use CMake for building your project, please see
 @ref overview_cmake.
 
-Using Microsoft Visual C++ IDE         {#msw_build_apps_msvc}
+Using MSVS                             {#msw_build_apps_msvc}
 ------------------------------
 
 If you use MSVS for building your project, simply add
@@ -447,7 +460,7 @@ Using Other Compilers or Command Line  {#msw_build_apps_other}
 
 We suppose that wxWidgets sources are under the directory `$WXWIN` (notice that
 different tool chains refer to environment variables such as WXWIN in
-different ways, e.g. MSVC users should use `$``(WXWIN)` instead of just
+different ways, e.g. MSVS users should use `$``(WXWIN)` instead of just
 `$WXWIN`). And we will use `<wx-lib-dir>` as a shortcut for the subdirectory of
 `$WXWIN\lib` which is composed from several parts separated by underscore:
 first, a compiler-specific prefix (e.g. "vc" for MSVC, "gcc" for g++ or the
@@ -487,10 +500,24 @@ MSVC, you also need to:
   depends on which libraries you use and whether you built wxWidgets in
   monolithic or default multi-lib mode and basically should include all the
   relevant libraries from the directory above, e.g. `wxmsw34ud_core.lib
-  wxbase34ud.lib wxtiffd.lib wxjpegd.lib wxpngd.lib wxzlibd.lib wxregexud.lib
-  wxexpatd.lib` for a debug build of an application using the core library of
-  wxWidgets 3.4 only (all wxWidgets applications use the base library).
-
+  wxbase34ud.lib wxtiffd.lib wxjpegd.lib wxpngd.lib wxwebpd.lib wxzlibd.lib
+  wxregexud.lib wxexpatd.lib` for a debug build of an application using the
+  core library of wxWidgets 3.4 only (all wxWidgets applications use the base
+  library).
+* When using classes from non-core libraries, e.g. `wxPropertyGrid`, also link
+  with the corresponding library, as indicated in the class documentation, i.e.
+  `wxmsw34ud_propgrid.lib` in this case.
+* When using `wxStyledTextCtrl`, if static (not DLL) wxWidgets libraries are
+  used, then, in addition to linking with `wxmsw34ud_stc.lib`, you also need
+  to add `wxlexilla[d].lib` and `wxscintilla[d].lib` the list of libraries
+  to link with.
+* Finally, when using static wxWidgets libraries you must also add all Windows
+  libraries that are used by wxWidgets to the linker input. Currently this
+  means linking with the following libraries (some of which might be
+  unnecessary depending on your build configuration): `advapi32 comctl32
+  comdlg32 gdi32 gdiplus imm32 kernel32 msimg32 ole32 oleacc oleaut32 opengl32
+  rpcrt4 shell32 shlwapi user32 uuid uxtheme version wininet winmm winspool
+  ws2_32`.
 
 For example, to compile your program with gcc using debug wxWidgets DLLs
 you would need to use the following options for the compiler (and `windres`

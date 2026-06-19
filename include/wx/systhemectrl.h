@@ -12,7 +12,7 @@
 
 #include "wx/defs.h"
 
-#if defined(__WXMSW__) && wxUSE_UXTHEME && !defined(__WXUNIVERSAL__)
+#if defined(__WXMSW__) && !defined(__WXUNIVERSAL__)
     #define wxHAS_SYSTEM_THEMED_CONTROL
 #endif
 
@@ -71,9 +71,6 @@ public:
     {
         DoEnableSystemTheme(enable, this);
     }
-
-    // Using wxBORDER_THEME is unnecessary and looks bad for these controls.
-    virtual bool CanApplyThemeBorder() const override { return false; }
 
 protected:
     void EnableSystemThemeByDefault()

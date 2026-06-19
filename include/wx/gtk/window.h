@@ -90,7 +90,6 @@ public:
 
     virtual bool SetBackgroundColour( const wxColour &colour ) override;
     virtual bool SetForegroundColour( const wxColour &colour ) override;
-    virtual bool SetCursor( const wxCursor &cursor ) override;
     virtual bool SetFont( const wxFont &font ) override;
 
     virtual bool SetBackgroundStyle(wxBackgroundStyle style) override ;
@@ -173,7 +172,7 @@ public:
     // also, it is not clear which native widget is the top
     // widget where (most of) the input goes. even tooltips have
     // to be applied to all subwidgets.
-    virtual GtkWidget* GetConnectWidget();
+    virtual GtkWidget* GetConnectWidget() const;
     void ConnectWidget( GtkWidget *widget );
 
 
@@ -204,10 +203,11 @@ public:
     void GTKHandleFocusOutNoDeferring();
     void GTKHandleDeferredFocusOut();
 
-    // Called when m_widget becomes realized. Derived classes must call the
-    // base class method if they override it.
+    // Called when m_widget becomes realized or unrealized (may be called
+    // multiple times). Derived classes must call the base class version if
+    // they override these functions.
     virtual void GTKHandleRealized();
-    void GTKHandleUnrealize();
+    virtual void GTKHandleUnrealized();
 
     // Apply the widget style to the given window. Should normally only be
     // called from the overridden DoApplyWidgetStyle() implementation in
@@ -242,6 +242,18 @@ protected:
 
     // Check if the given window makes part of this widget
     bool GTKIsOwnWindow(GdkWindow *window) const;
+
+    // Return the GdkWindow associated with either m_wxwindow or m_widget.
+    //
+    // This may be different from GTKGetConnectWindow() for the native widgets
+    // using a different "connect widget".
+    //
+    // Unlike GTKGetDrawingWindow(), this function always returns something
+    // non-null for a mapped window.
+    GdkWindow* GTKGetMainWindow() const;
+
+    // Return the GdkWindow associated with GetConnectWidget().
+    GdkWindow* GTKGetConnectWindow() const;
 
 public:
     // Returns the default context which usually is anti-aliased
@@ -352,10 +364,25 @@ public:
     // find the direction of the given scrollbar (must be one of ours)
     ScrollDir ScrollDirFromRange(GtkRange *range) const;
 
-    void GTKUpdateCursor(
-        bool isBusyOrGlobalCursor = false,
-        bool isRealize = false,
-        const wxCursor* overrideCursor = nullptr);
+    // Set the given cursor for the window.
+    void GTKSetCursor(const wxCursor& cursor);
+
+    // Apply the current cursor: called initially, after realizing the window,
+    // but may also called later after temporarily changing the cursor.
+    void GTKApplyCursor();
+
+    // Update the cursor for the window, taking into account the currently set
+    // global cursor, if any.
+    void GTKUpdateCursor();
+
+    // This overload can be used if we already know whether there is a globally
+    // set cursor overriding the normal one, it's just an optimization allowing
+    // to avoid checking for such cursor existence inside GTKUpdateCursor()
+    // itself.
+    void GTKUpdateCursor(GdkCursor* overrideCursor);
+
+    // Override the base class function to call GTKUpdateCursor() too.
+    virtual void WXUpdateCursor() override;
 
     // extra (wxGTK-specific) flags
     bool                 m_noExpose:1;          // wxGLCanvas has its own redrawing
@@ -366,7 +393,7 @@ public:
                                                 // chain needs update
     bool                 m_mouseButtonDown:1;
     bool                 m_showOnIdle:1;        // postpone showing the window until idle
-    bool m_needCursorReset:1;
+    bool                 m_needCursorReset:1;   // true if cursor set by wxEVT_SET_CURSOR
 
     wxRegion             m_nativeUpdateRegion;  // not transformed for RTL
 
@@ -482,6 +509,11 @@ private:
     // are already at the end)
     bool DoScrollByUnits(ScrollDir dir, ScrollUnit unit, int units);
     virtual void AddChildGTK(wxWindowGTK* child);
+
+    // Set the given (possibly null) cursor for all GdkWindows of this window.
+    //
+    // Return all windows for which we changed the cursor (may be empty).
+    wxArrayGdkWindows GTKSetCursorForAllWindows(GdkCursor* cursor);
 
 #ifdef __WXGTK3__
     // paint context is stashed here so wxPaintDC can use it

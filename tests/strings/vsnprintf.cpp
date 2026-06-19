@@ -254,13 +254,13 @@ TEST_CASE_METHOD(VsnprintfTestCase, "Vsnprintf::S", "[vsnprintf]")
     // Unicode code points from U+03B1 to U+03B9 are the greek letters alpha-iota;
     // UTF8 encoding of such code points is 0xCEB1 to 0xCEB9
 
-#define ALPHA       "\xCE\xB1"
+#define ALPHA       "α"
         // alpha
-#define ABC         "\xCE\xB1\xCE\xB2\xCE\xB3"
+#define ABC         "αβγ"
         // alpha+beta+gamma
-#define ABCDE       "\xCE\xB1\xCE\xB2\xCE\xB3\xCE\xB4\xCE\xB5"
+#define ABCDE       "αβγδε"
         // alpha+beta+gamma+delta+epsilon
-#define ABCDEFGHI   "\xCE\xB1\xCE\xB2\xCE\xB3\xCE\xB4\xCE\xB5\xCE\xB6\xCE\xB7\xCE\xB8\xCE\xB9"
+#define ABCDEFGHI   "αβγδεζηθι"
         // alpha+beta+gamma+delta+epsilon+zeta+eta+theta+iota
 
     // the 'expected' and 'arg' parameters of this macro are supposed to be
@@ -314,7 +314,6 @@ TEST_CASE_METHOD(VsnprintfTestCase, "Vsnprintf::Percent", "[vsnprintf]")
     // Compare(wxT("%"), wxT("%%%"));
 }
 
-#ifdef wxLongLong_t
 TEST_CASE_METHOD(VsnprintfTestCase, "Vsnprintf::LongLong", "[vsnprintf]")
 {
     CMP("123456789", "%lld", (wxLongLong_t)123456789);
@@ -327,7 +326,6 @@ TEST_CASE_METHOD(VsnprintfTestCase, "Vsnprintf::LongLong", "[vsnprintf]")
     CMP("123456789abcdef", "%I64x", wxLL(0x123456789abcdef));
 #endif
 }
-#endif
 
 TEST_CASE_METHOD(VsnprintfTestCase, "Vsnprintf::WrongFormatStrings", "[vsnprintf]")
 {
@@ -515,7 +513,6 @@ TEST_CASE_METHOD(VsnprintfTestCase, "Vsnprintf::GlibcMisc1", "[vsnprintf]")
 TEST_CASE_METHOD(VsnprintfTestCase, "Vsnprintf::GlibcMisc2", "[vsnprintf]")
 {
     int prec;
-    wxString test_format;
 
     prec = 0;
     CMP("3", "%.*g", prec, 3.3);

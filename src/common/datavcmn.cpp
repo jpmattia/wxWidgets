@@ -34,6 +34,8 @@
     #include "wx/access.h"
 #endif // wxUSE_ACCESSIBILITY
 
+#include "wx/private/safecall.h"
+
 // Uncomment this line to, for custom renderers, visually show the extent
 // of both a cell and its item.
 //#define DEBUG_RENDER_EXTENTS
@@ -52,11 +54,13 @@ public:
     {
         m_editorCtrl = editor;
         m_owner = owner;
-
         m_finished = false;
+        m_focusOnIdle = false;
     }
 
+#if defined(__WXGTK__) && !defined(wxHAS_GENERIC_DATAVIEWCTRL)
     void SetFocusOnIdle( bool focus = true ) { m_focusOnIdle = focus; }
+#endif
 
 protected:
     void OnChar( wxKeyEvent &event );
@@ -887,7 +891,7 @@ wxDataViewRendererBase::PrepareForItem(const wxDataViewModel *model,
 {
     // This method is called by the native control, so we shouldn't allow
     // exceptions to escape from it.
-    wxTRY
+    return wxSafeCall<bool>([&, this]()
     {
 
     // Now check if we have a value and remember it if we do.
@@ -915,14 +919,13 @@ wxDataViewRendererBase::PrepareForItem(const wxDataViewModel *model,
     SetEnabled(model->IsEnabled(item, column));
 
     return !value.IsNull();
-    }
-    wxCATCH_ALL
-    (
+    }, []()
+    {
         // There is not much we can do about it here, just log it and don't
         // show anything in this cell.
         wxLogDebug("Retrieving the value from the model threw an exception");
         return false;
-    )
+    });
 }
 
 
@@ -1089,7 +1092,11 @@ wxDataViewCustomRendererBase::RenderText(const wxString& text,
     int flags = 0;
     if ( state & wxDATAVIEW_CELL_SELECTED )
         flags |= wxCONTROL_SELECTED;
-    if ( !(GetOwner()->GetOwner()->IsEnabled() && GetEnabled()) )
+
+    // Use IsThisEnabled() rather than IsEnabled() to grey the text out if the
+    // item itself or the entire control is disabled, but not if it's
+    // implicitly disabled due to its parent being disabled.
+    if ( !(GetOwner()->GetOwner()->IsThisEnabled() && GetEnabled()) )
         flags |= wxCONTROL_DISABLED;
 
     wxRendererNative::Get().DrawItemText(
@@ -1210,15 +1217,6 @@ bool wxDataViewEditorCtrlEvtHandler::IsEditorSubControl(wxWindow* win) const
 // ---------------------------------------------------------
 // wxDataViewColumnBase
 // ---------------------------------------------------------
-
-void wxDataViewColumnBase::Init(wxDataViewRenderer *renderer,
-                                unsigned int model_column)
-{
-    m_renderer = renderer;
-    m_model_column = model_column;
-    m_owner = nullptr;
-    m_renderer->SetOwner( (wxDataViewColumn*) this );
-}
 
 wxDataViewColumnBase::~wxDataViewColumnBase()
 {

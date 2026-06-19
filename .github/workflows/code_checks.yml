@@ -14,12 +14,12 @@ permissions:
 
 jobs:
   check-unix:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     name: Check Spelling
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install codespell
         run: |
@@ -31,12 +31,12 @@ jobs:
 
 
   check-whitespace:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     name: Check Whitespace
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check for trailing whitespace and TABs
         run: |
@@ -53,7 +53,12 @@ jobs:
                 ':!build/autogen.mk' \
                 ':!build/bakefiles/make_dist.mk' \
                 ':!build/bakefiles/scintilla.bkl' \
+                ':!build/clone-minimal-vcxproj' \
+                ':!build/cmake/modules/cotire.cmake' \
+                ':!build/upmake' \
+                ':!build/vcxproj-clone' \
                 ':!docs/doxygen/doxygen-awesome-css/*' \
+                ':!misc/languages/data/unicode/*.xml' \
                 ':!samples/widgets/widgets.bkl' \
                 ':!tests/test.bkl' \
                 ':!**/*akefile*' \
@@ -65,12 +70,12 @@ jobs:
 
 
   check-mixed-eol:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     name: Check Mixed EOL
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install dos2unix
         run: |
@@ -81,12 +86,12 @@ jobs:
             ./misc/scripts/check_mixed_eol.sh
 
   check-cxx-style:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     name: Check C++ Style
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check for obsolete macros use
         run: |
@@ -97,3 +102,15 @@ jobs:
               echo "::error ::Please use C++11 equivalents of the deprecated macros in the new code."
               exit 1
             fi
+
+  check-allheaders:
+    runs-on: ubuntu-latest
+    name: Check All Headers In allheaders.h
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check that all headers are listed in tests/allheaders.h
+        run: |
+            ./misc/scripts/check_allheaders.sh

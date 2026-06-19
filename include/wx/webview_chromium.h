@@ -16,8 +16,6 @@
 
 class WXDLLIMPEXP_FWD_BASE wxFileName;
 
-extern WXDLLIMPEXP_DATA_WEBVIEW(const char) wxWebViewBackendChromium[];
-
 class CefClient;
 
 // Private namespace containing classes used only in the implementation.
@@ -92,6 +90,7 @@ public:
     virtual bool CanSetZoomType(wxWebViewZoomType type) const override;
 
     virtual void Print() override;
+    using wxWebView::Print;
 
     virtual wxWebViewZoom GetZoom() const override;
     virtual void SetZoom(wxWebViewZoom zoom) override;
@@ -212,6 +211,9 @@ public:
     // If non-zero, specifies the port to use for remote debugging (the usual
     // value for it is 9223).
     int m_remoteDebuggingPort = 0;
+
+    // Set to true to block CEF from accessing local files.
+    bool m_disableFileAccess = false;
 
     // Function to create the custom CefClient to use if non-null.
     //

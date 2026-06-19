@@ -51,12 +51,15 @@ enum wxDialogLayoutAdaptationMode
     wxDIALOG_ADAPTATION_MODE_DISABLED = 2   // disable this dialog overriding global status
 };
 
-enum wxDialogModality
-{
-    wxDIALOG_MODALITY_NONE = 0,
-    wxDIALOG_MODALITY_WINDOW_MODAL = 1,
-    wxDIALOG_MODALITY_APP_MODAL = 2
-};
+// The following symbols are preserved only for compatibility.
+// Please use wxWindowMode directly in any new code instead.
+
+// Preview frame modality kind used with wxPreviewFrame::Initialize()
+using wxDialogModality = wxWindowMode;
+
+constexpr wxWindowMode wxDIALOG_MODALITY_NONE = wxWindowMode::Normal;
+constexpr wxWindowMode wxDIALOG_MODALITY_WINDOW_MODAL = wxWindowMode::WindowModal;
+constexpr wxWindowMode wxDIALOG_MODALITY_APP_MODAL = wxWindowMode::AppModal;
 
 extern WXDLLIMPEXP_DATA_CORE(const char) wxDialogNameStr[];
 
@@ -106,7 +109,7 @@ public:
     // This function always returns a valid top level window or nullptr.
     wxWindow *GetParentForModalDialog(wxWindow *parent, long style) const
     {
-        return DoGetParentForDialog(wxDIALOG_MODALITY_APP_MODAL, parent, style);
+        return DoGetParentForDialog(wxWindowMode::AppModal, parent, style);
     }
 
     // This overload can only be used for already initialized windows, i.e. not
@@ -123,7 +126,7 @@ public:
     // is only shown later, after showing the parent).
     wxWindow *GetParentForModelessDialog(wxWindow *parent, long style) const
     {
-        return DoGetParentForDialog(wxDIALOG_MODALITY_NONE, parent, style);
+        return DoGetParentForDialog(wxWindowMode::Normal, parent, style);
     }
 
 #if wxUSE_STATTEXT // && wxUSE_TEXTCTRL
@@ -203,7 +206,7 @@ public:
     static void EnableLayoutAdaptation(bool enable) { sm_layoutAdaptation = enable; }
 
     // modality kind
-    virtual wxDialogModality GetModality() const;
+    virtual wxWindowMode GetModality() const;
 protected:
     // emulate click of a button with the given id if it's present in the dialog
     //
@@ -256,13 +259,13 @@ protected:
 
 private:
     // Common implementation of GetParentFor{Modal,Modeless}Dialog().
-    wxWindow *DoGetParentForDialog(wxDialogModality modality,
+    wxWindow *DoGetParentForDialog(wxWindowMode modality,
                                    wxWindow *parent,
                                    long style) const;
 
     // helper of DoGetParentForDialog(): returns the passed in window if it
     // can be used as parent for this kind of dialog or nullptr if it can't
-    wxWindow *CheckIfCanBeUsedAsParent(wxDialogModality modality,
+    wxWindow *CheckIfCanBeUsedAsParent(wxWindowMode modality,
                                        wxWindow *parent) const;
 
     // Helper of OnCharHook() and OnCloseWindow(): find the appropriate button
@@ -280,9 +283,6 @@ private:
 
     // handle the standard buttons
     void OnButton(wxCommandEvent& event);
-
-    // update the background colour
-    void OnSysColourChanged(wxSysColourChangedEvent& event);
 
 
     wxDECLARE_NO_COPY_CLASS(wxDialogBase);
@@ -389,7 +389,7 @@ public:
     int GetReturnCode() const
         { return GetDialog()->GetReturnCode(); }
 
-    virtual wxEvent *Clone() const override { return new wxWindowModalDialogEvent (*this); }
+    wxNODISCARD virtual wxEvent *Clone() const override { return new wxWindowModalDialogEvent (*this); }
 
 private:
     wxDECLARE_DYNAMIC_CLASS_NO_ASSIGN_DEF_COPY(wxWindowModalDialogEvent);

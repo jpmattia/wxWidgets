@@ -38,6 +38,7 @@
 #include "wx/thread.h"
 
 #include "wx/osx/private.h"
+#include "wx/osx/private/available.h"
 
 wxBEGIN_EVENT_TABLE(wxTextCtrl, wxTextCtrlBase)
     EVT_DROP_FILES(wxTextCtrl::OnDropFiles)
@@ -88,9 +89,6 @@ bool wxTextCtrl::Create( wxWindow *parent,
 {
     DontCreatePeer();
     m_editable = true ;
-
-    if ( ! (style & wxNO_BORDER) )
-        style = (style & ~wxBORDER_MASK) | wxSUNKEN_BORDER ;
 
     if ( !wxTextCtrlBase::Create( parent, id, pos, size, style & ~(wxHSCROLL | wxVSCROLL), validator, name ) )
         return false;
@@ -147,6 +145,11 @@ void wxTextCtrl::OSXDisableAllSmartSubstitutions()
 {
     OSXEnableAutomaticDashSubstitution(false);
     OSXEnableAutomaticQuoteSubstitution(false);
+}
+
+wxTextSearchResult wxTextCtrl::SearchText(const wxTextSearch& search) const
+{
+    return GetTextPeer()->SearchText(search);
 }
 
 wxString wxTextCtrl::GetRTFValue() const
@@ -215,22 +218,24 @@ wxSize wxTextCtrl::DoGetSizeFromTextSize(int xlen, int ylen) const
         // these are the numbers from the HIG:
         switch ( m_windowVariant )
         {
-            case wxWINDOW_VARIANT_NORMAL :
-                hText = 22;
-                break ;
-
             case wxWINDOW_VARIANT_SMALL :
                 hText = 19;
                 break ;
 
             case wxWINDOW_VARIANT_MINI :
-                hText = 15;
+                hText = 16;
                 break ;
 
+            case wxWINDOW_VARIANT_NORMAL :
             default :
-                hText = 22;
+                hText = 21;
                 break ;
         }
+
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_VERSION_26_0
+        if ( WX_IS_MACOS_AVAILABLE(26, 0) )
+            hText += 3;
+#endif
 
         // the numbers above include the border size, so subtract it before
         // possibly adding it back below
@@ -247,6 +252,8 @@ wxSize wxTextCtrl::DoGetSizeFromTextSize(int xlen, int ylen) const
     // since this method is now called with native field widths, an empty field still
     // has small positive xlen, therefore don't compare just with > 0 anymore
     wxSize size(xlen > TEXTCTRL_MAX_EMPTY_WIDTH ? xlen : 100, hText);
+
+    // !!! Any changes to these adjustments must be mirrored in wxNSTextFieldControl::GetBestSize() !!!
 
     // Use extra margin size which works under macOS 10.15: note that we don't
     // need the vertical margin when using the automatically determined hText.
@@ -466,10 +473,10 @@ void wxTextCtrl::OnChar(wxKeyEvent& event)
         case WXK_NUMPAD_ENTER:
             if (m_windowStyle & wxTE_PROCESS_ENTER)
             {
-                wxCommandEvent event(wxEVT_TEXT_ENTER, m_windowId);
-                event.SetEventObject( this );
-                event.SetString( GetValue() );
-                if ( HandleWindowEvent(event) )
+                wxCommandEvent evt(wxEVT_TEXT_ENTER, m_windowId);
+                evt.SetEventObject(this);
+                evt.SetString(GetValue());
+                if (HandleWindowEvent(evt))
                     return;
             }
 
@@ -481,9 +488,9 @@ void wxTextCtrl::OnChar(wxKeyEvent& event)
                     wxButton *def = wxDynamicCast(tlw->GetDefaultItem(), wxButton);
                     if ( def && def->IsEnabled() )
                     {
-                        wxCommandEvent event(wxEVT_BUTTON, def->GetId() );
-                        event.SetEventObject(def);
-                        def->Command(event);
+                        wxCommandEvent evt(wxEVT_BUTTON, def->GetId());
+                        evt.SetEventObject(def);
+                        def->Command(evt);
 
                         return ;
                     }

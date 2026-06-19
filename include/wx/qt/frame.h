@@ -52,6 +52,8 @@ public:
 
     virtual void SetWindowStyleFlag( long style ) override;
 
+    virtual void SetWindowModality(wxWindowMode modality) override;
+
     virtual void AddChild( wxWindowBase *child ) override;
     virtual void RemoveChild( wxWindowBase *child ) override;
 
@@ -59,8 +61,6 @@ public:
 
 protected:
     virtual wxPoint GetClientAreaOrigin() const override;
-    virtual void DoGetClientSize(int *width, int *height) const override;
-    virtual void DoSetClientSize(int width, int height) override;
 
     virtual QWidget* QtGetParentWidget() const override;
 

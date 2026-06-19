@@ -81,7 +81,7 @@ protected:
         }
     }
 };
-    
+
 } // anonymous namespace
 
 wxWidgetImplType* wxWidgetImpl::CreateGauge( wxWindowMac* wxpeer,
@@ -105,6 +105,10 @@ wxWidgetImplType* wxWidgetImpl::CreateGauge( wxWindowMac* wxpeer,
     if (style & wxGA_VERTICAL)
     {
         [v setBoundsRotation:-90.0];
+    }
+    if (style & wxGA_SMOOTH)
+    {
+        [v setUsesThreadedAnimation:YES];
     }
     wxWidgetCocoaImpl* c = new wxOSXGaugeCocoaImpl( wxpeer, v );
     return c;

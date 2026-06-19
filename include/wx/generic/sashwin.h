@@ -12,6 +12,8 @@
 #ifndef _WX_SASHWIN_H_G_
 #define _WX_SASHWIN_H_G_
 
+#include "wx/defs.h"
+
 #if wxUSE_SASH
 
 #include "wx/defs.h"
@@ -223,12 +225,12 @@ public:
     void SetDragStatus(wxSashDragStatus status) { m_dragStatus = status; }
     wxSashDragStatus GetDragStatus() const { return m_dragStatus; }
 
-    virtual wxEvent *Clone() const override { return new wxSashEvent(*this); }
+    wxNODISCARD virtual wxEvent *Clone() const override { return new wxSashEvent(*this); }
 
 private:
     wxSashEdgePosition  m_edge;
     wxRect              m_dragRect;
-    wxSashDragStatus    m_dragStatus;
+    wxSashDragStatus    m_dragStatus = wxSASH_STATUS_OK;
 
 private:
     wxDECLARE_DYNAMIC_CLASS_NO_ASSIGN(wxSashEvent);

@@ -23,12 +23,14 @@
 
 #include "wx/msw/missing.h"
 #include "wx/msw/private.h"
-#include "wx/msw/private/webview_ie.h"
 #include "wx/private/jsscriptwrapper.h"
+#include "wx/private/webview.h"
 
 #include <initguid.h>
 #include <exdispid.h>
 #include <mshtml.h>
+
+#include "wx/msw/private/webview_ie.h"
 
 /* These GUID definitions are our own implementation to support interfaces
  * normally in urlmon.h. See include/wx/msw/webview_ie.h
@@ -81,6 +83,11 @@ wxVersionInfo wxWebViewFactoryIE::GetVersionInfo(wxVersionContext context)
     }
 
     return {};
+}
+
+wxWebViewConfiguration wxWebViewFactoryIE::CreateConfiguration()
+{
+    return wxWebViewConfiguration(wxWebViewBackendIE, new wxWebViewConfigurationImpl);
 }
 
 //Convenience function for error conversion
@@ -576,8 +583,7 @@ bool wxWebViewIE::CanGoBack() const
 bool wxWebViewIE::CanGoForward() const
 {
     if(m_impl->m_historyEnabled)
-        return m_impl->m_historyPosition !=
-               static_cast<int>(m_impl->m_historyList.size()) - 1;
+        return m_impl->m_historyPosition != wxSsize(m_impl->m_historyList) - 1;
     else
         return false;
 }
@@ -591,8 +597,7 @@ void wxWebViewIE::LoadHistoryItem(wxSharedPtr<wxWebViewHistoryItem> item)
         if(m_impl->m_historyList[i].get() == item.get())
             pos = i;
     }
-    wxASSERT_MSG(pos != static_cast<int>(m_impl->m_historyList.size()),
-                 "invalid history item");
+    wxASSERT_MSG(pos != wxSsize(m_impl->m_historyList), "invalid history item");
     m_impl->m_historyLoadingFromList = true;
     LoadURL(item->GetUrl());
     m_impl->m_historyPosition = pos;
@@ -615,7 +620,7 @@ wxVector<wxSharedPtr<wxWebViewHistoryItem> > wxWebViewIE::GetForwardHistory()
     wxVector<wxSharedPtr<wxWebViewHistoryItem> > forwardhist;
     //As we don't have std::copy or an iterator constructor in the wxwidgets
     //native vector we construct it by hand
-    for(int i = m_impl->m_historyPosition + 1; i < static_cast<int>(m_impl->m_historyList.size()); i++)
+    for(int i = m_impl->m_historyPosition + 1; i < wxSsize(m_impl->m_historyList); i++)
     {
         forwardhist.push_back(m_impl->m_historyList[i]);
     }
@@ -967,7 +972,6 @@ void wxWebViewIE::ClearSelection()
     if(document)
     {
         wxCOMPtr<IHTMLSelectionObject> selection;
-        wxString selected;
         HRESULT hr = document->get_selection(&selection);
         if(SUCCEEDED(hr))
         {
@@ -1483,7 +1487,7 @@ void wxWebViewIE::onActiveXEvent(wxActiveXEvent& evt)
             {
                 //If we are not at the end of the list, then erase everything
                 //between us and the end before adding the new page
-                if(m_impl->m_historyPosition != static_cast<int>(m_impl->m_historyList.size()) - 1)
+                if(m_impl->m_historyPosition != wxSsize(m_impl->m_historyList) - 1)
                 {
                     m_impl->m_historyList.erase(m_impl->m_historyList.begin() + m_impl->m_historyPosition + 1,
                                                 m_impl->m_historyList.end());
@@ -1619,6 +1623,7 @@ VirtualProtocol::VirtualProtocol(wxSharedPtr<wxWebViewHandler> handler)
     m_handler = handler;
 }
 
+COM_DECLSPEC_NOTHROW
 STDMETHODIMP VirtualProtocol::QueryInterface(REFIID riid, void **ppv)
 {
     wxLogQueryInterface(wxT("VirtualProtocol"), riid);
@@ -1657,12 +1662,14 @@ STDMETHODIMP VirtualProtocol::QueryInterface(REFIID riid, void **ppv)
     return (HRESULT) E_NOINTERFACE;
 }
 
+COM_DECLSPEC_NOTHROW
 STDMETHODIMP_(ULONG) VirtualProtocol::AddRef()
 {
     wxLogAddRef(wxT("VirtualProtocol"), m_cRef);
     return ++m_cRef;
 }
 
+COM_DECLSPEC_NOTHROW
 STDMETHODIMP_(ULONG) VirtualProtocol::Release()
 {
     wxLogRelease(wxT("VirtualProtocol"), m_cRef);
@@ -1776,9 +1783,9 @@ HRESULT STDMETHODCALLTYPE VirtualProtocol::ParseUrl(
             case wxPARSE_SECURITY_URL:
             case wxPARSE_SECURITY_DOMAIN:
             {
-                if ( cchResult < secLen )
+                if ( cchResult <= secLen )
                     return S_FALSE;
-                wcscpy(pwzResult, m_handler->GetSecurityURL().wc_str());
+                wxStrlcpy(pwzResult, m_handler->GetSecurityURL().wc_str(), cchResult);
                 *pcchResult = secLen;
                 return S_OK;
             }

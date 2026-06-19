@@ -28,20 +28,20 @@
     #include "wx/dataobj.h"
 #endif // wxUSE_CLIPBOARD
 
-#if defined(__WXGTK__) || defined(__WXQT__)
-    #include "waitfor.h"
-#endif
+#include "waitfor.h"
 
 #ifdef __WXQT__
 #include <QtGlobal>
 #endif
 
 #include "wx/private/localeset.h"
+#include "wx/private/make_unique.h"
 
 #include "textentrytest.h"
 #include "testableframe.h"
 #include "asserthelper.h"
 
+#include <algorithm>
 #include <memory>
 
 static const int TEXT_HEIGHT = 200;
@@ -88,6 +88,7 @@ private:
         // Rerun the text entry tests not specific to single line controls for
         // multiline ones now.
         wxTEXT_ENTRY_TESTS();
+        WXUISIM_TEST( MaxLength );
         SINGLE_AND_MULTI_TESTS();
 
 
@@ -157,6 +158,9 @@ private:
     // (or not) already contain wxTE_MULTILINE.
     void CreateText(long extraStyles);
 
+    // Return a string pattern of length _len_ used as text lines in multi-line control
+    static wxString MakeLinePattern(int len = 100);
+
     wxTextCtrl *m_text;
 
     static long ms_style;
@@ -185,6 +189,16 @@ void TextCtrlTestCase::CreateText(long extraStyles)
     m_text = new wxTextCtrl(wxTheApp->GetTopWindow(), wxID_ANY, "",
                             wxDefaultPosition, wxSize(400, h),
                             style);
+}
+
+wxString TextCtrlTestCase::MakeLinePattern(int len)
+{
+    wxString pattern;
+    pattern.reserve(len);
+    for ( int i = 0; i < len; i++ )
+        pattern += '0' + i % 10;
+
+    return pattern;
 }
 
 void TextCtrlTestCase::setUp()
@@ -260,6 +274,88 @@ void TextCtrlTestCase::ReadOnly()
 void TextCtrlTestCase::MaxLength()
 {
 #if wxUSE_UIACTIONSIMULATOR
+    wxUIActionSimulator sim;
+
+    if ( ms_style == wxTE_MULTILINE )
+    {
+#if defined(__WXMSW__) || defined(__WXGTK3__) || defined(__WXQT__)
+        delete m_text;
+        CreateText(wxTE_DONTWRAP);
+        EventCounter maxlen(m_text, wxEVT_TEXT_MAXLEN);
+
+        m_text->SetMaxLength(250);
+        m_text->SetFocus();
+        wxYield();
+
+        const wxString linePattern = MakeLinePattern();
+
+        m_text->AppendText(linePattern);
+        m_text->SelectAll();
+        m_text->Copy();
+
+        m_text->SetInsertionPointEnd();
+
+        sim.Char(WXK_RETURN);
+        sim.Char('v', wxMOD_CONTROL); // Paste copied line.
+        wxYield();
+
+        CPPUNIT_ASSERT_EQUAL(0, maxlen.GetCount());
+
+        m_text->SetInsertionPointEnd();
+
+        sim.Char(WXK_RETURN);
+        wxYield();
+
+        sim.Char('v', wxMOD_CONTROL); // Paste copied line (2nd time).
+        WaitFor("wxTextCtrl update", [&]() { return maxlen.GetCount() != 0; });
+
+        CPPUNIT_ASSERT_EQUAL(1, maxlen.GetCount()); // Maximum length reached.
+        maxlen.Clear();
+
+        sim.Text("7"); // Should be rejected.
+        WaitFor("wxTextCtrl update", [&]() { return maxlen.GetCount() != 0; });
+
+        CPPUNIT_ASSERT_EQUAL(1, maxlen.GetCount());
+        maxlen.Clear();
+
+        // Depending on the underlying system, the new line (NL) could be
+        // LF, CR or CRLF, and as a consequence the length of the last line
+        // should be 50 - 2*NL.
+
+        CPPUNIT_ASSERT_EQUAL(3, m_text->GetNumberOfLines());
+
+        int lineLength = m_text->GetLineText(0).length(); // 1st line
+        CPPUNIT_ASSERT_EQUAL(100, lineLength);
+
+        lineLength = m_text->GetLineText(1).length(); // 2nd line
+        CPPUNIT_ASSERT_EQUAL(100, lineLength);
+
+        lineLength = m_text->GetLineText(2).length(); // 3rd line
+        CPPUNIT_ASSERT( (lineLength == 46 || lineLength == 48) );
+
+        // Try to paste a long string into a shorter selection:
+
+        m_text->SetSelection(0, 20);  // selection is: 01234567890123456789
+        m_text->Copy();
+        m_text->SetSelection(15, 21); // selection is: 567890
+        m_text->Paste(); // Only the first six characters can actually be pasted.
+        WaitFor("wxTextCtrl update", [&]() { return maxlen.GetCount() != 0; });
+        const auto line = m_text->GetLineText(0);
+        CPPUNIT_ASSERT( (line[15].GetValue() == '0' &&
+                         line[20].GetValue() == '5' &&
+                         line[21].GetValue() == '1') );
+        CPPUNIT_ASSERT_EQUAL(1, maxlen.GetCount());
+        maxlen.Clear();
+
+        // Now, despite the maximum length of 250 set above, adding additional
+        // content to the control programmatically is still possible/allowed:
+        m_text->AppendText(wxString::Format("\n%s", linePattern));
+        CPPUNIT_ASSERT_EQUAL(4, m_text->GetNumberOfLines());
+        CPPUNIT_ASSERT_EQUAL(0, maxlen.GetCount());
+#endif // __WXMSW__ || __WXGTK3__ || __WXQT__
+    }
+    else // !wxTE_MULTILINE
+    {
 #ifdef __WXQT__
     #if (QT_VERSION < QT_VERSION_CHECK(5, 12, 0))
         WARN("wxEVT_TEXT_MAXLEN event is only generated if Qt version is 5.12 or greater");
@@ -267,44 +363,44 @@ void TextCtrlTestCase::MaxLength()
     #endif
 #endif
 
-    EventCounter updated(m_text, wxEVT_TEXT);
-    EventCounter maxlen(m_text, wxEVT_TEXT_MAXLEN);
+        EventCounter updated(m_text, wxEVT_TEXT);
+        EventCounter maxlen(m_text, wxEVT_TEXT_MAXLEN);
 
-    m_text->SetFocus();
-    wxYield();
-    m_text->SetMaxLength(10);
+        m_text->SetMaxLength(10);
+        m_text->SetFocus();
+        wxYield();
 
-    wxUIActionSimulator sim;
-    sim.Text("abcdef");
-    wxYield();
+        sim.Text("abcdef");
+        wxYield();
 
-    CPPUNIT_ASSERT_EQUAL(0, maxlen.GetCount());
+        CPPUNIT_ASSERT_EQUAL(0, maxlen.GetCount());
 
-    sim.Text("ghij");
-    wxYield();
+        sim.Text("ghij");
+        wxYield();
 
-    CPPUNIT_ASSERT_EQUAL(0, maxlen.GetCount());
-    CPPUNIT_ASSERT_EQUAL(10, updated.GetCount());
+        CPPUNIT_ASSERT_EQUAL(0, maxlen.GetCount());
+        CPPUNIT_ASSERT_EQUAL(10, updated.GetCount());
 
-    maxlen.Clear();
-    updated.Clear();
+        maxlen.Clear();
+        updated.Clear();
 
-    sim.Text("k");
-    wxYield();
+        sim.Text("k");
+        wxYield();
 
-    CPPUNIT_ASSERT_EQUAL(1, maxlen.GetCount());
-    CPPUNIT_ASSERT_EQUAL(0, updated.GetCount());
+        CPPUNIT_ASSERT_EQUAL(1, maxlen.GetCount());
+        CPPUNIT_ASSERT_EQUAL(0, updated.GetCount());
 
-    maxlen.Clear();
-    updated.Clear();
+        maxlen.Clear();
+        updated.Clear();
 
-    m_text->SetMaxLength(0);
+        m_text->SetMaxLength(0);
 
-    sim.Text("k");
-    wxYield();
+        sim.Text("k");
+        wxYield();
 
-    CPPUNIT_ASSERT_EQUAL(0, maxlen.GetCount());
-    CPPUNIT_ASSERT_EQUAL(1, updated.GetCount());
+        CPPUNIT_ASSERT_EQUAL(0, maxlen.GetCount());
+        CPPUNIT_ASSERT_EQUAL(1, updated.GetCount());
+    }
 #endif
 }
 
@@ -483,12 +579,13 @@ void TextCtrlTestCase::Url()
     delete m_text;
     CreateText(wxTE_RICH | wxTE_AUTO_URL);
 
-    EventCounter url(m_text, wxEVT_TEXT_URL);
-
     m_text->AppendText("http://www.wxwidgets.org");
 
     wxUIActionSimulator sim;
     sim.MouseMove(m_text->ClientToScreen(wxPoint(5, 5)));
+
+    EventCounter url(m_text, wxEVT_TEXT_URL);
+
     sim.MouseClick();
     wxYield();
 
@@ -663,30 +760,23 @@ void TextCtrlTestCase::LogTextCtrl()
 
 void TextCtrlTestCase::LongText()
 {
-    // This test is only possible under MSW as in the other ports
-    // SetMaxLength() can't be used with multi line text controls.
-#ifdef __WXMSW__
     delete m_text;
     CreateText(wxTE_MULTILINE|wxTE_DONTWRAP);
 
     const int numLines = 1000;
-    const int lenPattern = 100;
     int i;
 
     // Pattern for the line.
-    wxChar linePattern[lenPattern+1];
-    for (i = 0; i < lenPattern - 1; i++)
-    {
-        linePattern[i] = wxChar('0' + i % 10);
-    }
-    linePattern[WXSIZEOF(linePattern) - 1] = wxChar('\0');
+    const wxString linePattern = MakeLinePattern();
 
-    // Fill the control.
-    m_text->SetMaxLength(15000);
+    wxString content;
     for (i = 0; i < numLines; i++)
     {
-        m_text->AppendText(wxString::Format(wxT("[%3d] %s\n"), i, linePattern));
+        content << wxString::Format(wxT("[%3d] %s\n"), i, linePattern);
     }
+
+    // Fill the control.
+    m_text->AppendText(content);
 
     // Check the content.
     for (i = 0; i < numLines; i++)
@@ -695,7 +785,6 @@ void TextCtrlTestCase::LongText()
         wxString line = m_text->GetLineText(i);
         CPPUNIT_ASSERT_EQUAL( line, pattern );
     }
-#endif // __WXMSW__
 }
 
 void TextCtrlTestCase::PositionToCoords()
@@ -1463,6 +1552,19 @@ TEST_CASE("wxTextCtrl::EventsOnCreate", "[wxTextCtrl][event]")
     CHECK( updated.GetCount() == 1 );
 }
 
+#ifdef __WXGTK3__
+TEST_CASE("wxTextCtrl::GTKSetPangoMarkup", "[wxTextCtrl][pango]")
+{
+    wxWindow* const parent = wxTheApp->GetTopWindow();
+
+    std::unique_ptr<wxTextCtrl> text(new wxTextCtrl(parent, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_MULTILINE));
+    text->SetValue("Bogus content to be replaced");
+    text->GTKSetPangoMarkup(R"(Welcome to <span background="#D3D3D3" strikethrough="true">wxWidgets</span> 3.3!)");
+
+    CHECK(text->GetValue() == wxString("Welcome to wxWidgets 3.3!"));
+}
+#endif
+
 #ifdef __WXOSX__
 TEST_CASE("wxTextCtrl::Get/SetRTFValue", "[wxTextCtrl][rtf]")
 {
@@ -1486,6 +1588,117 @@ TEST_CASE("wxTextCtrl::Get/SetRTFValue", "[wxTextCtrl][rtf]")
     CHECK(result.find(L"3.3") != wxString::npos);
 }
 #endif
+
+// SearchText() is not implemented in wxGTK2.
+#if !defined(__WXGTK__) || defined(__WXGTK3__)
+TEST_CASE("wxTextCtrl::SearchText", "[wxTextCtrl][search]")
+{
+    wxWindow* const parent = wxTheApp->GetTopWindow();
+
+    std::unique_ptr<wxTextCtrl> text(new wxTextCtrl(parent, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_RICH2 | wxTE_MULTILINE));
+
+    text->SetValue(R"(Allows more than 30Kb of text
+(on all Windows versions)
+and a very very long line to test wxHSCROLL style
+
+And here is a link in quotation marks to test wxTE_AUTO_URL: "http://www.wxwidgets.org"
+
+First 10 characters should be in red
+Next 10 characters should be in blue
+Next 10 characters should be normal
+And the next 10 characters should be green and italic
+This text should be cyan on blue
+And this should be in blue and the text you type should be in blue as well.
+
+And there is a mispeled word)");
+
+    text->SetSelection(0, 0);
+    auto results = text->SearchText(wxTextSearch(L"IMnotHERE!").SearchDirection(wxTextSearch::Direction::Down));
+    CHECK_FALSE(results);
+
+    results = text->SearchText(wxTextSearch(L"window").SearchDirection(wxTextSearch::Direction::Down).MatchCase());
+    CHECK_FALSE(results); // case is different
+
+    // ignore case
+    results = text->SearchText(wxTextSearch(L"window").SearchDirection(wxTextSearch::Direction::Down).MatchCase(false));
+    CHECK(results);
+    CHECK(results.m_start == 38);
+    CHECK(results.m_end == 44);
+
+    results = text->SearchText(wxTextSearch(L"Window").SearchDirection(wxTextSearch::Direction::Down).MatchCase());
+    CHECK(results);
+    CHECK(results.m_start == 38);
+    CHECK(results.m_end == 44);
+
+    results = text->SearchText(wxTextSearch(L"Window").SearchDirection(wxTextSearch::Direction::Down).MatchCase().MatchWholeWord());
+    CHECK_FALSE(results); // whole word fails
+
+    results = text->SearchText(wxTextSearch(L"Windows").SearchDirection(wxTextSearch::Direction::Down).MatchCase().MatchWholeWord());
+    CHECK(results);
+    CHECK(results.m_start == 38);
+    CHECK(results.m_end == 45);
+
+
+    results = text->SearchText(wxTextSearch(L"very").SearchDirection(wxTextSearch::Direction::Down).MatchCase().MatchWholeWord());
+    CHECK(results);
+    CHECK(results.m_start == 62);
+    CHECK(results.m_end == 66);
+
+    // will find the same match
+    results = text->SearchText(wxTextSearch(L"very").SearchDirection(wxTextSearch::Direction::Down).MatchCase().MatchWholeWord().Start(results.m_start));
+    CHECK(results);
+    CHECK(results.m_start == 62);
+    CHECK(results.m_end == 66);
+
+    // goes to next match
+    results = text->SearchText(wxTextSearch(L"very").SearchDirection(wxTextSearch::Direction::Down).MatchCase().MatchWholeWord().Start(results.m_start + 1));
+    CHECK(results);
+    CHECK(results.m_start == 67);
+    CHECK(results.m_end == 71);
+
+    // no more matches going down
+    results = text->SearchText(wxTextSearch(L"very").SearchDirection(wxTextSearch::Direction::Down).MatchCase().MatchWholeWord().Start(results.m_start + 1));
+    CHECK_FALSE(results);
+
+    // bad start position
+    results = text->SearchText(wxTextSearch(L"very").SearchDirection(wxTextSearch::Direction::Down).MatchCase().MatchWholeWord().Start(2000));
+    CHECK_FALSE(results); // started past the length of the control
+
+    // go up from the end
+    results = text->SearchText(wxTextSearch(L"very").SearchDirection(wxTextSearch::Direction::Up).MatchCase().MatchWholeWord());
+    CHECK(results);
+    CHECK(results.m_start == 67);
+    CHECK(results.m_end == 71);
+
+    results = text->SearchText(wxTextSearch(L"very").SearchDirection(wxTextSearch::Direction::Up).MatchCase().MatchWholeWord().Start(results.m_start));
+    CHECK(results);
+    CHECK(results.m_start == 62);
+    CHECK(results.m_end == 66);
+
+    // no more going up
+    results = text->SearchText(wxTextSearch(L"very").SearchDirection(wxTextSearch::Direction::Up).MatchCase().MatchWholeWord().Start(results.m_start));
+    CHECK_FALSE(results);
+
+    // phrase
+    results = text->SearchText(wxTextSearch(L"Next 10 characters").SearchDirection(wxTextSearch::Direction::Down).MatchCase().MatchWholeWord());
+    CHECK(results);
+    CHECK(results.m_start == 233);
+    CHECK(results.m_end == 251);
+
+    // Edge cases
+    // last word
+    results = text->SearchText(wxTextSearch(L"word").SearchDirection(wxTextSearch::Direction::Up).MatchCase().MatchWholeWord());
+    CHECK(results);
+    CHECK(results.m_start == 494);
+    CHECK(results.m_end == 498);
+
+    // first word
+    results = text->SearchText(wxTextSearch(L"Allows").SearchDirection(wxTextSearch::Direction::Down).MatchCase().MatchWholeWord());
+    CHECK(results);
+    CHECK(results.m_start == 0);
+    CHECK(results.m_end == 6);
+}
+#endif // !__WXGTK2__
 
 TEST_CASE("wxTextCtrl::InitialCanUndo", "[wxTextCtrl][undo]")
 {
@@ -1562,5 +1775,35 @@ TEST_CASE("wxTextCtrl::EmptyUndoBuffer", "[wxTextCtrl][undo]")
 }
 
 #endif // __MINGW32_TOOLCHAIN__
+
+#if wxUSE_RICHEDIT
+
+TEST_CASE("wxTextCtrl::RichWithHint", "[wxTextCtrl][hint][rich]")
+{
+    long richStyle = 0;
+
+    SECTION("Rich")
+    {
+        richStyle = wxTE_RICH;
+    }
+
+    SECTION("Rich2")
+    {
+        richStyle = wxTE_RICH2;
+    }
+
+    auto text = std::make_unique<wxTextCtrl>
+                (
+                    wxTheApp->GetTopWindow(), wxID_ANY, "",
+                    wxDefaultPosition, wxSize(400, 200),
+                    wxTE_MULTILINE | richStyle
+                );
+    text->SetHint("This is a hint");
+
+    CHECK( text->GetHint() == "This is a hint" );
+    CHECK( text->GetValue() == "" );
+}
+
+#endif // wxUSE_RICHEDIT
 
 #endif //wxUSE_TEXTCTRL

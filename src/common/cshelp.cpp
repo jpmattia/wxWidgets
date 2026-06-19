@@ -31,7 +31,6 @@
 
 #if wxUSE_MS_HTML_HELP
     #include "wx/msw/helpchm.h"     // for ShowContextHelpPopup
-    #include "wx/utils.h"           // for wxGetMousePosition()
 #endif
 
 // ----------------------------------------------------------------------------
@@ -200,7 +199,9 @@ bool wxContextHelp::DispatchEvent(wxWindow* win, const wxPoint& pt)
 {
     wxCHECK_MSG( win, false, wxT("win parameter can't be null") );
 
-    wxHelpEvent helpEvent(wxEVT_HELP, win->GetId(), pt,
+    wxHelpEvent helpEvent(wxEVT_HELP,
+                          win->GetHelpIdAtPoint(win->ScreenToClient(pt)),
+                          pt,
                           wxHelpEvent::Origin_HelpButton);
     helpEvent.SetEventObject(win);
 
@@ -359,7 +360,7 @@ bool wxSimpleHelpProvider::ShowHelp(wxWindowBase *window)
 #endif // wxUSE_MS_HTML_HELP
         {
 #if wxUSE_TIPWINDOW
-            static wxTipWindow* s_tipWindow = nullptr;
+            static wxTipWindow::Ref s_tipWindow;
 
             if ( s_tipWindow )
             {
@@ -369,8 +370,8 @@ bool wxSimpleHelpProvider::ShowHelp(wxWindowBase *window)
                 s_tipWindow->Close();
             }
 
-            s_tipWindow = new wxTipWindow((wxWindow *)window, text,
-                                            100, &s_tipWindow);
+            s_tipWindow = wxTipWindow::New((wxWindow *)window, text,
+                                            100);
 #else // !wxUSE_TIPWINDOW
             // we tried wxCHMHelpController but it failed and we don't have
             // wxTipWindow to fall back on, so

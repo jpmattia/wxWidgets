@@ -141,11 +141,6 @@
 
 #endif /* (__WXGTK__ || __WXQT__) && __WINDOWS__ */
 
-#ifdef __ANDROID__
-#   define __WXANDROID__
-#   include "wx/android/config_android.h"
-#endif
-
 #include "wx/compiler.h"
 
 /*
@@ -269,6 +264,12 @@
 #        if !defined(wxSIZE_T_IS_UINT) && !defined(wxSIZE_T_IS_ULONG)
 #            define wxSIZE_T_IS_ULONG
 #        endif
+
+        /* Define this as soon as possible and before string.h is included to
+           get memset_s() declaration from it if available. */
+#       ifndef __STDC_WANT_LIB_EXT1__
+#           define __STDC_WANT_LIB_EXT1__ 1
+#       endif
 #    endif
 
 /*
@@ -413,8 +414,17 @@
 #   endif
 #endif
 
-#ifdef __WXOSX_MAC__
+#ifdef __DARWIN__
 #    if defined(__MACH__)
+#        define __WXDARWIN__ 1
+#        include <TargetConditionals.h>
+#        if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+/*           this branch is also true for tv, catalyst, watch and vision */
+#            define __WXDARWIN_IPHONE__ 1
+#        elif defined(TARGET_OS_OSX) && TARGET_OS_OSX
+#            define __WXDARWIN_OSX__ 1
+#        endif
+
 #        include <Availability.h>
 #        ifndef MAC_OS_X_VERSION_10_4
 #           define MAC_OS_X_VERSION_10_4 1040
@@ -469,6 +479,9 @@
 #        endif
 #        ifndef MAC_OS_VERSION_14_0
 #           define MAC_OS_VERSION_14_0 140000
+#        endif
+#        ifndef MAC_OS_VERSION_26_0
+#           define MAC_OS_VERSION_26_0 260000
 #        endif
 #        if __MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_13
 #            ifndef NSAppKitVersionNumber10_10

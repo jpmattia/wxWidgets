@@ -157,16 +157,24 @@ int wxGetTimeZone()
     // We must initialize the time zone information before using it. It's not a
     // problem if we do it twice due to a race condition, as it's idempotent
     // anyhow, so don't bother with any locks here.
-    static bool s_tzSet = (_tzset(), true);
-    wxUnusedVar(s_tzSet);
+    static bool s_tzSet;
+    if (!s_tzSet)
+    {
+        _tzset();
+        s_tzSet = true;
+    }
 
     long t;
     _get_timezone(&t);
     return t;
 #else // Use some kind of time zone variable.
     // In any case we must initialize the time zone before using it.
-    static bool s_tzSet = (tzset(), true);
-    wxUnusedVar(s_tzSet);
+    static bool s_tzSet;
+    if (!s_tzSet)
+    {
+        tzset();
+        s_tzSet = true;
+    }
 
     #if defined(WX_TIMEZONE) // If WX_TIMEZONE was defined by configure, use it.
         return WX_TIMEZONE;
@@ -218,8 +226,6 @@ long wxGetUTCTime()
 {
     return (long)time(nullptr);
 }
-
-#if wxUSE_LONGLONG
 
 wxLongLong wxGetUTCTimeUSec()
 {
@@ -311,12 +317,3 @@ wxLongLong wxGetLocalTimeMillis()
 {
     return wxGetUTCTimeMillis() - wxGetTimeZone()*MILLISECONDS_PER_SECOND;
 }
-
-#else // !wxUSE_LONGLONG
-
-double wxGetLocalTimeMillis()
-{
-    return (double(clock()) / double(CLOCKS_PER_SEC)) * MILLISECONDS_PER_SECOND;
-}
-
-#endif // wxUSE_LONGLONG/!wxUSE_LONGLONG

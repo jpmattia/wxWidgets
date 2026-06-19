@@ -5,7 +5,7 @@
 // Licence:     wxWindows licence
 /////////////////////////////////////////////////////////////////////////////
 
-/** @class wxObjectRefData
+/** @typedef wxObjectRefData
 
     This class is just a typedef to wxRefCounter and is used by wxObject.
 
@@ -581,7 +581,8 @@ public:
         Constructor.
 
         @a ptr is a pointer to the reference counted object to which this class points.
-        If @a ptr is not null @b T::IncRef() will be called on the object.
+        This object takes ownership of @a ptr, i.e.\ it will call T::DecRef()
+        on it if it is non-null when this object is destroyed or reset.
     */
     wxObjectDataPtr(T* ptr = nullptr);
 
@@ -797,6 +798,36 @@ public:
 #define wxIMPLEMENT_DYNAMIC_CLASS2( className, baseClassName1, baseClassName2 )
 
 /**
+    Used in a C++ implementation file to complete the declaration of a class
+    that has run-time type information, and whose instances can be created
+    dynamically. Use this for template specializations.
+
+    Please note that @a arg must be the template parameter the primary template
+    @a templateName is being specialized for, e.g.
+
+    @code
+    template <typename T>
+    class MyWindow : public wxWindow
+    {
+    public:
+        MyWindow() = default; // Must have a default ctor for dynamic creation.
+
+    private:
+        T m_value;
+
+        wxDECLARE_DYNAMIC_CLASS(MyWindow);
+    };
+
+    wxIMPLEMENT_DYNAMIC_TEMPLATE_SPECIALIZATION(MyWindow, int, wxWindow);
+    @endcode
+
+    @header{wx/object.h}
+
+    @since 3.3.2
+*/
+#define wxIMPLEMENT_DYNAMIC_TEMPLATE_SPECIALIZATION( templateName, arg, baseClassName )
+
+/**
     Synonym for wxIMPLEMENT_ABSTRACT_CLASS().
 
     Please prefer to use the more clear, if longer,
@@ -870,6 +901,9 @@ public:
     @c this pointer is non-null which is always true), so this macro should be
     used to avoid them.
 
+    Note that @a ptr must be an object of wxObject-derived class, otherwise
+    using this macro results in undefined behaviour.
+
     @header{wx/object.h}
 
     @see wxDynamicCast()
@@ -880,6 +914,9 @@ public:
     This macro checks that the cast is valid in debug mode (an assert failure
     will result if wxDynamicCast(ptr, classname) == @NULL) and then returns the
     result of executing an equivalent of <tt>static_cast<classname *>(ptr)</tt>.
+
+    Note that @a ptr must be an object of wxObject-derived class, otherwise
+    using this macro results in undefined behaviour.
 
     @header{wx/object.h}
 

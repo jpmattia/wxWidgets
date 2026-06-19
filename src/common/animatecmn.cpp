@@ -29,6 +29,7 @@
 
 #include "wx/gifdecod.h"
 #include "wx/anidecod.h"
+#include "wx/webpdecoder.h"
 
 #include "wx/private/animate.h"
 
@@ -203,7 +204,7 @@ void wxAnimationCtrlBase::UpdateStaticImage()
         {
             // the user-provided bitmap is bigger than our control, strech it
             wxImage temp(bmpCurrent.ConvertToImage());
-            temp.Rescale(sz.GetWidth(), sz.GetHeight(), wxIMAGE_QUALITY_HIGH);
+            temp.Rescale(sz, wxIMAGE_QUALITY_HIGH);
             m_bmpStaticReal = wxBitmap(temp);
         }
     }
@@ -280,6 +281,9 @@ void wxAnimation::InitStandardHandlers()
 #if wxUSE_ICO_CUR
     AddHandler(new wxANIDecoder);
 #endif // wxUSE_ICO_CUR
+#if wxUSE_LIBWEBP
+    AddHandler(new wxWebPDecoder);
+#endif // wxUSE_LIBWEBP
 }
 
 void wxAnimation::CleanUpHandlers()

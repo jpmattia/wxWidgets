@@ -1127,20 +1127,22 @@ wxString wxString::Left(size_t nCount) const
 // (returns the whole string if ch not found)
 wxString wxString::BeforeFirst(wxUniChar ch, wxString *rest) const
 {
+  wxString ret;
   int iPos = Find(ch);
   if ( iPos == wxNOT_FOUND )
   {
-    iPos = length();
+    ret = *this;
     if ( rest )
       rest->clear();
   }
   else
   {
+    ret.assign(*this, 0, iPos);
     if ( rest )
       rest->assign(*this, iPos + 1, npos);
   }
 
-  return wxString(*this, 0, iPos);
+  return ret;
 }
 
 /// get all characters before the last occurrence of ch
@@ -1492,7 +1494,7 @@ ToNumeric(T* pVal,
     PreserveErrno preserveErrno;
     errno = 0;
 
-    wxStringCharType *end;
+    wxStringCharType *end = nullptr;
 
     const R res = convert(start, &end, base);
     if ( rangeCheck && !rangeCheck(res) )

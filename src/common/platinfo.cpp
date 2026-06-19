@@ -33,11 +33,21 @@
     #include "wx/versioninfo.h"
 #endif
 
+namespace
+{
+
 // global object
 // VERY IMPORTANT: do not use the default constructor since it would
 //                 try to init the wxPlatformInfo instance using
 //                 gs_platInfo itself!
-static wxPlatformInfo gs_platInfo(wxPORT_UNKNOWN);
+wxPlatformInfo gs_platInfo(wxPORT_UNKNOWN);
+
+#if wxUSE_THREADS
+// Critical section protecting gs_platInfo initialization.
+wxCriticalSection gs_csInit;
+#endif // wxUSE_THREADS
+
+} // anonymous namespace
 
 // ----------------------------------------------------------------------------
 // constants
@@ -170,7 +180,8 @@ bool wxPlatformInfo::operator==(const wxPlatformInfo &t) const
            m_port == t.m_port &&
            m_usingUniversal == t.m_usingUniversal &&
            m_bitness == t.m_bitness &&
-           m_endian == t.m_endian;
+           m_endian == t.m_endian &&
+           m_platformDescription == t.m_platformDescription;
 }
 
 void wxPlatformInfo::InitForCurrentPlatform()
@@ -195,6 +206,7 @@ void wxPlatformInfo::InitForCurrentPlatform()
                                            &m_tkVersionMicro);
         m_usingUniversal = traits->IsUsingUniversalWidgets();
         m_desktopEnv = traits->GetDesktopEnvironment();
+        m_platformDescription = traits->GetPlatformDescription();
     }
 
     m_os = wxGetOsVersion(&m_osVersionMajor, &m_osVersionMinor, &m_osVersionMicro);
@@ -213,12 +225,12 @@ void wxPlatformInfo::InitForCurrentPlatform()
 /* static */
 const wxPlatformInfo& wxPlatformInfo::Get()
 {
-    static bool initialized = false;
-    if ( !initialized )
-    {
+#if wxUSE_THREADS
+    wxCriticalSectionLocker lockInit(gs_csInit);
+#endif // wxUSE_THREADS
+
+    if ( !gs_platInfo.m_initializedForCurrentPlatform )
         gs_platInfo.InitForCurrentPlatform();
-        initialized = true;
-    }
 
     return gs_platInfo;
 }

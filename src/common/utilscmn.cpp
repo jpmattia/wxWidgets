@@ -470,46 +470,12 @@ wxString wxGetHomeDir()
     return home;
 }
 
-#if 0
-
-wxString wxGetCurrentDir()
-{
-    wxString dir;
-    size_t len = 1024;
-    bool ok;
-    do
-    {
-        ok = getcwd(dir.GetWriteBuf(len + 1), len) != nullptr;
-        dir.UngetWriteBuf();
-
-        if ( !ok )
-        {
-            if ( errno != ERANGE )
-            {
-                wxLogSysError(wxT("Failed to get current directory"));
-
-                return wxEmptyString;
-            }
-            else
-            {
-                // buffer was too small, retry with a larger one
-                len *= 2;
-            }
-        }
-        //else: ok
-    } while ( !ok );
-
-    return dir;
-}
-
-#endif // 0
-
 // ----------------------------------------------------------------------------
 // Environment
 // ----------------------------------------------------------------------------
 
 #ifdef __WXOSX__
-#if wxOSX_USE_COCOA_OR_CARBON
+#if defined(wxOSX_USE_COCOA_OR_CARBON) && wxOSX_USE_COCOA_OR_CARBON
     #include <crt_externs.h>
 #endif
 #endif
@@ -523,6 +489,7 @@ bool wxGetEnvMap(wxEnvVariableHashMap *map)
     // it might only have it in narrow char version until now as we use main()
     // (and not _wmain()) as our entry point.
     static wxChar* s_dummyEnvVar = _tgetenv(wxT("TEMP"));
+    wxUnusedVar(s_dummyEnvVar);
 
     wxChar **env = _tenviron;
 #elif defined(__VMS)
@@ -530,7 +497,7 @@ bool wxGetEnvMap(wxEnvVariableHashMap *map)
    // TODO : should we do something with logicals?
     char **env=nullptr;
 #elif defined(__DARWIN__)
-#if wxOSX_USE_COCOA_OR_CARBON
+#if defined(wxOSX_USE_COCOA_OR_CARBON) && wxOSX_USE_COCOA_OR_CARBON
     // Under Mac shared libraries don't have access to the global environ
     // variable so use this Mac-specific function instead as advised by
     // environ(7) under Darwin
@@ -1022,6 +989,62 @@ unsigned int wxCTZ(wxUint32 x)
 #endif
 }
 
+wxVersionInfo wxGetLibraryVersionInfo()
+{
+    // Only add the last build component to the version if it's non-zero, it's
+    // pretty useless otherwise.
+    wxString ver = wxString::Format
+                   (
+                        wxS("%d.%d.%d"),
+                        wxMAJOR_VERSION,
+                        wxMINOR_VERSION,
+                        wxRELEASE_NUMBER
+                   );
+    if ( wxSUBRELEASE_NUMBER )
+        ver += wxString::Format(wxS(".%d"), wxSUBRELEASE_NUMBER);
+
+    // don't translate these strings, they're for diagnostics purposes only
+    wxString msg;
+    msg.Printf(wxS("wxWidgets Library (%s port)\n")
+               wxS("Version %s (Unicode: %s, debug level: %d),\n")
+#if !wxUSE_REPRODUCIBLE_BUILD
+               wxS("compiled at %s %s\n\n")
+#endif
+               wxS("Runtime version of toolkit used is %d.%d.%d.\n"),
+               wxPlatformInfo::Get().GetPortIdName(),
+               ver,
+#if wxUSE_UNICODE_UTF8
+               "UTF-8",
+#else
+               "wchar_t",
+#endif
+               wxDEBUG_LEVEL,
+#if !wxUSE_REPRODUCIBLE_BUILD
+               // As explained in the comment near these macros definitions,
+               // ccache has special logic for detecting the use of __DATE__
+               // and __TIME__ macros, which doesn't apply to our own versions
+               // of them, hence this comment is needed just to mention the
+               // standard macro names and to ensure that ccache does _not_
+               // cache the results of compiling this file.
+               __TDATE__,
+               __TTIME__,
+#endif
+               wxPlatformInfo::Get().GetToolkitMajorVersion(),
+               wxPlatformInfo::Get().GetToolkitMinorVersion(),
+               wxPlatformInfo::Get().GetToolkitMicroVersion()
+              );
+
+    msg += wxPlatformInfo::Get().GetPlatformDescription();
+
+    return wxVersionInfo(wxS("wxWidgets"),
+                         wxMAJOR_VERSION,
+                         wxMINOR_VERSION,
+                         wxRELEASE_NUMBER,
+                         msg,
+                         wxString::FromUTF8("Copyright © 1992-2026 wxWidgets team")
+                         );
+}
+
 
 #endif // wxUSE_BASE
 
@@ -1186,7 +1209,7 @@ wxString wxStripMenuCodes(const wxString& in, int flags)
 
     for ( wxString::const_iterator it = in.begin(); it != in.end(); ++it )
     {
-        wxChar ch = *it;
+        wxUniChar ch = *it;
         if ( (flags & wxStrip_Mnemonics) && ch == wxT('&') )
         {
             // skip it, it is used to introduce the accel char (or to quote
@@ -1264,7 +1287,7 @@ wxFindMenuItemId(wxFrame *frame,
 }
 
 // Try to find the deepest child that contains 'pt'.
-// We go backwards, to try to allow for controls that are spacially
+// We go backwards, to try to allow for controls that are spatially
 // within other controls, but are still siblings (e.g. buttons within
 // static boxes). Static boxes are likely to be created _before_ controls
 // that sit inside them.
@@ -1374,73 +1397,6 @@ int wxMessageBox(const wxString& message, const wxString& caption, long style,
     return wxCANCEL;
 }
 
-wxVersionInfo wxGetLibraryVersionInfo()
-{
-    // Only add the last build component to the version if it's non-zero, it's
-    // pretty useless otherwise.
-    wxString ver = wxString::Format
-                   (
-                        wxS("%d.%d.%d"),
-                        wxMAJOR_VERSION,
-                        wxMINOR_VERSION,
-                        wxRELEASE_NUMBER
-                   );
-    if ( wxSUBRELEASE_NUMBER )
-        ver += wxString::Format(wxS(".%d"), wxSUBRELEASE_NUMBER);
-
-    // don't translate these strings, they're for diagnostics purposes only
-    wxString msg;
-    msg.Printf(wxS("wxWidgets Library (%s port)\n")
-               wxS("Version %s (Unicode: %s, debug level: %d),\n")
-#if !wxUSE_REPRODUCIBLE_BUILD
-               wxS("compiled at %s %s\n\n")
-#endif
-               wxS("Runtime version of toolkit used is %d.%d.\n"),
-               wxPlatformInfo::Get().GetPortIdName(),
-               ver,
-#if wxUSE_UNICODE_UTF8
-               "UTF-8",
-#else
-               "wchar_t",
-#endif
-               wxDEBUG_LEVEL,
-#if !wxUSE_REPRODUCIBLE_BUILD
-               // As explained in the comment near these macros definitions,
-               // ccache has special logic for detecting the use of __DATE__
-               // and __TIME__ macros, which doesn't apply to our own versions
-               // of them, hence this comment is needed just to mention the
-               // standard macro names and to ensure that ccache does _not_
-               // cache the results of compiling this file.
-               __TDATE__,
-               __TTIME__,
-#endif
-               wxPlatformInfo::Get().GetToolkitMajorVersion(),
-               wxPlatformInfo::Get().GetToolkitMinorVersion()
-              );
-
-#ifdef __WXGTK__
-    msg += wxString::Format("Compile-time GTK+ version is %d.%d.%d.\n",
-                            GTK_MAJOR_VERSION,
-                            GTK_MINOR_VERSION,
-                            GTK_MICRO_VERSION);
-#endif // __WXGTK__
-
-#ifdef __WXQT__
-    msg += wxString::Format("Compile-time QT version is %s.\n",
-                            QT_VERSION_STR);
-#endif // __WXQT__
-
-    const wxString copyrightSign = wxString::FromUTF8("\xc2\xa9");
-
-    return wxVersionInfo(wxS("wxWidgets"),
-                         wxMAJOR_VERSION,
-                         wxMINOR_VERSION,
-                         wxRELEASE_NUMBER,
-                         msg,
-                         wxString::Format(wxS("Copyright %s 1992-2024 wxWidgets team"),
-                                          copyrightSign));
-}
-
 void wxInfoMessageBox(wxWindow* parent)
 {
     wxVersionInfo info = wxGetLibraryVersionInfo();
@@ -1523,7 +1479,7 @@ wxWindowDisabler::wxWindowDisabler(bool disable)
     {
         DoDisable();
 
-#if defined(__WXOSX__) && wxOSX_USE_COCOA
+#if defined(__WXOSX__) && defined(wxOSX_USE_COCOA) && wxOSX_USE_COCOA
         AfterDisable(nullptr);
 #endif
     }
@@ -1540,7 +1496,7 @@ wxWindowDisabler::wxWindowDisabler(wxWindow *winToSkip, wxWindow *winToSkip2)
 
     DoDisable();
 
-#if defined(__WXOSX__) && wxOSX_USE_COCOA
+#if defined(__WXOSX__) && defined(wxOSX_USE_COCOA) && wxOSX_USE_COCOA
     AfterDisable(winToSkip);
 #endif
 }
@@ -1573,7 +1529,7 @@ wxWindowDisabler::~wxWindowDisabler()
     if ( !m_disabled )
         return;
 
-#if defined(__WXOSX__) && wxOSX_USE_COCOA
+#if defined(__WXOSX__) && defined(wxOSX_USE_COCOA) && wxOSX_USE_COCOA
     BeforeEnable();
 #endif
 

@@ -182,20 +182,20 @@ constexpr bool operator!(wxPGPropertyValuesFlags a)
 }
 
 #if WXWIN_COMPATIBILITY_3_2
-wxDEPRECATED_MSG("use wxPGPropertyValuesFlags::DontRecurse instead")
-constexpr wxPGPropertyValuesFlags wxPG_DONT_RECURSE { wxPGPropertyValuesFlags::DontRecurse };
-wxDEPRECATED_MSG("use wxPGPropertyValuesFlags::KeepStructure instead")
-constexpr wxPGPropertyValuesFlags wxPG_KEEP_STRUCTURE { wxPGPropertyValuesFlags::KeepStructure };
-wxDEPRECATED_MSG("use wxPGPropertyValuesFlags::Recurse instead")
-constexpr wxPGPropertyValuesFlags wxPG_RECURSE { wxPGPropertyValuesFlags::Recurse };
-wxDEPRECATED_MSG("use wxPGPropertyValuesFlags::IncAttributes instead")
-constexpr wxPGPropertyValuesFlags wxPG_INC_ATTRIBUTES { wxPGPropertyValuesFlags::IncAttributes };
-wxDEPRECATED_MSG("use wxPGPropertyValuesFlags::RecurseStarts instead")
-constexpr wxPGPropertyValuesFlags wxPG_RECURSE_STARTS { wxPGPropertyValuesFlags::RecurseStarts };
-wxDEPRECATED_MSG("use wxPGPropertyValuesFlags::Force instead")
-constexpr wxPGPropertyValuesFlags wxPG_FORCE { wxPGPropertyValuesFlags::Force };
-wxDEPRECATED_MSG("use wxPGPropertyValuesFlags::SortTopLevelOnly instead")
-constexpr wxPGPropertyValuesFlags wxPG_SORT_TOP_LEVEL_ONLY { wxPGPropertyValuesFlags::SortTopLevelOnly };
+// These constants are deprecated but intentionally don't use wxDEPRECATED_MSG()
+// because one will be given whenever they are used with any function now
+// taking wxPGPropertyValuesFlags anyhow and giving multiple deprecation
+// warnings for the same line of code is more annoying than helpful.
+enum wxPG_PROPERTYVALUES_FLAGS
+{
+    wxPG_DONT_RECURSE = static_cast<int>(wxPGPropertyValuesFlags::DontRecurse),
+    wxPG_KEEP_STRUCTURE = static_cast<int>(wxPGPropertyValuesFlags::KeepStructure),
+    wxPG_RECURSE = static_cast<int>(wxPGPropertyValuesFlags::Recurse),
+    wxPG_INC_ATTRIBUTES = static_cast<int>(wxPGPropertyValuesFlags::IncAttributes),
+    wxPG_RECURSE_STARTS = static_cast<int>(wxPGPropertyValuesFlags::RecurseStarts),
+    wxPG_FORCE = static_cast<int>(wxPGPropertyValuesFlags::Force),
+    wxPG_SORT_TOP_LEVEL_ONLY = static_cast<int>(wxPGPropertyValuesFlags::SortTopLevelOnly),
+};
 
 wxDEPRECATED_MSG("use wxPGPropertyValuesFlags instead")
 constexpr bool operator==(wxPGPropertyValuesFlags a, int b)
@@ -281,22 +281,18 @@ inline int operator|=(int& a, wxPGPropValFormatFlags b)
     return a = a | static_cast<int>(b);
 }
 
-wxDEPRECATED_MSG("use wxPGPropValFormatFlags::FullValue instead")
-constexpr wxPGPropValFormatFlags wxPG_FULL_VALUE { wxPGPropValFormatFlags::FullValue };
-wxDEPRECATED_MSG("use wxPGPropValFormatFlags::ReportError instead")
-constexpr wxPGPropValFormatFlags wxPG_REPORT_ERROR { wxPGPropValFormatFlags::ReportError };
-wxDEPRECATED_MSG("use wxPGPropValFormatFlags::PropertySpecific instead")
-constexpr wxPGPropValFormatFlags wxPG_PROPERTY_SPECIFIC { wxPGPropValFormatFlags::PropertySpecific };
-wxDEPRECATED_MSG("use wxPGPropValFormatFlags::EditableValue instead")
-constexpr wxPGPropValFormatFlags wxPG_EDITABLE_VALUE { wxPGPropValFormatFlags::EditableValue };
-wxDEPRECATED_MSG("use wxPGPropValFormatFlags::CompositeFragment instead")
-constexpr wxPGPropValFormatFlags wxPG_COMPOSITE_FRAGMENT { wxPGPropValFormatFlags::CompositeFragment };
-wxDEPRECATED_MSG("use wxPGPropValFormatFlags::UneditableCompositeFragment instead")
-constexpr wxPGPropValFormatFlags wxPG_UNEDITABLE_COMPOSITE_FRAGMENT { wxPGPropValFormatFlags::UneditableCompositeFragment };
-wxDEPRECATED_MSG("use wxPGPropValFormatFlags::ValueIsCurrent instead")
-constexpr wxPGPropValFormatFlags wxPG_VALUE_IS_CURRENT { wxPGPropValFormatFlags::ValueIsCurrent };
-wxDEPRECATED_MSG("use wxPGPropValFormatFlags::ProgrammaticValue instead")
-constexpr wxPGPropValFormatFlags wxPG_PROGRAMMATIC_VALUE { wxPGPropValFormatFlags::ProgrammaticValue };
+// See comment before wxPG_RECURSE above.
+enum wxPG_MISC_ARG_FLAGS
+{
+    wxPG_FULL_VALUE = static_cast<int>(wxPGPropValFormatFlags::FullValue),
+    wxPG_REPORT_ERROR = static_cast<int>(wxPGPropValFormatFlags::ReportError),
+    wxPG_PROPERTY_SPECIFIC = static_cast<int>(wxPGPropValFormatFlags::PropertySpecific),
+    wxPG_EDITABLE_VALUE = static_cast<int>(wxPGPropValFormatFlags::EditableValue),
+    wxPG_COMPOSITE_FRAGMENT = static_cast<int>(wxPGPropValFormatFlags::CompositeFragment),
+    wxPG_UNEDITABLE_COMPOSITE_FRAGMENT = static_cast<int>(wxPGPropValFormatFlags::UneditableCompositeFragment),
+    wxPG_VALUE_IS_CURRENT = static_cast<int>(wxPGPropValFormatFlags::ValueIsCurrent),
+    wxPG_PROGRAMMATIC_VALUE = static_cast<int>(wxPGPropValFormatFlags::ProgrammaticValue),
+};
 #endif // WXWIN_COMPATIBILITY_3_2
 
 // -----------------------------------------------------------------------
@@ -331,14 +327,13 @@ constexpr bool operator!(wxPGSetValueFlags a)
 }
 
 #if WXWIN_COMPATIBILITY_3_2
-wxDEPRECATED_MSG("use wxPGSetValueFlags::RefreshEditor instead")
-constexpr wxPGSetValueFlags wxPG_SETVAL_REFRESH_EDITOR { wxPGSetValueFlags::RefreshEditor };
-wxDEPRECATED_MSG("use wxPGSetValueFlags::Aggregated instead")
-constexpr wxPGSetValueFlags wxPG_SETVAL_AGGREGATED { wxPGSetValueFlags::Aggregated };
-wxDEPRECATED_MSG("use wxPGSetValueFlags::FromParent instead")
-constexpr wxPGSetValueFlags wxPG_SETVAL_FROM_PARENT { wxPGSetValueFlags::FromParent };
-wxDEPRECATED_MSG("use wxPGSetValueFlags::ByUser instead")
-constexpr wxPGSetValueFlags wxPG_SETVAL_BY_USER { wxPGSetValueFlags::ByUser };
+enum wxPG_SETVALUE_FLAGS
+{
+    wxPG_SETVAL_REFRESH_EDITOR = static_cast<int>(wxPGSetValueFlags::RefreshEditor),
+    wxPG_SETVAL_AGGREGATED = static_cast<int>(wxPGSetValueFlags::Aggregated),
+    wxPG_SETVAL_FROM_PARENT = static_cast<int>(wxPGSetValueFlags::FromParent),
+    wxPG_SETVAL_BY_USER = static_cast<int>(wxPGSetValueFlags::ByUser),
+};
 
 wxDEPRECATED_MSG("use wxPGSetValueFlags instead")
 constexpr bool operator==(wxPGSetValueFlags a, int b)
@@ -426,12 +421,10 @@ template<> inline wxVariant WXVARIANT( const wxArrayString& value )
     { return wxVariant(value); }
 template<> inline wxVariant WXVARIANT( const wxString& value )
     { return wxVariant(value); }
-#if wxUSE_LONGLONG
 template<> inline wxVariant WXVARIANT( const wxLongLong& value )
     { return wxVariant(value); }
 template<> inline wxVariant WXVARIANT( const wxULongLong& value )
     { return wxVariant(value); }
-#endif
 #if wxUSE_DATETIME
 template<> inline wxVariant WXVARIANT( const wxDateTime& value )
     { return wxVariant(value); }
@@ -485,7 +478,7 @@ public:\
 \
     virtual wxString GetType() const override; \
 \
-    virtual wxVariantData* Clone() const override { return new classname##VariantData(m_value); } \
+    wxNODISCARD virtual wxVariantData* Clone() const override { return new classname##VariantData(m_value); } \
 \
     DECLARE_WXANY_CONVERSION() \
 protected:\
@@ -600,10 +593,8 @@ template<> inline wxVariant WXVARIANT( const wxColour& value )
 #if wxUSE_DATETIME
 #define wxPG_VARIANT_TYPE_DATETIME      wxS("datetime")
 #endif
-#if wxUSE_LONGLONG
 #define wxPG_VARIANT_TYPE_LONGLONG      wxS("longlong")
 #define wxPG_VARIANT_TYPE_ULONGLONG     wxS("ulonglong")
-#endif
 #endif // !SWIG
 
 // -----------------------------------------------------------------------

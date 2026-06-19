@@ -59,6 +59,15 @@ public:
     // implementation only from now on
     // -------------------------------
 
+    // override some virtual functions inherited from wxWindow too
+    virtual wxVisualAttributes GetDefaultAttributes() const override
+    {
+        return GetClassDefaultAttributes(GetWindowVariant());
+    }
+
+    static wxVisualAttributes
+    GetClassDefaultAttributes(wxWindowVariant variant = wxWINDOW_VARIANT_NORMAL);
+
     virtual void SetWindowStyleFlag(long style) override;
 
     virtual bool MSWCommand(WXUINT param, WXWORD id) override;
@@ -100,7 +109,7 @@ protected:
     // common part of all ctors
     void Init();
 
-    virtual bool MSWGetDarkModeSupport(MSWDarkModeSupport& support) const override;
+    virtual void MSWSetDarkOrLightMode(SetMode setmode) override;
     virtual int MSWGetToolTipMessage() const override;
 
     // create the native toolbar control

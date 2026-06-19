@@ -94,7 +94,7 @@ enum
 class SliderWidgetsPage : public WidgetsPage
 {
 public:
-    SliderWidgetsPage(WidgetsBookCtrl *book, wxImageList *imaglist);
+    SliderWidgetsPage(WidgetsBookCtrl *book, wxVector<wxBitmapBundle>& imaglist);
 
     virtual wxWindow *GetWidget() const override { return m_slider; }
     virtual void RecreateWidget() override { CreateSlider(); }
@@ -251,7 +251,7 @@ wxEND_EVENT_TABLE()
 IMPLEMENT_WIDGETS_PAGE(SliderWidgetsPage, "Slider", FAMILY_CTRLS );
 
 SliderWidgetsPage::SliderWidgetsPage(WidgetsBookCtrl *book,
-                                     wxImageList *imaglist)
+                                     wxVector<wxBitmapBundle>& imaglist)
                   : WidgetsPage(book, imaglist, slider_xpm)
 {
     // init everything
@@ -310,7 +310,7 @@ void SliderWidgetsPage::CreateContent()
     sizerLeft->AddSpacer(5);
 
     wxButton *btn = new wxButton(sizerLeftBox, SliderPage_Reset, "&Reset");
-    sizerLeft->Add(btn, wxSizerFlags().CentreHorizontal().Border(wxALL, 15));
+    sizerLeft->Add(btn, wxSizerFlags().CentreHorizontal().Border(wxALL, FromDIP(15)));
 
     // middle pane
     wxStaticBoxSizer *sizerMiddle = new wxStaticBoxSizer(wxVERTICAL, this, "&Change slider value");
@@ -403,11 +403,11 @@ void SliderWidgetsPage::CreateContent()
 
     // the 3 panes panes compose the window
     sizerTop->Add(sizerLeft,
-                  wxSizerFlags(0).Expand().Border((wxALL & ~wxLEFT), 10));
+                  wxSizerFlags(0).Expand().DoubleBorder((wxALL & ~wxLEFT)));
     sizerTop->Add(sizerMiddle,
-                  wxSizerFlags(1).Expand().Border(wxALL, 10));
+                  wxSizerFlags(1).Expand().DoubleBorder(wxALL));
     sizerTop->Add(sizerRight,
-                  wxSizerFlags(1).Expand().Border((wxALL & ~wxRIGHT), 10));
+                  wxSizerFlags(1).Expand().DoubleBorder((wxALL & ~wxRIGHT)));
 
     // final initializations
     SetSizer(sizerTop);

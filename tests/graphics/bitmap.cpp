@@ -12,10 +12,10 @@
 
 #include "testprec.h"
 
+#include "wx/bitmap.h"
+
 #ifdef wxHAS_RAW_BITMAP
 
-
-#include "wx/bitmap.h"
 #include "wx/rawbmp.h"
 #include "wx/dcmemory.h"
 #include "wx/dcsvg.h"
@@ -411,7 +411,6 @@ TEST_CASE("BitmapTestCase::ToImage", "[bitmap][image][convertto]")
 #endif // __WXMSW__ || __WXOSX__
         {
             const wxColour clrFg(*wxCYAN);
-            const wxColour clrBg(*wxGREEN);
             const unsigned char alpha = 92;
 
 #ifdef wxHAS_PREMULTIPLIED_ALPHA
@@ -489,7 +488,6 @@ TEST_CASE("BitmapTestCase::ToImage", "[bitmap][image][convertto]")
 #endif // __WXMSW__ || __WXOSX__
         {
             const wxColour clrFg(*wxCYAN);
-            const wxColour clrBg(*wxGREEN);
             const unsigned char alpha = 92;
 #ifdef wxHAS_PREMULTIPLIED_ALPHA
             // premultiplied values
@@ -2087,7 +2085,7 @@ TEST_CASE("wxBitmap::ResourceExhaustion", "[.]")
     }
 
     // Copying bitmaps (triggered by modifying the scale factor) doesn't work
-    // neither, but still shouldn't crash.
+    // either, but still shouldn't crash.
     wxBitmap bmp1x2 = bmp1;
     bmp1x2.SetScaleFactor(2);
 

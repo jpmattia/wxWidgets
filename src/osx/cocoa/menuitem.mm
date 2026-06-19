@@ -18,6 +18,7 @@
     #include "wx/menu.h"
 #endif // WX_PRECOMP
 
+#include "wx/private/bmpbndl.h"
 #include "wx/osx/private.h"
 #include "wx/osx/private/available.h"
 
@@ -30,7 +31,7 @@ struct Mapping
     SEL action;
 };
 
-Mapping sActionToWXMapping[] =
+static const Mapping sActionToWXMapping[] =
 {
 // as we don't have NSUndoManager support we must not use the native actions
 #if 0
@@ -54,7 +55,7 @@ int wxOSXGetIdFromSelector(SEL action )
             return sActionToWXMapping[i].menuid;
         ++i;
     }
-    
+
     return 0;
 }
 
@@ -67,7 +68,7 @@ SEL wxOSXGetSelectorFromID(int menuId )
             return sActionToWXMapping[i].action;
         ++i;
     }
-    
+
     return nil;
 }
 
@@ -144,7 +145,7 @@ void wxMacCocoaMenuItemSetAccelerator( NSMenuItem* menuItem, wxAcceleratorEntry*
 
         if (entry->GetFlags() & wxACCEL_RAW_CTRL)
             modifiers |= NSControlKeyMask;
-        
+
         if (entry->GetFlags() & wxACCEL_ALT)
             modifiers |= NSAlternateKeyMask ;
 
@@ -213,7 +214,7 @@ void wxMacCocoaMenuItemSetAccelerator( NSMenuItem* menuItem, wxAcceleratorEntry*
                 case WXK_NUMPAD_ENTER :
                     shortcut = NSEnterCharacter;
                     break;
-                    
+
                 case WXK_BACK :
                 case WXK_RETURN :
                 case WXK_TAB :
@@ -248,9 +249,9 @@ public :
 
     ~wxMenuItemCocoaImpl();
 
-    void SetBitmap( const wxBitmap& bitmap ) override
+    void SetBitmap( const wxBitmapBundle& bitmap ) override
     {
-        [m_osxMenuItem setImage:bitmap.GetNSImage()];
+        [m_osxMenuItem setImage:wxOSXGetImageFromBundle(bitmap)];
     }
 
     void Enable( bool enable ) override
@@ -288,7 +289,7 @@ public :
 
         wxMacCocoaMenuItemSetAccelerator( m_osxMenuItem, entry );
     }
-    
+
     bool DoDefault() override;
 
     void * GetHMenuItem() override { return m_osxMenuItem; }
@@ -308,7 +309,7 @@ bool wxMenuItemCocoaImpl::DoDefault()
 {
     bool handled=false;
     int menuid = m_peer->GetId();
-    
+
     NSApplication *theNSApplication = [NSApplication sharedApplication];
     if (menuid == wxID_OSX_HIDE)
     {
@@ -355,18 +356,18 @@ wxMenuItemImpl* wxMenuItemImpl::Create( wxMenuItem* peer, wxMenu *pParentMenu,
         if ( (pParentMenu == nullptr || !pParentMenu->GetNoEventsMode()) && pSubMenu == nullptr )
         {
             selector = wxOSXGetSelectorFromID(menuid);
-            
+
             if ( selector == nil )
             {
                 selector = @selector(clickedAction:);
                 targetSelf = true;
             }
         }
-        
+
         wxNSMenuItem* menuitem = [ [ wxNSMenuItem alloc ] initWithTitle:cfText.AsNSString() action:selector keyEquivalent:@""];
         if ( targetSelf )
             [menuitem setTarget:menuitem];
-        
+
         if ( pSubMenu )
         {
             pSubMenu->GetPeer()->SetTitle( text );

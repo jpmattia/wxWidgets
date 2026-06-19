@@ -37,6 +37,16 @@
         this option allows changing it without modifying the program code and
         also applies to asserts which may happen before the wxApp object
         creation or after its destruction.
+    @flag{catch-unhandled-exceptions}
+        If set to zero, wxWidgets will not catch unhandled exceptions, but
+        rather lets the default behaviour of aborting the program take place.
+        Not catching unhandled exceptions makes debugging easier, as the
+        backtrace is more likely to show what actually happened, and where.
+        The same applies to any crash dumps generated due to unhandled exceptions.
+        By default unhandled exceptions are eventually caught by wxWidgets.
+        This flag should be set very early during program startup, within
+        the constructor of the wxApp derivative. This option has been added in
+        wxWidgets 3.3.0.
     @endFlagTable
 
     @section sysopt_win Windows
@@ -72,10 +82,6 @@
         appearance but not all fonts are available in this quality,
         e.g. the Terminal font in small sizes is not and this option may be
         used if wider fonts selection is more important than higher quality.
-    @flag{msw.window.no-composited}
-        If set to 1, disables the use of composited, i.e. double-buffered,
-        windows by default in wxMSW. This is not recommended, but can be useful
-        for debugging or working around redraw problems in the existing code.
     @flag{msw.dark-mode}
         If set to 1, enable experimental support of dark mode if the system is
         using it, i.e. this has the same effect as calling

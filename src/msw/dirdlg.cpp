@@ -35,6 +35,8 @@
 #include <initguid.h>
 
 #include "wx/msw/private/cotaskmemptr.h"
+#include "wx/msw/private/gethwnd.h"
+
 #include "wx/dynlib.h"
 
 // IFileDialog related declarations missing from some compilers headers.
@@ -141,7 +143,7 @@ int wxDirDialog::ShowModal()
     WX_HOOK_MODAL_DIALOG();
 
     wxWindow* const parent = GetParentForModalDialog();
-    WXHWND hWndParent = parent ? GetHwndOf(parent) : nullptr;
+    const WXHWND hWndParent = wxGetHWND(parent);
 
     wxWindowDisabler disableOthers(this, parent);
 
@@ -150,9 +152,12 @@ int wxDirDialog::ShowModal()
     // Use IFileDialog under new enough Windows, it's more user-friendly.
     int rc;
 #if wxUSE_IFILEOPENDIALOG
-    rc = wxMSWImpl::wxIFileDialog::CanBeUsedWithAnOwner()
-                        ? ShowIFileOpenDialog(hWndParent)
-                        : wxID_NONE;
+    // It is crucial for this variable to be static, CanBeUsedWithAnOwner()
+    // only detects COM apartment type change once, so we shouldn't call it
+    // again if it returned false the first time.
+    static bool
+        s_canUseIFileDialog = wxMSWImpl::wxIFileDialog::CanBeUsedWithAnOwner();
+    rc = s_canUseIFileDialog ? ShowIFileOpenDialog(hWndParent) : wxID_NONE;
 
     if ( rc == wxID_NONE )
 #endif // wxUSE_IFILEOPENDIALOG
@@ -178,7 +183,12 @@ int wxDirDialog::ShowSHBrowseForFolder(WXHWND owner)
     bi.lpfn           = BrowseCallbackProc;
     bi.lParam         = wxMSW_CONV_LPARAM(m_path); // param for the callback
 
+    // When this file is compiled as part of wxQt, GetComCtl32Version() is not
+    // available, but this doesn't matter because wxQt is not going to be used
+    // with ancient Windows versions anyhow.
+#ifdef __WXMSW__
     static const int verComCtl32 = wxApp::GetComCtl32Version();
+#endif // __WXMSW__
 
     // we always add the edit box (it doesn't hurt anybody, does it?)
     bi.ulFlags |= BIF_EDITBOX;
@@ -195,11 +205,13 @@ int wxDirDialog::ShowSHBrowseForFolder(WXHWND owner)
         }
         else
         {
+#ifdef __WXMSW__
             // Versions < 600 doesn't support BIF_NONEWFOLDERBUTTON
             // The only way to get rid of the Make New Folder button is use
             // the old dialog style which doesn't have the button thus we
             // simply don't set the New Dialog Style for such comctl versions.
             if (verComCtl32 >= 600)
+#endif // __WXMSW__
             {
                 bi.ulFlags |= BIF_NEWDIALOGSTYLE;
                 bi.ulFlags |= BIF_NONEWFOLDERBUTTON;

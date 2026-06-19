@@ -67,6 +67,7 @@ public:
         m_notebook->AddPage(win, page->GetName());
     }
 
+#ifndef wxHAS_PREF_EDITOR_MODELESS
     int GetSelectedPage() const
     {
         return m_notebook->GetSelection();
@@ -76,6 +77,7 @@ public:
     {
         m_notebook->ChangeSelection(page);
     }
+#endif // !wxHAS_PREF_EDITOR_MODELESS
 
      bool ShouldPreventAppExit() const override
      {
@@ -170,6 +172,7 @@ public:
             // probably not worth the hassle. We know the old parent is still
             // valid, because otherwise Dismiss() would have been called and
             // m_win cleared.
+            m_win->Show();
             m_win->Raise();
         }
     }

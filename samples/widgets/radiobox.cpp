@@ -71,7 +71,7 @@ static const int TEST_BUTTON = 1;
 class RadioWidgetsPage : public WidgetsPage
 {
 public:
-    RadioWidgetsPage(WidgetsBookCtrl *book, wxImageList *imaglist);
+    RadioWidgetsPage(WidgetsBookCtrl *book, wxVector<wxBitmapBundle>& imaglist);
 
     virtual wxWindow *GetWidget() const override { return m_radio; }
     virtual void RecreateWidget() override { CreateRadio(); }
@@ -174,7 +174,7 @@ IMPLEMENT_WIDGETS_PAGE(RadioWidgetsPage, "Radio",
                        );
 
 RadioWidgetsPage::RadioWidgetsPage(WidgetsBookCtrl *book,
-                                   wxImageList *imaglist)
+                                   wxVector<wxBitmapBundle>& imaglist)
                   : WidgetsPage(book, imaglist, radio_xpm)
 {
     // init everything
@@ -226,7 +226,7 @@ void RadioWidgetsPage::CreateContent()
     sizerLeft->AddSpacer(5);
 
     btn = new wxButton(sizerleftBox, RadioPage_Reset, "&Reset");
-    sizerLeft->Add(btn, wxSizerFlags().CentreHorizontal().Border(wxALL, 15));
+    sizerLeft->Add(btn, wxSizerFlags().CentreHorizontal().Border(wxALL, FromDIP(15)));
 
     // middle pane
     wxStaticBoxSizer *sizerMiddle = new wxStaticBoxSizer(wxVERTICAL, this, "&Change parameters");
@@ -277,11 +277,11 @@ void RadioWidgetsPage::CreateContent()
 
     // the 3 panes panes compose the window
     sizerTop->Add(sizerLeft,
-                  wxSizerFlags(0).Expand().Border((wxALL & ~wxLEFT), 10));
+                  wxSizerFlags(0).Expand().DoubleBorder((wxALL & ~wxLEFT)));
     sizerTop->Add(sizerMiddle,
-                  wxSizerFlags(1).Expand().Border(wxALL, 10));
+                  wxSizerFlags(1).Expand().DoubleBorder(wxALL));
     sizerTop->Add(sizerRight,
-                  wxSizerFlags(0).Expand().Border((wxALL & ~wxRIGHT), 10));
+                  wxSizerFlags(0).Expand().DoubleBorder((wxALL & ~wxRIGHT)));
 
     // final initializations
     SetSizer(sizerTop);

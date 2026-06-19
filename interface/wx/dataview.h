@@ -86,7 +86,7 @@
     @code
         wxDataViewCtrl *musicCtrl = new wxDataViewCtrl(this, wxID_ANY);
         wxObjectDataPtr<wxDataViewModel> musicModel(new MyMusicModel);
-        
+
         musicCtrl->AssociateModel(musicModel.get());
 
         // add columns now
@@ -816,7 +816,7 @@ public:
     ///@}
 
     /**
-        Returns the ID.
+        Returns the ID as an opaque void pointer.
     */
     void* GetID() const;
 
@@ -824,6 +824,11 @@ public:
         Returns @true if the ID is not @NULL.
     */
     bool IsOk() const;
+
+    /**
+        Sets the ID to @NULL and thus makes this item invalid.
+    */
+    void Unset();
 };
 
 
@@ -3109,14 +3114,14 @@ public:
         after adding any items to the control (or, conversely, items must not
         be added before the columns are set up).
     */
-    void AppendItem( const wxVector<wxVariant> &values, wxUIntPtr data = nullptr );
+    void AppendItem( const wxVector<wxVariant> &values, wxUIntPtr data = 0 );
 
     /**
         Prepends an item (i.e.\ a row) to the control.
 
         See remarks for AppendItem() for preconditions of this method.
     */
-    void PrependItem( const wxVector<wxVariant> &values, wxUIntPtr data = nullptr );
+    void PrependItem( const wxVector<wxVariant> &values, wxUIntPtr data = 0 );
 
     /**
         Inserts an item (i.e.\ a row) to the control.
@@ -3126,7 +3131,7 @@ public:
         Additionally, @a row must be less than or equal to the current number
         of items in the control (see GetItemCount()).
     */
-    void InsertItem( unsigned int row, const wxVector<wxVariant> &values, wxUIntPtr data = nullptr );
+    void InsertItem( unsigned int row, const wxVector<wxVariant> &values, wxUIntPtr data = 0 );
 
     /**
         Delete the row at position @a row.
@@ -3498,7 +3503,7 @@ public:
         in number and type. No (default) values are filled in
         automatically.
     */
-    void AppendItem( const wxVector<wxVariant> &values, wxUIntPtr data = nullptr );
+    void AppendItem( const wxVector<wxVariant> &values, wxUIntPtr data = 0 );
 
     /**
         Prepends an item (=row) and fills it with @a values.
@@ -3507,7 +3512,7 @@ public:
         in number and type. No (default) values are filled in
         automatically.
     */
-    void PrependItem( const wxVector<wxVariant> &values, wxUIntPtr data = nullptr );
+    void PrependItem( const wxVector<wxVariant> &values, wxUIntPtr data = 0 );
 
     /**
         Inserts an item (=row) and fills it with @a values.
@@ -3516,7 +3521,7 @@ public:
         in number and type. No (default) values are filled in
         automatically.
     */
-    void InsertItem(  unsigned int row, const wxVector<wxVariant> &values, wxUIntPtr data = nullptr );
+    void InsertItem(  unsigned int row, const wxVector<wxVariant> &values, wxUIntPtr data = 0 );
 
     /**
         Delete the item (=row) at position @a pos.
@@ -4054,11 +4059,10 @@ public:
         Returns the index of the child item at which an item currently being
         dragged would be dropped.
 
-        This function can be used from wxEVT_DATAVIEW_ITEM_DROP_POSSIBLE
-        handlers to determine the exact position of the item being dropped.
-
-        Note that it currently always returns wxNOT_FOUND when using native GTK
-        implementation of this control.
+        This function can be used from wxEVT_DATAVIEW_ITEM_DROP (in all ports)
+        and wxEVT_DATAVIEW_ITEM_DROP_POSSIBLE (except when using native GTK
+        implementation) handlers to determine the exact position of the item
+        being dropped.
 
         @since 3.1.2
      */

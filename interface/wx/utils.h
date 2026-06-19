@@ -110,48 +110,6 @@ public:
     ~wxWindowDisabler();
 };
 
-
-
-/**
-    @class wxBusyCursor
-
-    This class makes it easy to tell your user that the program is temporarily
-    busy. Just create a wxBusyCursor object on the stack, and within the
-    current scope, the hourglass will be shown.
-
-    For example:
-
-    @code
-    wxBusyCursor wait;
-
-    for (int i = 0; i < 100000; i++)
-        DoACalculation();
-    @endcode
-
-    It works by calling wxBeginBusyCursor() in the constructor, and
-    wxEndBusyCursor() in the destructor.
-
-    @library{wxcore}
-    @category{misc}
-
-    @see wxBeginBusyCursor(), wxEndBusyCursor(), wxWindowDisabler, wxBusyInfo
-*/
-class wxBusyCursor
-{
-public:
-    /**
-        Constructs a busy cursor object, calling wxBeginBusyCursor().
-    */
-    wxBusyCursor(const wxCursor* cursor = wxHOURGLASS_CURSOR);
-
-    /**
-        Destroys the busy cursor object, calling wxEndBusyCursor().
-    */
-    ~wxBusyCursor();
-};
-
-
-
 // ============================================================================
 // Global functions/macros
 // ============================================================================
@@ -159,38 +117,6 @@ public:
 
 /** @addtogroup group_funcmacro_dialog */
 ///@{
-
-/**
-    Changes the cursor to the given cursor for all windows in the application.
-    Use wxEndBusyCursor() to revert the cursor back to its previous state.
-    These two calls can be nested, and a counter ensures that only the outer
-    calls take effect.
-
-    @see wxIsBusy(), wxBusyCursor
-
-    @header{wx/utils.h}
-*/
-void wxBeginBusyCursor(const wxCursor* cursor = wxHOURGLASS_CURSOR);
-
-/**
-    Changes the cursor back to the original cursor, for all windows in the
-    application. Use with wxBeginBusyCursor().
-
-    @see wxIsBusy(), wxBusyCursor
-
-    @header{wx/utils.h}
-*/
-void wxEndBusyCursor();
-
-/**
-    Returns @true if between two wxBeginBusyCursor() and wxEndBusyCursor()
-    calls.
-
-    @see wxBusyCursor.
-
-    @header{wx/utils.h}
-*/
-bool wxIsBusy();
 
 /**
     Ring the system bell.
@@ -232,7 +158,7 @@ void wxInfoMessageBox(wxWindow* parent);
 
     @header{wx/utils.h}
 
-    @library{wxcore}
+    @library{wxbase}
 */
 wxVersionInfo wxGetLibraryVersionInfo();
 
@@ -256,15 +182,19 @@ wxVersionInfo wxGetLibraryVersionInfo();
 using wxEnvVariableHashMap = std::unordered_map<wxString, wxString>;
 
 /**
-    This is a macro defined as @c getenv() or its wide char version in Unicode
-    mode.
+    Wrapper of the standard @c getenv() or its wide char version.
 
-    Note that under Win32 it may not return correct value for the variables set
-    with wxSetEnv(), use wxGetEnv() function instead.
+    Note that under Win32 the overload using `char*` does not work for
+    variables using non-ASCII characters, use either the overload taking
+    `wchar_t*` or, preferably, wxGetEnv() instead.
+
+    Under other platforms, `char*` overload always uses UTF-8 encoding.
 
     @header{wx/utils.h}
 */
-wxChar* wxGetenv(const wxString& var);
+char* wxGetenv(const char* s);
+wchar_t* wxGetenv(const wchar_t* ws);
+char* wxGetenv(const wxString& s);
 
 /**
     Returns the current value of the environment variable @a var in @a value.
@@ -913,7 +843,9 @@ bool wxGetUserName(char* buf, int sz);
 /**
     Returns the string containing the description of the current platform in a
     user-readable form. For example, this function may return strings like
-    "Windows 10 (build 10240), 64-bit edition" or "Linux 4.1.4 i386".
+    "Windows 10 Pro 22H2 (build 19045), 64-bit edition",
+    "AlmaLinux 10.1 (Heliotrope Lion), 6.12.0-55.9.1.el10_0.x86_64",
+    or "Linux 4.1.4 i386".
 
     @see wxGetOsVersion()
 
@@ -938,6 +870,9 @@ wxString wxGetOsDescription();
     numbers (as returned by the 'uname -r' command); e.g. "4", "1", and "4" if
     the machine is using kernel 4.1.4.
 
+    On Linux (@c __LINUX__ defined), if you are interested in the distribution
+    version rather than the kernel version, see wxGetLinuxDistributionInfo().
+
     For macOS systems (@c wxOS_MAC) the major and minor version integers are the
     natural version numbers associated with the OS; e.g. "10", "11" and "2" if
     the machine is using macOS El Capitan 10.11.2.
@@ -950,6 +885,12 @@ wxString wxGetOsDescription();
             <th>Major version</th>
             <th>Minor version</th>
             <th>Build number</th>
+        </tr>
+        <tr>
+            <td>Windows Server 2025</td>
+            <td>10</td>
+            <td>0</td>
+            <td>26100</td>
         </tr>
         <tr>
             <td>Windows 11</td>
@@ -1051,7 +992,7 @@ wxString wxGetOsDescription();
     See the <a href="https://learn.microsoft.com/en-us/windows/win32/sysinfo/operating-system-version">Microsoft documentation</a>
     for more info about the values above.
 
-    @see wxGetOsDescription(), wxPlatformInfo
+    @see wxGetOsDescription(), wxGetLinuxDistributionInfo(), wxPlatformInfo
 
     @header{wx/utils.h}
 */
@@ -1060,6 +1001,9 @@ wxOperatingSystemId wxGetOsVersion(int* major = nullptr, int* minor = nullptr, i
 /**
     Returns @true if the version of the operating system on which the program
     is running under is the same or later than the given version.
+
+    For Unix-like systems (except macOS), this is the kernel version, not
+    the marketing/distribution version.
 
     @since 3.1.0
 
@@ -1131,13 +1075,8 @@ wxString wxGetNativeCpuArchitectureName();
     Returns a structure containing information about the currently running
     Linux distribution.
 
-    This function uses the @c lsb_release utility which is part of the
-    <tt>Linux Standard Base Core</tt> specification
-    (see http://refspecs.linux-foundation.org/lsb.shtml) since the very first LSB
-    release 1.0 (released in 2001).
-    The @c lsb_release utility is very common on modern Linux distributions but in
-    case it's not available, then this function will return a ::wxLinuxDistributionInfo
-    structure containing empty strings.
+    In case such information cannot be obtained, this function will return
+    a ::wxLinuxDistributionInfo structure containing empty strings.
 
     This function is Linux-specific and is only available when the @c \__LINUX__
     symbol is defined.
@@ -1604,18 +1543,6 @@ wxString wxNow();
     @header{wx/utils.h}
 */
 void wxSleep(int secs);
-
-/**
-    @deprecated This function is deprecated because its name is misleading:
-                notice that the argument is in milliseconds, not microseconds.
-                Please use either wxMilliSleep() or wxMicroSleep() depending on
-                the resolution you need.
-
-    Sleeps for the specified number of milliseconds.
-
-    @header{wx/utils.h}
-*/
-void wxUsleep(unsigned long milliseconds);
 
 ///@}
 

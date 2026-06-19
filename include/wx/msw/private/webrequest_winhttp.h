@@ -30,6 +30,8 @@ public:
 
     wxString GetHeader(const wxString& name) const override;
 
+    std::vector<wxString> GetAllHeaderValues(const wxString& name) const override;
+
     int GetStatus() const override;
 
     wxString GetStatusText() const override;
@@ -83,6 +85,8 @@ public:
 
     void Start() override;
 
+    void SetTimeouts(long connectionTimeoutMs, long dataTimeoutMs) override;
+
     wxWebResponseImplPtr GetResponse() const override
         { return m_response; }
 
@@ -118,6 +122,7 @@ private:
     // returned later and this argument must be null.
     wxNODISCARD Result DoWriteData(DWORD* bytesWritten = nullptr);
 
+    void DoSetTimeouts();
 
     wxWebSessionWinHTTP& m_sessionImpl;
     wxString m_url;
@@ -137,6 +142,11 @@ private:
     // Proxy credentials (if any) are stored in the session, but we need store
     // the same flag for them as for the server credentials here.
     bool m_tryProxyCredentials = false;
+
+    // Store timeouts, in order to set these before sending request.
+    long m_connectionTimeoutMs = wxWebRequest::Timeout_Default;
+    long m_dataTimeoutMs = wxWebRequest::Timeout_Default;
+
 
 
     wxNODISCARD Result SendRequest();
@@ -159,6 +169,10 @@ private:
     {
         return Fail(operation, ::GetLastError());
     }
+
+    // Log all the headers of the response if debug logging is enabled.
+    void LogResponseHeadersIfNecessary();
+
 
     // These functions can only be used for asynchronous requests.
     void SetFailed(const wxString& operation, DWORD errorCode)

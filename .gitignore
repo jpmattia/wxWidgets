@@ -84,8 +84,6 @@
 /build/msw/*.vcproj.*.user
 /build/msw/*.vcxproj.user
 /build/msw/vc*_mswud
-/build/msw/wx_vc8arm_*.vcproj
-/build/msw/wx_vc8arm.sln
 /build/msw/ipch/
 /build/msw/*.opensdf
 /build/msw/*.sdf
@@ -98,6 +96,7 @@
 **/xcuserdata/
 **/DerivedData/
 /build/osx/build
+/build/osx/__pycache__
 /build/osx/setup/cocoa/include/wx/setup.h
 /build/osx/setup/iphone/include/wx/setup.h
 
@@ -180,6 +179,7 @@
 /distrib/release
 
 # /docs/doxygen/
+/docs/doxygen/doxygen.log
 /docs/doxygen/out
 
 # /include/
@@ -455,3 +455,6 @@
 /utils/wxrc/wxrc_vc[789].sln
 
 /3rdparty/webview2
+
+/build/cmake/output/
+CMakeUserPresets.json

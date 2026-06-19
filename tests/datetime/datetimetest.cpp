@@ -21,6 +21,7 @@
 #endif // WX_PRECOMP
 
 #include "wx/wxcrt.h"       // for wxStrstr()
+#include "wx/scopeguard.h"
 
 #include "wx/private/localeset.h"
 
@@ -180,10 +181,10 @@ struct Date
 static const Date testDates[] =
 {
     {  1, wxDateTime::Jan,  1970, 00, 00, 00, 2440587.5, wxDateTime::Thu,         0 },
-    {  7, wxDateTime::Feb,  2036, 00, 00, 00, 2464730.5, wxDateTime::Thu,        -1 },
-    {  8, wxDateTime::Feb,  2036, 00, 00, 00, 2464731.5, wxDateTime::Fri,        -1 },
-    {  1, wxDateTime::Jan,  2037, 00, 00, 00, 2465059.5, wxDateTime::Thu,        -1 },
-    {  1, wxDateTime::Jan,  2038, 00, 00, 00, 2465424.5, wxDateTime::Fri,        -1 },
+    {  7, wxDateTime::Feb,  2036, 00, 00, 00, 2464730.5, wxDateTime::Thu, 2085955200LL },
+    {  8, wxDateTime::Feb,  2036, 00, 00, 00, 2464731.5, wxDateTime::Fri, 2086041600LL },
+    {  1, wxDateTime::Jan,  2037, 00, 00, 00, 2465059.5, wxDateTime::Thu, 2114380800LL },
+    {  1, wxDateTime::Jan,  2038, 00, 00, 00, 2465424.5, wxDateTime::Fri, 2145916800LL },
     {  1, wxDateTime::Jan,  2044, 00, 00, 00, 2467615.5, wxDateTime::Fri, 2335219200LL },
     { 21, wxDateTime::Jan,  2222, 00, 00, 00, 2532648.5, wxDateTime::Mon, 7954070400LL },
     { 29, wxDateTime::May,  1976, 12, 00, 00, 2442928.0, wxDateTime::Sat, 202219200 },
@@ -795,6 +796,21 @@ TEST_CASE("wxDateTime::Format", "[datetime]")
     }
 
     CHECK(wxDateTime::Now().Format("%%") == "%");
+
+
+    wxDateTime dt(29, wxDateTime::May, 1976, 18, 30, 15, 678);
+    CHECK( dt.Format("%F %T.%l") == "1976-05-29 18:30:15.678" );
+
+    // A format ending in a lone '%' must not read past the end of the format
+    // string; the trailing percent is output verbatim. The literal is long
+    // enough to be heap-allocated so the over-read trips ASAN without the fix.
+    //
+    // The MSVC CRT considers a trailing '%' an invalid format string and
+    // aborts, so skip this check there. This CRT is also used by MinGW.
+#if !defined(_MSC_VER) && !defined(__MINGW32__)
+    CHECK( dt.Format("a long enough format ending in a percent sign %") ==
+                     "a long enough format ending in a percent sign %" );
+#endif
 }
 
 TEST_CASE("wxDateTime::ParseFormat", "[datetime]")
@@ -1419,6 +1435,14 @@ TEST_CASE("wxDateTime::ParseDateTime", "[datetime]")
         },
 
         {
+            "4242-04-02 4:20",
+            {  2, wxDateTime::Apr, 4242, 4, 20,  0 },
+            true,
+            "",
+            false
+        },
+
+        {
             "2010-01-04 14:30",
             {  4, wxDateTime::Jan, 2010, 14, 30,  0 },
             true,
@@ -1830,7 +1854,7 @@ TEST_CASE("wxDateTime::DateOnly", "[datetime]")
 
 TEST_CASE("wxDateTime::TranslateFromUnicodeFormat", "[datetime]")
 {
-#if defined(__WINDOWS__) || defined(__WXOSX__)
+#if defined(__WINDOWS__) || defined(__DARWIN__)
     // This function is defined in src/common/intl.cpp and as it is not public we
     // need to declare it here explicitly.
     WXDLLIMPEXP_BASE
@@ -2530,6 +2554,12 @@ TEST_CASE("Easter", "[datetime][holiday][easter]")
 
 TEST_CASE("US Catholic Holidays", "[datetime][holiday]")
 {
+    // Clear the wxDateTimeWorkDays that exists by default, and restore it at the end,
+    // after cleaning up the authority tested here.
+    wxDateTimeHolidayAuthority::ClearAllAuthorities();
+    wxON_BLOCK_EXIT0(wxDateTimeHolidayAuthority::ClearAllAuthorities);
+    wxON_BLOCK_EXIT1(wxDateTimeHolidayAuthority::AddAuthority, new wxDateTimeWorkDays);
+
     SECTION("Ascension")
     {
         wxDateTime ascension = wxDateTimeUSCatholicFeasts::GetThursdayAscension(2023);
@@ -2557,6 +2587,12 @@ TEST_CASE("US Catholic Holidays", "[datetime][holiday]")
 
 TEST_CASE("Christian Holidays", "[datetime][holiday][christian]")
 {
+    // Clear the wxDateTimeWorkDays that exists by default, and restore it at the end,
+    // after cleaning up the authority tested here.
+    wxDateTimeHolidayAuthority::ClearAllAuthorities();
+    wxON_BLOCK_EXIT0(wxDateTimeHolidayAuthority::ClearAllAuthorities);
+    wxON_BLOCK_EXIT1(wxDateTimeHolidayAuthority::AddAuthority, new wxDateTimeWorkDays);
+
     SECTION("Easter")
     {
         wxDateTime easter = wxDateTimeChristianHolidays::GetEaster(2023);

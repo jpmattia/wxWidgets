@@ -39,10 +39,23 @@ enum wxAuiManagerOption
     wxAUI_MGR_VENETIAN_BLINDS_HINT     = 1 << 4,
     /// The possible location for docking is indicated by a rectangular outline.
     wxAUI_MGR_RECTANGLE_HINT           = 1 << 5,
-    /// The translucent area where the pane could be docked appears gradually.
+    /**
+        The translucent area where the pane could be docked appears gradually.
+
+        Note that this flag was included in the default flags until wxWidgets
+        3.3.0 but this is not the case in the newer versions. If you'd like to
+        still show the hint progressively, you need to explicitly add it to
+        wxAUI_MGR_DEFAULT.
+     */
     wxAUI_MGR_HINT_FADE                = 1 << 6,
-    /// Used in complement of wxAUI_MGR_VENETIAN_BLINDS_HINT to show the hint immediately.
-    wxAUI_MGR_NO_VENETIAN_BLINDS_FADE  = 1 << 7,
+    /**
+        Style which disabled the fade-in effect for the docking hint when using
+        Venetian blinds hint.
+
+        This style is obsolete and doesn't do anything any longer, fade-in
+        effect is only enabled when wxAUI_MGR_HINT_FADE is used.
+     */
+    wxAUI_MGR_NO_VENETIAN_BLINDS_FADE  = 0,
     /// When a docked pane is resized, its content is refreshed in live (instead of moving
     /// the border alone and refreshing the content at the end).
     /// Since wxWidgets 3.3.0 this flag is included in the default flags.
@@ -50,9 +63,30 @@ enum wxAuiManagerOption
     /// Default behaviour.
     wxAUI_MGR_DEFAULT = wxAUI_MGR_ALLOW_FLOATING |
                         wxAUI_MGR_TRANSPARENT_HINT |
-                        wxAUI_MGR_HINT_FADE |
-                        wxAUI_MGR_NO_VENETIAN_BLINDS_FADE |
                         wxAUI_MGR_LIVE_RESIZE
+};
+
+/**
+    Flags for wxAuiManager::SetDocksForMinPanesStyle().
+
+    @since 3.3.2
+ */
+enum wxAuiMinDockOption
+{
+    /// Show icons of the minimized panes.
+    wxAUI_MIN_DOCK_ICONS       = 1 << 0,
+
+    /// Show titles of the minimized panes.
+    wxAUI_MIN_DOCK_TEXT        = 1 << 1,
+
+    /// Show both icons and titles of the minimized panes.
+    wxAUI_MIN_DOCK_BOTH        = wxAUI_MIN_DOCK_ICONS | wxAUI_MIN_DOCK_TEXT,
+
+    /// Rotate the icons to match the text orientation in vertical docks.
+    wxAUI_MIN_DOCK_ROTATE_ICON_WITH_TEXT = 1 << 2,
+
+    /// Default style showing both icons and titles.
+    wxAUI_MIN_DOCK_DEFAULT = wxAUI_MIN_DOCK_BOTH
 };
 
 /**
@@ -60,7 +94,7 @@ enum wxAuiManagerOption
 
     wxAuiManager is the central class of the wxAUI class framework.
 
-    wxAuiManager manages the panes associated with it for a particular wxFrame,
+    wxAuiManager manages the panes associated with it for a particular window,
     using a pane's wxAuiPaneInfo information to determine each pane's docking
     and floating behaviour.
 
@@ -76,18 +110,18 @@ enum wxAuiManagerOption
     flicker, by modifying more than one pane at a time, and then "committing"
     all of the changes at once by calling Update().
 
-    Panes can be added quite easily:
+    Panes can be added using AddPane():
 
     @code
-    wxTextCtrl* text1 = new wxTextCtrl(this, -1);
-    wxTextCtrl* text2 = new wxTextCtrl(this, -1);
+    wxTextCtrl* text1 = new wxTextCtrl(this, wxID_ANY);
+    wxTextCtrl* text2 = new wxTextCtrl(this, wxID_ANY);
     m_mgr.AddPane(text1, wxLEFT, "Pane Caption");
     m_mgr.AddPane(text2, wxBOTTOM, "Pane Caption");
     m_mgr.Update();
     @endcode
 
-    Later on, the positions can be modified easily. The following will float
-    an existing pane in a tool window:
+    Later on, the positions and other attributes can be modified, e.g. the
+    following will float an existing pane in a tool window:
 
     @code
     m_mgr.GetPane(text1).Float();
@@ -122,6 +156,22 @@ enum wxAuiManagerOption
         in a lower level yield to panes in higher levels. The best way to
         understand layers is by running the wxAUI sample.
 
+    @section auimanager_minimized Minimizing Panes
+
+    Since wxWidgets 3.3.2, wxAuiManager supports minimizing panes which have
+    the minimize button, see wxAuiPaneInfo::MinimizeButton(). Such panes appear
+    in the special toolbar(s) showing the buttons for all panes that can be
+    minimized and allowing to either hide or show them again.
+
+    By default, the toolbars showing the buttons for the minimized panes are
+    created on the left, bottom and right sides of the managed window. You can
+    change this using AllowDocksForMinPanes() but note that you must still
+    allow for the toolbars to be created on at least one side and the only way
+    not to have any such toolbar at all is to not have any panes with minimize
+    button. See SetDocksForMinPanesStyle() and wxAuiPaneInfo::IconMin() for more
+    customization possibilities.
+
+
     @beginStyleTable
     @style{wxAUI_MGR_ALLOW_FLOATING}
            Allow a pane to be undocked to take the form of a wxMiniFrame.
@@ -141,9 +191,11 @@ enum wxAuiManagerOption
            instead.
     @style{wxAUI_MGR_HINT_FADE}
            The translucent area where the pane could be docked appears gradually.
+           Note that this flag is not included in wxAUI_MGR_DEFAULT since
+           wxWidgets 3.3.0 any longer.
     @style{wxAUI_MGR_NO_VENETIAN_BLINDS_FADE}
-           Used in complement of wxAUI_MGR_VENETIAN_BLINDS_HINT to show the
-           docking hint immediately.
+           This style is obsolete and doesn't do anything, it is only defined
+           as 0 for compatibility.
     @style{wxAUI_MGR_LIVE_RESIZE}
            When a docked pane is resized, its content is refreshed in live (instead of moving
            the border alone and refreshing the content at the end). Note that
@@ -152,8 +204,8 @@ enum wxAuiManagerOption
            always enabled in wxGTK3 and wxOSX ports as non-live resizing is not
            implemented in them.
     @style{wxAUI_MGR_DEFAULT}
-           Default behaviour, combines: wxAUI_MGR_ALLOW_FLOATING | wxAUI_MGR_TRANSPARENT_HINT |
-           wxAUI_MGR_HINT_FADE | wxAUI_MGR_NO_VENETIAN_BLINDS_FADE.
+           Default behaviour, combines ::wxAUI_MGR_ALLOW_FLOATING,
+           ::wxAUI_MGR_TRANSPARENT_HINT and ::wxAUI_MGR_LIVE_RESIZE.
     @endStyleTable
 
     @beginEventEmissionTable{wxAuiManagerEvent}
@@ -161,6 +213,9 @@ enum wxAuiManagerOption
         Triggered when any button is pressed for any docked panes.
     @event{EVT_AUI_PANE_CLOSE(func)}
         Triggered when a docked or floating pane is closed.
+    @event{EVT_AUI_PANE_MINIMIZE(func)}
+        Triggered when a pane is minimized. This event is new since wxWidgets
+        3.3.2.
     @event{EVT_AUI_PANE_MAXIMIZE(func)}
         Triggered when a pane is maximized.
     @event{EVT_AUI_PANE_RESTORE(func)}
@@ -184,13 +239,14 @@ public:
     /**
         Constructor.
 
-        @param managed_wnd
-            Specifies the wxFrame which should be managed.
+        @param managedWindow
+            Specifies the window which will contain AUI panes. If it is not
+            specified here, it must be set later using SetManagedWindow().
         @param flags
             Specifies the frame management behaviour and visual effects
             with the ::wxAuiManagerOption's style flags.
     */
-    wxAuiManager(wxWindow* managed_wnd = nullptr,
+    wxAuiManager(wxWindow* managedWindow = nullptr,
                  unsigned int flags = wxAUI_MGR_DEFAULT);
 
     /**
@@ -214,6 +270,64 @@ public:
                  const wxAuiPaneInfo& pane_info,
                  const wxPoint& drop_pos);
     //@}
+
+    /**
+        Change the sides where docks for minimized panes can be created.
+
+        The argument @a direction must be a combination of one or more of
+        ::wxLEFT, ::wxRIGHT, ::wxTOP and ::wxBOTTOM flags.
+
+        This function must currently be called before there any minimized
+        panes, so it is recommended to call it before adding any panes at all.
+
+        Example of using this function to only allow docks showing the buttons
+        for the minimized panes on the left and right sides of the window:
+        @code
+        mgr.AllowDocksForMinPanes(wxLEFT | wxRIGHT);
+
+        // This pane will be shown in the toolbar on the left side of the
+        // window.
+        mgr.AddPane(someWindow, wxAuiPaneInfo().Left().MinimizeButton());
+
+        // But so will will this one, as creating a toolbar along the bottom
+        // side is not allowed.
+        mgr.AddPane(otherWindow, wxAuiPaneInfo().Bottom().MinimizeButton());
+        @endcode
+
+        @since 3.3.2
+     */
+    void AllowDocksForMinPanes(int directions);
+
+    /**
+        Set style of for the items representing minimized panes in the docking
+        toolbars.
+
+        If ::wxAUI_MIN_DOCK_ICONS is specified as part of the @a style, the
+        pane icon specified by wxAuiPaneInfo::IconMin() or, if it is not set,
+        wxAuiPaneInfo::Icon(), will be shown for the minimized panes.
+
+        If ::wxAUI_MIN_DOCK_TEXT is specified, the pane title will be shown
+        (possible in addition to its icon). Note that the text will be rendered
+        vertically for the panes shown in the toolbars docked on the left and
+        right sides of the window and that the icons will be rotated to match
+        the text orientation.
+
+        By default, both the text and the icons are shown, which corresponds to
+        ::wxAUI_MIN_DOCK_BOTH. When using this style it may be desired to also
+        use ::wxAUI_MIN_DOCK_ROTATE_ICON_WITH_TEXT style which makes the icons
+        match the text orientation.
+
+        This function must currently be called before there any minimized
+        panes, so it is recommended to call it before adding any panes at all.
+
+        @param style
+            Combination of wxAuiMinDockOption elements.
+
+        @see AllowDocksForMinPanes()
+
+        @since 3.3.2
+     */
+    void SetDocksForMinPanesStyle(unsigned int style);
 
     /**
         Returns true if live resize is always used on the current platform.
@@ -243,12 +357,33 @@ public:
         @param paneWindow The window pointer of the pane being dragged.
         @param pt The mouse position, in client coordinates.
         @param offset Describes the offset that the mouse is from the upper-left
-            corner of the item being dragged.
+            corner of the item being dragged, 0 by default (since wxWidgets
+            3.3.0, this parameter had to be specified in the earlier versions).
         @return The rectangle hint will be returned in screen coordinates if the pane
             would indeed become docked at the specified drop point.
             Otherwise, an empty rectangle is returned.
     */
-    wxRect CalculateHintRect(wxWindow* paneWindow, const wxPoint& pt, const wxPoint& offset);
+    wxRect CalculateHintRect(wxWindow* paneWindow,
+                             const wxPoint& pt,
+                             const wxPoint& offset = wxPoint{0, 0});
+
+    /**
+        Return a reasonable size to use for a new split.
+
+        This function currently calculates the number of columns and rows in
+        the current layout and returns the size of the managed window divided
+        by one more than that number, i.e. returns half of the available size
+        if there is currently just one row or column, a third if there are two
+        rows or columns, and so on.
+
+        The implementation may change in the future, but it will always return
+        some reasonable size to use for a new split.
+
+        @see SplitPane(), wxAuiNotebook::CalculateNewSplitSize()
+
+        @since 3.3.2
+     */
+    wxSize CalculateNewSplitSize() const;
 
     /**
         Check if a key modifier is pressed (actually ::WXK_CONTROL or
@@ -281,13 +416,27 @@ public:
 
         It is rarely called, and is mostly used by controls implementing custom
         pane drag/drop behaviour.
+
+        Calling it is equivalent to calling CalculateHintRect() and
+        UpdateHint() with the resulting rectangle.
+
+        @param paneWindow Window passed to CalculateHintRect().
+        @param pt Mouse position passed to CalculateHintRect().
+        @param offset Offset passed to CalculateHintRect(), 0 by default (since
+            wxWidgets 3.3.0, this parameter had to be specified in the earlier
+            versions).
     */
-    void DrawHintRect(wxWindow* paneWindow, const wxPoint& pt, const wxPoint& offset);
+    void DrawHintRect(wxWindow* paneWindow,
+                      const wxPoint& pt,
+                      const wxPoint& offset = wxPoint{0, 0});
 
     /**
         Returns an array of all panes managed by the frame manager.
     */
     wxAuiPaneInfoArray& GetAllPanes();
+
+    /// @overload
+    const wxAuiPaneInfoArray& GetAllPanes() const;
 
     /**
         Returns the current art provider being used.
@@ -353,6 +502,8 @@ public:
 
     /**
         HideHint() hides any docking hint that may be visible.
+
+        @see UpdateHint()
     */
     virtual void HideHint();
 
@@ -372,6 +523,19 @@ public:
                     int insert_level = wxAUI_INSERT_PANE);
 
     /**
+        Load the layout information saved by SaveLayout().
+
+        The implementation of wxAuiDeserializer object passed to this function
+        should be consistent with that of the serializer used to save the
+        layout. See @ref page_samples_aui for an example of using serializer
+        saving the layout in XML format and matching deserializer restoring the
+        layout from it.
+
+        @since 3.3.0
+     */
+    void LoadLayout(wxAuiDeserializer& deserializer);
+
+    /**
         LoadPaneInfo() is similar to LoadPerspective, with the exception that it
         only loads information about a single pane.
 
@@ -388,6 +552,10 @@ public:
 
     /**
         Loads a saved perspective.
+
+        This function is used to load layouts previously saved with
+        SavePerspective(), use LoadLayout() to load a layout saved with
+        SaveLayout().
 
         A perspective is the layout state of an AUI managed window.
 
@@ -408,6 +576,22 @@ public:
                          bool update = true);
 
     /**
+        Minimize the given pane.
+
+        Note that the pane **must** have the minimize button enabled for this
+        function to work, it cannot be used to minimize the panes without it.
+
+        Minimizing a pane hides it, but it can be later shown again by the user
+        by clicking the button corresponding to it in the minimized panes
+        toolbar.
+
+        @see @ref auimanager_minimized
+
+        @since 3.3.2
+    */
+    void MinimizePane(wxAuiPaneInfo& paneInfo);
+
+    /**
         Maximize the given pane.
     */
     void MaximizePane(wxAuiPaneInfo& paneInfo);
@@ -421,6 +605,19 @@ public:
         Restore the previously maximized pane.
     */
     void RestoreMaximizedPane();
+
+    /**
+        Save the layout information using the provided object.
+
+        This function allows to use a custom @a serializer to save the layout
+        information in any format, e.g. @ref page_samples_aui shows how to save
+        it in XML format.
+
+        See wxAuiSerializer documentation for more details.
+
+        @since 3.3.0
+     */
+    void SaveLayout(wxAuiSerializer& serializer) const;
 
     /**
         SavePaneInfo() is similar to SavePerspective, with the exception that it only
@@ -440,6 +637,9 @@ public:
     /**
         Saves the entire user interface layout into an encoded wxString, which
         can then be stored by the application (probably using wxConfig).
+
+        @note You may prefer to use SaveLayout() instead of this function for
+            more flexibility.
 
         @see LoadPerspective
         @see LoadPaneInfo
@@ -478,19 +678,57 @@ public:
     void SetFlags(unsigned int flags);
 
     /**
-        Called to specify the frame or window which is to be managed by wxAuiManager.
-        Frame management is not restricted to just frames.  Child windows or custom
-        controls are also allowed.
+        Set the window which is to be managed by wxAuiManager.
+
+        This window will often be a wxFrame but an arbitrary child window can
+        also be used.
+
+        Note that wxAuiManager handles many events for the managed window,
+        including ::wxEVT_SIZE, so any application-defined handlers for this
+        window should take care to call wxEvent::Skip() to let wxAuiManager
+        perform its own processing.
     */
-    void SetManagedWindow(wxWindow* managed_wnd);
+    void SetManagedWindow(wxWindow* managedWindow);
 
     /**
-        This function is used by controls to explicitly show a hint window at the
-        specified rectangle. It is rarely called, and is mostly used by controls
-        implementing custom pane drag/drop behaviour.
-        The specified rectangle should be in screen coordinates.
+        This function is used to show a hint window at the specified rectangle.
+
+        It can be overridden to customize the hint appearance. When overriding
+        it, HideHint() should normally be also overridden as well.
+
+        Do not call this function directly to show the hint, use UpdateHint()
+        instead.
+
+        @param rect The area where the hint window should be shown, in screen
+            coordinates, or an empty rectangle to hide the window.
     */
     virtual void ShowHint(const wxRect& rect);
+
+    /**
+        Create a new pane with the given window near an existing pane.
+
+        The size of the new pane is determined by CalculateNewSplitSize() and
+        the existing panes are resized to have the same size in the split
+        direction.
+
+        Note that this function calls Update() internally, so there is no need
+        to call it separately.
+
+        @param window A window already managed by this wxAuiManager identifying
+            the pane to split.
+        @param newWindow The window to be added as a new pane.
+        @param direction The direction where the new pane should be added, one
+            of ::wxLEFT, ::wxRIGHT, ::wxTOP or ::wxBOTTOM.
+        @param dropPos The position where the pane is dropped, if this function
+            is called in response to a drag-and-drop operation. If not
+            specified, the position is determined by @a direction.
+
+        @since 3.3.2
+     */
+    bool SplitPane(wxWindow* window,
+                   wxWindow* newWindow,
+                   int direction,
+                   const wxPoint& dropPos = wxDefaultPosition);
 
     /**
         Mostly used internally to define the drag action parameters.
@@ -517,6 +755,18 @@ public:
         pane flicker to be avoided by updating the whole layout at one time.
     */
     void Update();
+
+    /**
+        Show or hide the hint window.
+
+        This function is mostly used internally.
+
+        @param rect The area where the hint window should be shown, in screen
+            coordinates, or an empty rectangle to hide the window.
+
+        @since 3.3.0
+     */
+    void UpdateHint(const wxRect& rect);
 
 protected:
 
@@ -682,9 +932,27 @@ public:
     //@{
     /**
         FloatingSize() sets the size of the floating pane.
+
+        FloatingClientSize() has precedence over this, i.e. this size is ignored
+        if the floating client size is specified.
     */
     wxAuiPaneInfo& FloatingSize(const wxSize& size);
     wxAuiPaneInfo& FloatingSize(int x, int y);
+    //@}
+
+    //@{
+    /**
+        FloatingClientSize() sets the client size of the floating pane.
+
+        This has precedence over FloatingSize(), i.e. FloatingSize() is ignored
+        if this is specified.
+
+        @see wxWindow::SetClientSize
+
+        @since 3.3.1
+    */
+    wxAuiPaneInfo& FloatingClientSize(const wxSize& size);
+    wxAuiPaneInfo& FloatingClientSize(int x, int y);
     //@}
 
     /**
@@ -760,6 +1028,23 @@ public:
         @since 2.9.2
     */
     wxAuiPaneInfo& Icon(const wxBitmapBundle& b);
+
+    /**
+        IconMin() sets the icon shown when the pane is minimized.
+
+        If minimized icon is not specified, the normal icon set by Icon() is
+        used instead, so this function should be only called if a different
+        icon is desired for the minimized state or if you don't want to show
+        any icon in the title bar when the pane is shown normally.
+
+        It is, of course, useless to call this function if the pane doesn't
+        have a minimize button.
+
+        @see MinimizeButton()
+
+        @since 3.3.2
+     */
+    wxAuiPaneInfo& IconMin(const wxBitmapBundle& b);
 
     /**
         IsBottomDockable() returns @true if the pane can be docked at the bottom of the
@@ -893,6 +1178,16 @@ public:
 
     /**
         MinimizeButton() indicates that a minimize button should be drawn for the pane.
+
+        Pressing this button hides the pane and shows the minimized panes
+        toolbar, allowing to show the pane again later, if it hadn't been shown
+        before.
+
+        Note that when the toolbar containing the minimized panes is visible,
+        all panes that have MinimizeButton() enabled will show in it, even if
+        they are currently shown.
+
+        @see @ref auimanager_minimized, IconMin()
     */
     wxAuiPaneInfo& MinimizeButton(bool visible = true);
 
@@ -1066,6 +1361,9 @@ public:
         Triggered when any button is pressed for any docked panes.
     @event{EVT_AUI_PANE_CLOSE(func)}
         Triggered when a docked or floating pane is closed.
+    @event{EVT_AUI_PANE_MINIMIZE(func)}
+        Triggered when a pane is minimized. This event is new since wxWidgets
+        3.3.2.
     @event{EVT_AUI_PANE_MAXIMIZE(func)}
         Triggered when a pane is maximized.
     @event{EVT_AUI_PANE_RESTORE(func)}
@@ -1160,6 +1458,7 @@ public:
 
 wxEventType wxEVT_AUI_PANE_BUTTON;
 wxEventType wxEVT_AUI_PANE_CLOSE;
+wxEventType wxEVT_AUI_PANE_MINIMIZE;
 wxEventType wxEVT_AUI_PANE_MAXIMIZE;
 wxEventType wxEVT_AUI_PANE_RESTORE;
 wxEventType wxEVT_AUI_PANE_ACTIVATED;

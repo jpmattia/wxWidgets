@@ -156,14 +156,6 @@ bool wxMenu::DoInsertOrAppend(wxMenuItem *item, size_t pos)
     // if we're already attached to the menubar, we must update it
     if ( IsAttached() && GetMenuBar()->IsAttached() )
     {
-        if ( item->IsSubMenu() )
-        {
-            item->GetSubMenu()->SetupBitmaps();
-        }
-        if ( !item->IsSeparator() )
-        {
-            item->UpdateItemBitmap();
-        }
         GetMenuBar()->Refresh();
     }
 #endif // wxUSE_MENUBAR
@@ -380,7 +372,7 @@ bool wxMenu::HandleCommandProcess( wxMenuItem* item )
 
     if(!processed)
     {
-        processed = item->GetPeer()->DoDefault();  
+        processed = item->GetPeer()->DoDefault();
     }
 
     return processed;
@@ -412,44 +404,6 @@ void wxMenu::HandleMenuOpened()
 void wxMenu::HandleMenuClosed()
 {
     DoHandleMenuOpenedOrClosed(wxEVT_MENU_CLOSE);
-}
-
-#if wxUSE_MENUBAR
-void wxMenu::Attach(wxMenuBarBase *menubar)
-{
-    wxMenuBase::Attach(menubar);
-
-    if (menubar->IsAttached())
-    {
-        SetupBitmaps();
-    }
-}
-#endif
-
-void wxMenu::SetInvokingWindow(wxWindow* win)
-{
-    wxMenuBase::SetInvokingWindow(win);
-
-    if ( win )
-        SetupBitmaps();
-}
-
-void wxMenu::SetupBitmaps()
-{
-    for ( wxMenuItemList::compatibility_iterator node = m_items.GetFirst();
-          node;
-          node = node->GetNext() )
-    {
-        wxMenuItem *item = node->GetData();
-        if ( item->IsSubMenu() )
-        {
-            item->GetSubMenu()->SetupBitmaps();
-        }
-        if ( !item->IsSeparator() )
-        {
-            item->UpdateItemBitmap();
-        }
-    }
 }
 
 #if wxUSE_MENUBAR
@@ -527,7 +481,7 @@ static wxMenu *CreateAppleMenu()
     appleMenu->Append( wxID_OSX_SHOWALL,
                        wxGETTEXT_IN_CONTEXT("macOS menu item", "Show All") );
     appleMenu->AppendSeparator();
-    
+
     // Do always add "Quit" item unconditionally however, it can't be disabled.
     wxString quitLabel;
     if ( wxTheApp )
@@ -547,7 +501,7 @@ void wxMenuBar::Init()
         gs_emptyMenuBar.reset( new wxMenu() );
         gs_emptyMenuBar->AppendSubMenu(CreateAppleMenu(), "\x14") ;
     }
-    
+
     m_eventHandler = this;
     m_menuBarFrame = nullptr;
     m_rootMenu = new wxMenu();
@@ -615,9 +569,9 @@ void wxMenuBar::MacInstallMenuBar()
         return ;
 
     m_rootMenu->GetPeer()->MakeRoot();
-    
+
     // hide items in the apple menu that don't exist in the wx menubar
-    
+
     wxMenuItem* appleItem = nullptr;
     wxMenuItem* wxItem = nullptr;
 
@@ -628,10 +582,10 @@ void wxMenuBar::MacInstallMenuBar()
     {
         if ( wxItem == nullptr )
             appleItem->GetPeer()->Hide();
-        else 
+        else
             appleItem->SetItemLabel(wxItem->GetItemLabel());
     }
-    
+
     menuid = wxApp::s_macPreferencesMenuItemId;
     appleItem = m_appleMenu->FindItem(menuid);
     wxItem = FindItem(menuid);
@@ -639,7 +593,7 @@ void wxMenuBar::MacInstallMenuBar()
     {
         if ( wxItem == nullptr )
             appleItem->GetPeer()->Hide();
-        else 
+        else
             appleItem->SetItemLabel(wxItem->GetItemLabel());
     }
 
@@ -692,21 +646,6 @@ wxString wxMenuBar::GetMenuLabel(size_t pos) const
     return GetMenu(pos)->GetTitle();
 }
 
-void wxMenuBar::SetupBitmaps()
-{
-    for ( wxMenuList::const_iterator it = m_menus.begin(); it != m_menus.end(); ++it )
-    {
-        (*it)->SetupBitmaps();
-    }
-}
-
-void wxMenuBar::Attach(wxFrame *frame)
-{
-    wxMenuBarBase::Attach(frame);
-
-    SetupBitmaps();
-}
-
 // ---------------------------------------------------------------------------
 // wxMenuBar construction
 // ---------------------------------------------------------------------------
@@ -726,11 +665,13 @@ wxMenu *wxMenuBar::Replace(size_t pos, wxMenu *menu, const wxString& title)
 
 bool wxMenuBar::Insert(size_t pos, wxMenu *menu, const wxString& title)
 {
+    // must be set early because base class method call might call back and create a native menu which would be missing a title
+    menu->SetTitle(title);
+
     if ( !wxMenuBarBase::Insert(pos, menu, title) )
         return false;
 
     m_rootMenu->Insert( pos+firstMenuPos, wxMenuItem::New( m_rootMenu, wxID_ANY, title, "", wxITEM_NORMAL, menu ) );
-    menu->SetTitle(title);
 
     return true;
 }
@@ -749,6 +690,9 @@ wxMenu *wxMenuBar::Remove(size_t pos)
 
 bool wxMenuBar::Append(wxMenu *menu, const wxString& title)
 {
+    // must be set early because base class method call might call back and create a native menu which would be missing a title
+    menu->SetTitle(title);
+
     WXHMENU submenu = menu ? menu->GetHMenu() : nullptr;
         wxCHECK_MSG( submenu, false, wxT("can't append invalid menu to menubar") );
 
@@ -756,7 +700,6 @@ bool wxMenuBar::Append(wxMenu *menu, const wxString& title)
         return false;
 
     m_rootMenu->AppendSubMenu(menu, title);
-    menu->SetTitle(title);
 
     return true;
 }
@@ -764,7 +707,7 @@ bool wxMenuBar::Append(wxMenu *menu, const wxString& title)
 void wxMenuBar::DoGetPosition(int *x, int *y) const
 {
     int _x,_y,_width,_height;
-    
+
     m_rootMenu->GetPeer()->GetMenuBarDimensions(_x, _y, _width, _height);
 
     if (x)
@@ -776,7 +719,7 @@ void wxMenuBar::DoGetPosition(int *x, int *y) const
 void wxMenuBar::DoGetSize(int *width, int *height) const
 {
     int _x,_y,_width,_height;
-    
+
     m_rootMenu->GetPeer()->GetMenuBarDimensions(_x, _y, _width, _height);
 
     if (width)

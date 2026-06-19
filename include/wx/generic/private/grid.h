@@ -980,7 +980,7 @@ public:
         { grid->DeselectCol(line); }
 
     virtual bool IsLineInSelection(wxGrid *grid, int line) const override
-        { return grid->m_selection->IsInSelection(line, 0); }
+        { return grid->m_selection->IsInSelection(0, line); }
 
     virtual wxGrid::EventResult SendEvent(wxGrid *grid, wxEventType eventType,
         int line, const wxMouseEvent& event) const override
@@ -1411,7 +1411,7 @@ private:
         });
 
         int i = 0;
-        const int n = static_cast<int>(points.size());
+        const int n = wxSsize(points);
 
         while ( i < n )
         {
@@ -1432,7 +1432,7 @@ private:
         std::sort(sortedPointsX.begin(), sortedPointsX.end(), wxPointCmp{});
 
         int i = 0;
-        const int n = static_cast<int>(points.size());
+        const int n = wxSsize(points);
 
         while ( i < n )
         {

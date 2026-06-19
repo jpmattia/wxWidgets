@@ -27,6 +27,7 @@
 #endif // WX_PRECOMP
 
 #include "wx/display.h"
+#include "wx/modalhook.h"
 
 #include "wx/private/tlwgeom.h"
 
@@ -311,6 +312,24 @@ void wxTopLevelWindowBase::DoCentre(int dir)
 }
 
 // ----------------------------------------------------------------------------
+// Default item management
+// ----------------------------------------------------------------------------
+
+wxWindow* wxTopLevelWindowBase::SetDefaultItem(wxWindow* win)
+{
+    wxWindow* const old = GetDefaultItem();
+    m_winDefault = win;
+    return old;
+}
+
+wxWindow* wxTopLevelWindowBase::SetTmpDefaultItem(wxWindow* win)
+{
+    wxWindow* const old = GetDefaultItem();
+    m_winTmpDefault = win;
+    return old;
+}
+
+// ----------------------------------------------------------------------------
 // Saving/restoring geometry
 // ----------------------------------------------------------------------------
 
@@ -486,6 +505,20 @@ bool wxTopLevelWindowBase::Layout()
     return false;
 }
 
+void wxTopLevelWindowBase::Fit()
+{
+    if ( !UsesAutoLayout() )
+    {
+        if ( wxWindow* const child = GetUniqueChild() )
+        {
+            SetClientSize(child->GetBestSize());
+            return;
+        }
+    }
+
+    return wxNonOwnedWindow::Fit();
+}
+
 wxSize wxTopLevelWindowBase::DoGetBestClientSize() const
 {
     // The logic here parallels that of Layout() above.
@@ -499,8 +532,16 @@ wxSize wxTopLevelWindowBase::DoGetBestClientSize() const
 }
 
 // The default implementation for the close window event.
-void wxTopLevelWindowBase::OnCloseWindow(wxCloseEvent& WXUNUSED(event))
+void wxTopLevelWindowBase::OnCloseWindow(wxCloseEvent& event)
 {
+    if ( event.CanVeto() && wxModalDialogHook::GetOpenCount() )
+    {
+        // We can't close the window if there are any app-modal dialogs still
+        // shown.
+        event.Veto();
+        return;
+    }
+
     Destroy();
 }
 

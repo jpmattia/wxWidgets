@@ -19,8 +19,10 @@
 #include "wx/cursor.h"
 #include "wx/qt/private/converter.h"
 
-void wxSetCursor(const wxCursor& cursor)
+void wxSetCursor( const wxCursorBundle& cursors )
 {
+    const wxCursor& cursor = cursors.GetCursorForMainWindow();
+
     if (cursor.GetHandle().shape() == Qt::ArrowCursor)
         QApplication::restoreOverrideCursor();
     else
@@ -59,6 +61,11 @@ public:
 
 wxIMPLEMENT_DYNAMIC_CLASS(wxCursor, wxGDIObject);
 
+
+wxCursor::wxCursor(const wxBitmap& bitmap, int hotSpotX, int hotSpotY)
+{
+    InitFromBitmap(bitmap, hotSpotX, hotSpotY);
+}
 
 wxCursor::wxCursor(const wxString& cursor_file,
                    wxBitmapType type,
@@ -110,7 +117,7 @@ void wxCursor::InitFromStock( wxStockCursor cursorId )
     {
     case wxCURSOR_BLANK:
     {
-        GetHandle() = QBitmap();
+        GetHandle() = QCursor();
         return;
     }
 //    case wxCURSOR_ARROW:
@@ -154,20 +161,25 @@ void wxCursor::InitFromStock( wxStockCursor cursorId )
     GetHandle().setShape(qt_cur);
 }
 
+void wxCursor::InitFromBitmap(const wxBitmap& bmp, int hotSpotX, int hotSpotY)
+{
+    AllocExclusive();
+
+    GetHandle() = QCursor(*bmp.GetHandle(), hotSpotX, hotSpotY);
+}
+
 #if wxUSE_IMAGE
 
 void wxCursor::InitFromImage( const wxImage & image )
 {
-    AllocExclusive();
-
     wxBitmap bmp(image);
     bmp.QtBlendMaskWithAlpha();
 
-    GetHandle() = QCursor(*bmp.GetHandle(),
-                           image.HasOption(wxIMAGE_OPTION_CUR_HOTSPOT_X) ?
-                           image.GetOptionInt(wxIMAGE_OPTION_CUR_HOTSPOT_X) : 0,
-                           image.HasOption(wxIMAGE_OPTION_CUR_HOTSPOT_Y) ?
-                           image.GetOptionInt(wxIMAGE_OPTION_CUR_HOTSPOT_Y) : 0);
+    InitFromBitmap(bmp,
+                   image.HasOption(wxIMAGE_OPTION_CUR_HOTSPOT_X) ?
+                   image.GetOptionInt(wxIMAGE_OPTION_CUR_HOTSPOT_X) : 0,
+                   image.HasOption(wxIMAGE_OPTION_CUR_HOTSPOT_Y) ?
+                   image.GetOptionInt(wxIMAGE_OPTION_CUR_HOTSPOT_Y) : 0);
 }
 
 #endif // wxUSE_IMAGE
@@ -179,5 +191,5 @@ wxGDIRefData *wxCursor::CreateGDIRefData() const
 
 wxGDIRefData *wxCursor::CloneGDIRefData(const wxGDIRefData *data) const
 {
-    return new wxCursorRefData(*(wxCursorRefData *)data);
+    return new wxCursorRefData(*static_cast<const wxCursorRefData*>(data));
 }

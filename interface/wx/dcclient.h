@@ -24,7 +24,7 @@
     @library{wxcore}
     @category{dc}
 
-    @see wxDC, wxClientDC, wxMemoryDC, wxWindowDC, wxScreenDC
+    @see wxDC, wxMemoryDC
 */
 class wxPaintDC : public wxClientDC
 {
@@ -47,11 +47,11 @@ public:
 
     @note While wxClientDC may also be used for drawing on the client area of a
     window from outside an EVT_PAINT() handler in some ports, this does @em not
-    work on most of the platforms: neither wxOSX nor wxGTK with GTK 3 Wayland
-    backend support this at all, so drawing using wxClientDC simply doesn't
-    have any effect there. CanBeUsedForDrawing() can be used to determine
-    whether wxClientDC can be used for drawing in the current environment, but
-    it is recommended to only draw on the window using wxPaintDC, as this is
+    work on all platforms: neither wxOSX nor wxGTK with GTK 3 Wayland backend
+    support this at all, so drawing using wxClientDC simply doesn't have any
+    effect there. CanBeUsedForDrawing() can be used to determine whether
+    wxClientDC can be used for drawing in the current environment, but it is
+    recommended to only draw on the window using wxPaintDC, as this is
     guaranteed to work everywhere. To redraw a small part of the window, use
     wxWindow::RefreshRect() to invalidate just this part and check
     wxWindow::GetUpdateRegion() in the paint event handler to redraw this part
@@ -66,7 +66,7 @@ public:
     @library{wxcore}
     @category{dc}
 
-    @see wxDC, wxMemoryDC, wxPaintDC, wxWindowDC, wxScreenDC
+    @see wxDC, wxMemoryDC, wxPaintDC, wxWindowDC
 */
 class wxClientDC : public wxWindowDC
 {
@@ -120,7 +120,7 @@ public:
     @library{wxcore}
     @category{dc}
 
-    @see wxDC, wxMemoryDC, wxPaintDC, wxClientDC, wxScreenDC
+    @see wxDC, wxMemoryDC, wxPaintDC, wxClientDC
 */
 class wxWindowDC : public wxDC
 {

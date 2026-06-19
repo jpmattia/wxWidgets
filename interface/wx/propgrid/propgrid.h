@@ -166,8 +166,8 @@ wxPG_EX_NATIVE_DOUBLE_BUFFERING         = 0x00080000,
 
 /**
     Set this style to let user have ability to set values of properties to
-    unspecified state. Same as setting wxPGPropertyFlags::AutoUnspecified
-    for all properties.
+    unspecified state. Same as setting wxPGFlags::AutoUnspecified for all
+    properties.
     @hideinitializer
 */
 wxPG_EX_AUTO_UNSPECIFIED_VALUES         = 0x00200000,
@@ -434,7 +434,8 @@ enum class wxPGKeyboardAction
     Call wxPropertyGrid::SetSortFunction() to set it.
 
     Sort function should return a value greater than 0 if position of @a p1 is
-    after @a p2. So, for instance, when comparing property names, you can use
+    after @a p2, negative if position of @a p1 is before @a p2 and 0 if they are
+    equivalent. So, for instance, when comparing property names, you can use the
     following implementation:
 
         @code
@@ -898,7 +899,7 @@ public:
         Note that @a column must not be equal to 1, as the second column is
         always editable and can be made read-only only on cell-by-cell basis
         using
-        @code wxPGProperty::ChangeFlag(wxPGPropertyFlags::ReadOnly, true) @endcode
+        @code wxPGProperty::ChangeFlag(wxPGFlags::ReadOnly, true) @endcode
 
         @see BeginLabelEdit(), EndLabelEdit()
     */
@@ -926,6 +927,8 @@ public:
 
     /**
         Redraws given property.
+
+        @param p Valid, i.e. non-@NULL, property pointer.
     */
     virtual void RefreshProperty( wxPGProperty* p );
 
@@ -1143,6 +1146,8 @@ public:
     /**
         Draws item, children, and consecutive parents as long as category is
         not met.
+
+        @param p Valid, i.e. non-@NULL, property pointer.
      */
     void DrawItemAndValueRelated( wxPGProperty* p );
 
@@ -1201,7 +1206,7 @@ public:
 
     /** Override to customize resetting of property validation failure status.
         @remarks
-        Property is guaranteed to have flag wxPGPropertyFlags::InvalidValue set.
+        Property is guaranteed to have flag wxPGFlags::InvalidValue set.
     */
     virtual void DoOnValidationFailureReset( wxPGProperty* property );
 

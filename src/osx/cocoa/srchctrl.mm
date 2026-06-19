@@ -45,6 +45,12 @@
     return self;
 }
 
+- (void)dealloc
+{
+    self.WXFieldEditor = nil;
+    [super dealloc];
+}
+
 - (void)textDidChange:(NSNotification *)aNotification
 {
     m_withinTextDidChange = YES;
@@ -79,19 +85,19 @@
     // NSString*       partialString;
     // partialString = [[textView string] substringWithRange:charRange];
     matches       = [NSMutableArray array];
-    
+
     // wxTextWidgetImpl* impl = (wxTextWidgetImpl* ) wxWidgetImpl::FindFromWXWidget( self );
     wxArrayString completions;
-    
+
     // adapt to whatever strategy we have for getting the strings
     // impl->GetTextEntry()->GetCompletions(wxCFStringRef::AsString(partialString), completions);
-    
+
     for (size_t i = 0; i < completions.GetCount(); ++i )
         [matches addObject: wxCFStringRef(completions[i]).AsNSString()];
-    
+
     // [matches sortUsingSelector:@selector(compare:)];
-    
-    
+
+
     return matches;
 }
 

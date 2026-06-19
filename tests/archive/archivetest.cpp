@@ -440,7 +440,7 @@ void ArchiveTestCase<ClassFactoryT>::runTest()
         CreateArchive(out);
     else
     {
-#ifndef __WXOSX_IPHONE__
+#ifndef __WXDARWIN_IPHONE__
         CreateArchive(out, m_archiver);
 #else
         CPPUNIT_FAIL("using external archivers is not supported on iOS");
@@ -473,7 +473,7 @@ void ArchiveTestCase<ClassFactoryT>::runTest()
         ExtractArchive(in);
     else
     {
-#ifndef __WXOSX_IPHONE__
+#ifndef __WXDARWIN_IPHONE__
         ExtractArchive(in, m_unarchiver);
 #else
         CPPUNIT_FAIL("using external archivers is not supported on iOS");
@@ -609,7 +609,7 @@ void ArchiveTestCase<ClassFactoryT>::CreateArchive(wxOutputStream& out)
 
 // Create an archive using an external archive program
 //
-#ifndef __WXOSX_IPHONE__
+#ifndef __WXDARWIN_IPHONE__
 template <class ClassFactoryT>
 void ArchiveTestCase<ClassFactoryT>::CreateArchive(wxOutputStream& out,
                                                    const wxString& archiver)
@@ -771,7 +771,8 @@ void ArchiveTestCase<ClassFactoryT>::ExtractArchive(wxInputStream& in)
     if ((m_options & PipeIn) == 0)
         OnArchiveExtracted(*arc, expectedTotal);
 
-    while (entry = EntryPtr(arc->GetNextEntry()), entry.get() != nullptr) {
+    while ((entry = EntryPtr(arc->GetNextEntry())).get())
+    {
         wxString name = entry->GetName(wxPATH_UNIX);
 
         // provide some context for the error message so that we know which
@@ -855,7 +856,7 @@ void ArchiveTestCase<ClassFactoryT>::ExtractArchive(wxInputStream& in)
 
 // Extract an archive using an external unarchive program
 //
-#ifndef __WXOSX_IPHONE__
+#ifndef __WXDARWIN_IPHONE__
 template <class ClassFactoryT>
 void ArchiveTestCase<ClassFactoryT>::ExtractArchive(wxInputStream& in,
                                                     const wxString& unarchiver)
@@ -1028,6 +1029,11 @@ void ArchiveTestCase<ClassFactoryT>::TestSmartIterator(wxInputStream& in)
 
     for (CatalogIter it = cat.begin(); it != cat.end(); ++it)
         CPPUNIT_ASSERT(m_testEntries.count((*it)->GetName(wxPATH_UNIX)));
+
+    Iter a, b;
+    // test assignment
+    a = b;
+    CPPUNIT_ASSERT(a == b);
 }
 
 // pair iterator using smart pointers

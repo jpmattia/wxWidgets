@@ -460,24 +460,28 @@ extern void SetProcessEventFunc(ProcessEventFunc func)
 
 static bool DoCheckConnection()
 {
+#if wxUSE_SOCKETS
     // NOTE: we could use wxDialUpManager here if it was in wxNet; since it's in
     //       wxCore we use a simple rough test:
 
     wxSocketInitializer socketInit;
 
     wxIPV4address addr;
-    if (!addr.Hostname(0xadfe5c16) || !addr.Service(wxASCII_STR("www")))
+    if (!addr.Hostname(0x01010101) || !addr.Service(wxASCII_STR("www")))
         return false;
 
     const char* const
-        HTTP_GET = "GET / HTTP /1.1\r\nHost: www.wxwidgets.org\r\n\r\n";
+        HTTP_GET = "GET / HTTP /1.1\r\nHost: 1.1.1.1\r\n\r\n";
 
     wxSocketClient sock;
     sock.SetTimeout(10);    // 10 secs
-    bool online = sock.Connect(addr) &&
-                    (sock.Write(HTTP_GET, strlen(HTTP_GET)), sock.WaitForRead(1));
-
-    return online;
+    if (sock.Connect(addr))
+    {
+        sock.Write(HTTP_GET, strlen(HTTP_GET));
+        return sock.WaitForRead(1);
+    }
+#endif
+    return false;
 }
 
 extern bool IsNetworkAvailable()

@@ -40,6 +40,18 @@ enum
                           wxFULLSCREEN_NOCAPTION
 };
 
+/**
+    Possible parameters for wxFrame::SetWindowModality().
+
+    @since 3.3.2
+*/
+enum class wxWindowMode
+{
+    Normal,      ///< Show the frame non-modally, and this is the default.
+    WindowModal, ///< Disable only the parent window while the frame is shown.
+    AppModal     ///< Disable all the other TLWs while the frame is shown.
+};
+
 #define wxDEFAULT_FRAME_STYLE (wxSYSTEM_MENU |          \
                                wxRESIZE_BORDER |        \
                                wxMINIMIZE_BOX |         \
@@ -60,7 +72,7 @@ enum
     internal top level window list.
 
     @beginEventEmissionTable
-    @event{EVT_MAXIMIZE(id, func)}
+    @event{EVT_MAXIMIZE(func)}
         Process a @c wxEVT_MAXIMIZE event. See wxMaximizeEvent.
     @event{EVT_MOVE(func)}
         Process a @c wxEVT_MOVE event, which is generated when a window is moved.
@@ -75,7 +87,7 @@ enum
         See wxMoveEvent.
     @event{EVT_SHOW(func)}
         Process a @c wxEVT_SHOW event. See wxShowEvent.
-    @event{EVT_FULLSCREEN(id, func)}
+    @event{EVT_FULLSCREEN(func)}
         Process a @c wxEVT_FULLSCREEN event. See wxFullScreenEvent.
     @endEventTable
 
@@ -228,6 +240,17 @@ public:
     const wxIconBundle& GetIcons() const;
 
     /**
+        Get the window title.
+
+        This base class function is overridden in this class to behave as
+        GetTitle() and is useful when having only a `wxWindow*` pointer.
+
+        Please call GetTitle() directly instead of this function for clarity if
+        possible.
+     */
+    virtual wxString GetLabel() const;
+
+    /**
         Gets a string containing the window title.
 
         @see SetTitle()
@@ -361,10 +384,11 @@ public:
         @note This function should normally be only used when the application
               is not already in foreground.
 
-        This function is currently implemented for Win32 where it flashes
-        the window icon in the taskbar, and for wxGTK with task bars
-        supporting it.
-
+        This function is currently implemented under Windows where it flashes
+        the window icon in the taskbar, and in wxGTK, but its behaviour there
+        depends on support from the desktop environment or window manager: if
+        the current environment does not support window urgency hints, calling
+        this function has no visible effect.
     */
     virtual void RequestUserAttention(int flags = wxUSER_ATTENTION_INFO);
 
@@ -492,6 +516,11 @@ public:
 
         @note In wxMSW, @a icon must be either 16x16 or 32x32 icon.
 
+        @note In wxGTK this function currently doesn't do anything when using
+            Wayland, which doesn't allow setting the icon for a window. Please
+            create a `.desktop` file for your application to set the icon for
+            its windows.
+
         @see wxIcon, SetIcons()
     */
     void SetIcon(const wxIcon& icon);
@@ -507,6 +536,11 @@ public:
 
         @note In wxMSW, @a icons must contain a 16x16 or 32x32 icon,
               preferably both.
+
+        @note In wxGTK this function currently doesn't do anything when using
+            Wayland, which doesn't allow setting the icon for a window. Please
+            create a `.desktop` file for your application to set the icon for
+            its windows.
 
         @see wxIconBundle
     */
@@ -571,6 +605,20 @@ public:
     void SetSizeHints(const wxSize& minSize,
                       const wxSize& maxSize = wxDefaultSize,
                       const wxSize& incSize = wxDefaultSize);
+
+    /**
+        Sets the window title.
+
+        This base class function is overridden in this class to behave as
+        SetTitle() and is useful when having only a `wxWindow*` pointer.
+
+        Please call SetTitle() directly instead of this function for clarity if
+        possible.
+
+        @param title
+            The window title.
+     */
+    virtual void SetLabel(const wxString& title);
 
     /**
         Sets the window title.
@@ -650,6 +698,9 @@ public:
     /**
         Enables the zoom button to toggle full screen mode.
 
+        This function is currently only implemented in wxOSX and simply returns
+        @false in the other ports.
+
         A wxFullScreenEvent is generated when the users enters or exits
         full screen via the enter/exit full screen button.
 
@@ -662,7 +713,7 @@ public:
             for possible values. It is available since wxWidgets 3.1.6.
 
         @return @true if the button behaviour has been changed, @false if running
-        under another OS.
+        under unsupported OS.
 
         @note Having the button is also required to let ShowFullScreen()
         make use of the full screen API: a full screen window gets its own space
@@ -671,8 +722,6 @@ public:
         is used.
         Only @c ::wxFULLSCREEN_NOTOOLBAR and @c ::wxFULLSCREEN_NOMENUBAR will be
         used when using the fullscreen API (other values are ignored).
-
-        @onlyfor{wxosx}
 
         @see ShowFullScreen(), wxFullScreenEvent
 

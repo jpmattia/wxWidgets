@@ -232,6 +232,10 @@ time_t wxFileModificationTime(const wxString& filename);
     overwritten if @a overwrite is @true (default) and the function fails if @a
     overwrite is @false.
 
+    Since wxWidgets 3.3.0, if @a overwrite is @true `ReplaceFile()` function is
+    used under MSW which allows to preserve the file attributes while replacing
+    its contents.
+
     @header{wx/filefn.h}
 */
 bool wxRenameFile(const wxString& oldpath,
@@ -290,6 +294,19 @@ wxString wxGetWorkingDirectory(char* buf = nullptr, int sz = 1000);
 /**
     Returns the directory part of the filename.
 
+    @deprecated Please use wxFileName::GetPath() instead.
+
+    Note that the behaviour of this function is slightly different for Windows
+    paths including drive letters: it returns a string without trailing
+    backslash for the absolute paths with drive letters and a string with
+    trailing dot for the relative paths with drive letters.
+
+    Since wxWidgets 3.3.3 all path separators are normalized to the current
+    platform path separator in the returned path, i.e. under Windows forward
+    slashes in @a path will be replaced with backslashes in the returned value.
+    Previous versions of wxWidgets didn't perform this normalization and
+    returned the path with the same separators as in @a path.
+
     @header{wx/filefn.h}
 */
 wxString wxPathOnly(const wxString& path);
@@ -343,6 +360,31 @@ bool wxConcatFiles(const wxString& src1,
     @header{wx/filefn.h}
 */
 bool wxRemoveFile(const wxString& file);
+
+/**
+    Moves @a path to the system trash or recycle bin.
+
+    This works for both files and directories. The item is not permanently
+    deleted and can be restored by the user from the platform's trash
+    facility.
+
+    Preprocessor symbol @c wxHAS_MOVE_TO_TRASH is defined if this function is
+    available on the current platform.
+
+    Implementation details:
+    - Under Windows, this uses @c SHFileOperation with @c FOF_ALLOWUNDO.
+    - Under macOS, this uses @c NSFileManager's @c trashItemAtURL method.
+    - Under Unix systems (including Linux and BSD), this uses @c g_file_trash.
+
+    @returns @true on success or @false if the operation failed in which case
+        an error message will have been logged using wxLogError() and the file
+        or directory at @a path is left in place.
+
+    @since 3.3.3
+
+    @header{wx/filefn.h}
+*/
+bool wxMoveToTrash(const wxString& path);
 
 /**
     File permission bit names.

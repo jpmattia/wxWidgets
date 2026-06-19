@@ -24,10 +24,6 @@
 
 #include "wx/statusbr.h"
 
-#ifndef WX_PRECOMP
-    #include "wx/frame.h"
-#endif //WX_PRECOMP
-
 const char wxStatusBarNameStr[] = "statusBar";
 
 // ============================================================================
@@ -116,14 +112,7 @@ wxStatusBarBase::wxStatusBarBase()
     Bind(wxEVT_SIZE, &wxStatusBarBase::OnSize, this);
 }
 
-wxStatusBarBase::~wxStatusBarBase()
-{
-    // notify the frame that it doesn't have a status bar any longer to avoid
-    // dangling pointers
-    wxFrame *frame = wxDynamicCast(GetParent(), wxFrame);
-    if ( frame && frame->GetStatusBar() == this )
-        frame->SetStatusBar(nullptr);
-}
+wxStatusBarBase::~wxStatusBarBase() = default;
 
 // ----------------------------------------------------------------------------
 // field widths
@@ -205,7 +194,7 @@ wxArrayInt wxStatusBarBase::CalculateAbsWidths(wxCoord widthTotal) const
 
         for ( size_t i = m_panes.size(); i > 0; i-- )
         {
-            // divide the unassigned width evently between the
+            // divide the unassigned width evenly between the
             // not yet processed fields:
             int w = widthToUse / i;
             widths.Add(w);

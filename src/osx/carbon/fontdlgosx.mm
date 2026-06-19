@@ -45,6 +45,7 @@
     @public
     bool m_isUnderline;
     bool m_isStrikethrough;
+    NSFont* m_currentFont;
 }
 
 // Delegate methods
@@ -63,6 +64,7 @@
     {
         m_isUnderline = false;
         m_isStrikethrough = false;
+        m_currentFont = nil;
     }
     return self;
 }
@@ -94,8 +96,9 @@
 - (void)changeFont:(id)sender
 {
     NSFont *dummyFont = [NSFont userFontOfSize:12.0];
-    [[NSFontPanel sharedFontPanel] setPanelFont:[sender convertFont:dummyFont] isMultiple:NO];
-    [[NSFontManager sharedFontManager] setSelectedFont:[sender convertFont:dummyFont] isMultiple:false];
+    m_currentFont = [sender convertFont:dummyFont];
+    [[NSFontPanel sharedFontPanel] setPanelFont:m_currentFont isMultiple:NO];
+    [[NSFontManager sharedFontManager] setSelectedFont:m_currentFont isMultiple:false];
 }
 @end
 
@@ -147,6 +150,8 @@
 
         [self addSubview:cancelButton];
         [self addSubview:okButton];
+        [cancelButton release];
+        [okButton release];
 
         [self resetFlags];
     }
@@ -238,6 +243,7 @@ int RunMixedFontDialog(wxFontDialog* dialog)
     }
     theFPDelegate->m_isStrikethrough = font.GetStrikethrough();
     theFPDelegate->m_isUnderline = font.GetUnderlined();
+    theFPDelegate->m_currentFont = font.OSXGetNSFont();
 
     [[NSFontPanel sharedFontPanel] setPanelFont: font.OSXGetNSFont() isMultiple:NO];
     [[NSFontManager sharedFontManager] setSelectedFont:font.OSXGetNSFont() isMultiple:false];
@@ -256,17 +262,17 @@ int RunMixedFontDialog(wxFontDialog* dialog)
     [[NSFontManager sharedFontManager] setSelectedAttributes:attributes isMultiple:false];
 
     if(fontdata.m_fontColour.IsOk())
-        [[NSColorPanel sharedColorPanel] setColor: fontdata.m_fontColour.OSXGetNSColor()];
+        [[NSColorPanel sharedColorPanel] setColor: fontdata.m_fontColour.OSXGetWXColor()];
     else
         [[NSColorPanel sharedColorPanel] setColor:[NSColor blackColor]];
 #endif
-    
+
     [NSApp runModalForWindow:fontPanel];
-    
+
     // if we don't reenable it, FPShowHideFontPanel does not work
     [[fontPanel standardWindowButton:NSWindowCloseButton] setEnabled:YES] ;
     // we must pick the selection before closing, otherwise a native textcontrol interferes
-    NSFont* theFont = [fontPanel panelConvertFont:[NSFont userFontOfSize:0]];
+    NSFont* theFont = theFPDelegate->m_currentFont;
     [fontPanel close];
 
     if ( [accessoryView closedWithOk])

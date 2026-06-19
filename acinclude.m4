@@ -251,44 +251,6 @@ AC_DEFUN([WX_CHECK_FUNCS],
 ])
 
 dnl ---------------------------------------------------------------------------
-dnl a slightly better AC_C_BIGENDIAN macro which allows cross-compiling
-dnl ---------------------------------------------------------------------------
-
-AC_DEFUN([WX_C_BIGENDIAN],
-[AC_CACHE_CHECK([whether byte ordering is bigendian], ac_cv_c_bigendian,
-[ac_cv_c_bigendian=unknown
-# See if sys/param.h defines the BYTE_ORDER macro.
-AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <sys/types.h>
-#include <sys/param.h>], [
-#if !BYTE_ORDER || !BIG_ENDIAN || !LITTLE_ENDIAN
- bogus endian macros
-#endif])], [# It does; now see whether it defined to BIG_ENDIAN or not.
-AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <sys/types.h>
-#include <sys/param.h>], [
-#if BYTE_ORDER != BIG_ENDIAN
- not big endian
-#endif])], ac_cv_c_bigendian=yes, ac_cv_c_bigendian=no)])
-if test $ac_cv_c_bigendian = unknown; then
-AC_RUN_IFELSE([AC_LANG_SOURCE([[main () {
-  /* Are we little or big endian?  From Harbison&Steele.  */
-  union
-  {
-    long l;
-    char c[sizeof (long)];
-  } u;
-  u.l = 1;
-  exit (u.c[sizeof (long) - 1] == 1);
-}]])], [ac_cv_c_bigendian=no], [ac_cv_c_bigendian=yes], [ac_cv_c_bigendian=unknown])
-fi])
-if test $ac_cv_c_bigendian = unknown; then
-  AC_MSG_WARN([Assuming little-endian target machine - this may be overridden by adding the line "ac_cv_c_bigendian=${ac_cv_c_bigendian='yes'}" to config.cache file])
-fi
-if test $ac_cv_c_bigendian = yes; then
-  AC_DEFINE(WORDS_BIGENDIAN)
-fi
-])
-
-dnl ---------------------------------------------------------------------------
 dnl override AC_ARG_ENABLE/WITH to handle options defaults
 dnl ---------------------------------------------------------------------------
 
@@ -323,8 +285,8 @@ AC_DEFUN([WX_ARG_SYS_WITH],
                         fi
                       ],
                       [
-                        if test "DEFAULT_$3" = no; then
-                            value=no
+                        if test -n "${DEFAULT_$3}"; then
+                            value=${DEFAULT_$3}
                         elif test "$wxUSE_ALL_FEATURES" = no; then
                             value=no
                         elif test "$wxUSE_SYS_LIBS" = no; then
@@ -494,6 +456,23 @@ AC_DEFUN([WX_VERSIONED_SYMBOLS],
                   wx_cv_version_script=no
                 fi
 
+                dnl We also check for --undefined-version support, as we need
+                dnl it with our current approach of using the same version
+                dnl script for all libraries. This should ideally be changed...
+                if test $wx_cv_version_script = yes ; then
+                    if AC_TRY_COMMAND([
+                            $CXX -o conftest.output $CXXFLAGS $CPPFLAGS $LDFLAGS conftest.cpp
+                            -Wl,--version-script,conftest.sym -Wl,--undefined-version >/dev/null 2>conftest.stderr]) ; then
+                      if test -s conftest.stderr ; then
+                          wx_cv_undefined_version=no
+                      else
+                          wx_cv_undefined_version=yes
+                      fi
+                    else
+                      wx_cv_undefined_version=no
+                    fi
+                fi
+
                 dnl There's a problem in some old linkers with --version-script that
                 dnl can cause linking to fail when you have objects with vtables in
                 dnl libs 3 deep.  This is known to happen in netbsd and openbsd with
@@ -535,6 +514,9 @@ AC_DEFUN([WX_VERSIONED_SYMBOLS],
 
             if test $wx_cv_version_script = yes ; then
                 LDFLAGS_VERSIONING="-Wl,--version-script,$1"
+                if test $wx_cv_undefined_version = yes ; then
+                    LDFLAGS_VERSIONING="$LDFLAGS_VERSIONING -Wl,--undefined-version"
+                fi
             fi
             ;;
     esac

@@ -51,7 +51,6 @@ static Qt::BrushStyle ConvertBrushStyle(wxBrushStyle style)
         case wxBRUSHSTYLE_STIPPLE_MASK_OPAQUE:
         case wxBRUSHSTYLE_STIPPLE_MASK:
             return Qt::TexturePattern;
-            break;
     }
     return Qt::SolidPattern;
 }
@@ -226,5 +225,5 @@ wxGDIRefData *wxBrush::CreateGDIRefData() const
 
 wxGDIRefData *wxBrush::CloneGDIRefData(const wxGDIRefData *data) const
 {
-    return new wxBrushRefData(*(wxBrushRefData *)data);
+    return new wxBrushRefData(*static_cast<const wxBrushRefData*>(data));
 }

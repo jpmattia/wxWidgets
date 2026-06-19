@@ -23,6 +23,13 @@ class WXDLLIMPEXP_FWD_CORE wxNonOwnedWindow;
     typedef wxWidgetImpl wxOSXWidgetImpl;
 #endif
 
+struct wxMacBorderSize
+{
+    long left;
+    long top;
+    long right;
+    long bottom;
+};
 
 class WXDLLIMPEXP_CORE wxWindowMac: public wxWindowBase
 {
@@ -82,7 +89,6 @@ public:
     virtual void Update() override;
     virtual void ClearBackground() override;
 
-    virtual bool SetCursor( const wxCursor &cursor ) override;
     virtual bool SetFont( const wxFont &font ) override;
     virtual bool SetBackgroundColour( const wxColour &colour ) override;
     virtual bool SetForegroundColour( const wxColour &colour ) override;
@@ -129,6 +135,8 @@ public:
 
     // implementation from now on
     // --------------------------
+
+    virtual void WXUpdateCursor() override;
 
     void MacClientToRootWindow( int *x , int *y ) const;
 
@@ -188,10 +196,13 @@ public:
     wxNonOwnedWindow*   MacGetTopLevelWindow() const ;
 
     virtual long        MacGetWXBorderSize() const;
-    virtual long        MacGetLeftBorderSize() const ;
-    virtual long        MacGetRightBorderSize() const ;
-    virtual long        MacGetTopBorderSize() const ;
-    virtual long        MacGetBottomBorderSize() const ;
+
+    // Border adjusted for inset/"aura", if any.
+    virtual wxMacBorderSize MacGetBorderSize() const;
+    virtual long            MacGetLeftBorderSize() const;
+    virtual long            MacGetRightBorderSize() const;
+    virtual long            MacGetTopBorderSize() const;
+    virtual long            MacGetBottomBorderSize() const;
 
     virtual void        MacSuperChangedPosition() ;
 
@@ -220,6 +231,9 @@ public:
 
     // returns the visible region of this control in window ie non-client coordinates
     const wxRegion&     MacGetVisibleRegion( bool includeOuterStructures = false ) ;
+
+    // sets NSView.clipsToBounds property
+    void                MacClipsToBounds( bool clip );
 
     // returns true if children have to clipped to the content area
     // (e.g., scrolled windows)
@@ -275,6 +289,16 @@ public:
     virtual void *OSXGetViewOrWindow() const;
 #endif // Cocoa
 
+#ifdef __WXOSX_IPHONE__
+    void                OSXSetScrollTargetWindow( wxWindow *target );
+    wxWindow *          OSXGetScrollTargetWindow() { return m_scrollTargetWindow; }
+    const wxWindow *    OSXGetScrollTargetWindow() const { return m_scrollTargetWindow; }
+    wxWindow *          m_scrollTargetWindow;
+    void                OSXSetScrollOwnerWindow( wxWindow *owner );
+    wxWindow *          OSXGetScrollOwnerWindow() { return m_scrollOwnerWindow; }
+    wxWindow *          m_scrollOwnerWindow;
+#endif
+
     void *              MacGetCGContextRef() { return m_cgContextRef ; }
     void                MacSetCGContextRef(void * cg) { m_cgContextRef = cg ; }
 
@@ -315,9 +339,6 @@ protected:
     mutable wxRegion    m_cachedClippedRegion ;
     mutable wxRegion    m_cachedClippedClientRegion ;
 
-    // insets of the mac control from the wx top left corner
-    wxPoint             m_macTopLeftInset ;
-    wxPoint             m_macBottomRightInset ;
     wxByte              m_macAlpha ;
 
     wxScrollBar*        m_hScrollBar ;

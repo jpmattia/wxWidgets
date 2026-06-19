@@ -92,7 +92,7 @@ function(wx_write_config_inplace)
         "wx-config-inplace.in"
         "inplace-${TOOLCHAIN_FULLNAME}"
         )
-    if(WIN32_MSVC_NAMING)
+    if(WIN32_MSVC_NAMING OR NOT wxBUILD_INSTALL_USE_SYMLINK)
         set(COPY_CMD copy)
     else()
         set(COPY_CMD create_symlink)
@@ -100,18 +100,21 @@ function(wx_write_config_inplace)
     execute_process(
         COMMAND
         "${CMAKE_COMMAND}" -E ${COPY_CMD}
-        "${wxBINARY_DIR}/lib/wx/config/inplace-${TOOLCHAIN_FULLNAME}"
+        "${wxCONFIG_DIR}/inplace-${TOOLCHAIN_FULLNAME}"
         "${wxBINARY_DIR}/wx-config"
         )
 endfunction()
 
 function(wx_write_config)
+    wx_get_install_dir(include)
+    wx_get_install_platform_dir(library)
+    wx_get_install_platform_dir(runtime)
 
     set(prefix ${CMAKE_INSTALL_PREFIX})
     set(exec_prefix "\${prefix}")
-    set(includedir "\${prefix}/include")
-    set(libdir "\${exec_prefix}/lib")
-    set(bindir "\${exec_prefix}/bin")
+    set(includedir "\${prefix}/${include_dir}")
+    set(libdir "\${exec_prefix}/${library_dir}")
+    set(bindir "\${exec_prefix}/${runtime_dir}")
 
     if(wxBUILD_MONOLITHIC)
         set(MONOLITHIC 1)
@@ -154,13 +157,14 @@ function(wx_write_config)
     set(WX_RELEASE ${wxMAJOR_VERSION}.${wxMINOR_VERSION})
     set(WX_VERSION ${wxVERSION})
     set(WX_SUBVERSION ${wxVERSION}.0)
-    set(WX_FLAVOUR)
+    wx_get_flavour(WX_FLAVOUR "-")
+    wx_get_flavour(lib_flavour "_")
     set(TOOLKIT_DIR ${wxBUILD_TOOLKIT})
     set(TOOLKIT_VERSION)
     set(WIDGET_SET ${wxBUILD_WIDGETSET})
     set(TOOLCHAIN_NAME "${TOOLKIT_DIR}${TOOLKIT_VERSION}${WIDGET_SET}${lib_unicode_suffix}-${WX_RELEASE}")
-    set(WX_LIBRARY_BASENAME_GUI "wx_${TOOLKIT_DIR}${TOOLKIT_VERSION}${WIDGET_SET}${lib_unicode_suffix}")
-    set(WX_LIBRARY_BASENAME_NOGUI "wx_base${lib_unicode_suffix}")
+    set(WX_LIBRARY_BASENAME_GUI "wx_${TOOLKIT_DIR}${TOOLKIT_VERSION}${WIDGET_SET}${lib_unicode_suffix}${lib_flavour}")
+    set(WX_LIBRARY_BASENAME_NOGUI "wx_base${lib_unicode_suffix}${lib_flavour}")
 
     wx_get_dependencies(WXCONFIG_LIBS base)
     wx_get_dependencies(EXTRALIBS_GUI core)
@@ -196,7 +200,7 @@ function(wx_write_config)
     set(WXCONFIG_RESFLAGS)
     set(WXCONFIG_RPATH "-Wl,-rpath,\$libdir")
     set(LDFLAGS_GL)
-    set(RESCOMP)
+    get_filename_component(RESCOMP "${CMAKE_RC_COMPILER}" NAME_WE)
 
     wx_configure_script(
         "wx-config.in"

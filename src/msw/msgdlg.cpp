@@ -27,6 +27,7 @@
 #include "wx/msw/private/darkmode.h"
 #include "wx/msw/private/metrics.h"
 #include "wx/msw/private/msgdlg.h"
+#include "wx/msw/private/taskdlg.h"
 #include "wx/modalhook.h"
 #include "wx/fontutil.h"
 #include "wx/textbuf.h"
@@ -121,10 +122,12 @@ wxMessageDialog::HookFunction(int code, WXWPARAM wParam, WXLPARAM lParam)
         // too big to fit the display
         wnd->ReplaceStaticWithEdit();
 
+#ifdef wxHAS_ANY_BUTTON
         // update the labels if necessary: we need to do it before centering
         // the dialog as this can change its size
         if ( wnd->HasCustomLabels() )
             wnd->AdjustButtonLabels();
+#endif // wxHAS_ANY_BUTTON
 
         // centre the message box on its parent if requested
         if ( wnd->GetMessageDialogStyle() & wxCENTER )
@@ -262,6 +265,7 @@ void wxMessageDialog::ReplaceStaticWithEdit()
     }
 }
 
+#ifdef wxHAS_ANY_BUTTON
 void wxMessageDialog::AdjustButtonLabels()
 {
     // changing the button labels is the easy part but we also need to ensure
@@ -371,6 +375,7 @@ void wxMessageDialog::AdjustButtonLabels()
         rcBtn.right += wBtnNew + MARGIN_INNER;
     }
 }
+#endif // wxHAS_ANY_BUTTON
 
 /* static */
 wxFont wxMessageDialog::GetMessageFont()
@@ -584,12 +589,34 @@ namespace
 {
 
 HRESULT CALLBACK
-wxTaskDialogCallback(HWND hwnd, UINT msg, WPARAM, LPARAM, LONG_PTR)
+wxTaskDialogCallback(HWND hwnd,
+                     UINT msg,
+                     WPARAM wParam,
+                     LPARAM WXUNUSED(lParam),
+                     LONG_PTR refData)
 {
+    const auto* const
+        config = reinterpret_cast<const TASKDIALOGCONFIG*>(refData);
+
     switch ( msg )
     {
-        case TDN_DIALOG_CONSTRUCTED:
-            wxMSWDarkMode::EnableForTLW(hwnd);
+        case TDN_CREATED:
+            // The dialog is fully constructed now, so we can enable dark mode
+            // for it if necessary (doing it on TDN_DIALOG_CONSTRUCTED wouldn't
+            // work because all dialog elements wouldn't be constructed yet).
+            wxMSWDarkMode::AllowForTaskDialog(hwnd, config);
+            break;
+
+        case TDN_EXPANDO_BUTTON_CLICKED:
+            // Store the expanded state as a window property so the subclassed
+            // TaskPage panel can read it during WM_PAINT without a UIA call.
+            SetProp(hwnd, L"IsExpanded",
+                reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(wParam)));
+            break;
+
+        case TDN_DESTROYED:
+            // Clean up all resources allocated by AllowForTaskDialog().
+            wxMSWDarkMode::RemoveFromTaskDialog(hwnd);
             break;
     }
 
@@ -646,13 +673,18 @@ void wxMSWTaskDialogConfig::MSWCommonTaskDialogInit(TASKDIALOGCONFIG &tdc)
     // fully shown for reasonably-sized words whereas without it using almost
     // any file system path in a message box would result in truncation.
     tdc.dwFlags = TDF_EXPAND_FOOTER_AREA |
-                  TDF_POSITION_RELATIVE_TO_WINDOW |
                   TDF_SIZE_TO_CONTENT;
     tdc.hInstance = wxGetInstance();
     tdc.pszWindowTitle = caption.t_str();
 
-    // use the top level window as parent if none specified
     tdc.hwndParent = parent ? GetHwndOf(parent) : nullptr;
+
+    // Don't use this flag if our parent window is minimized because this
+    // results in the task dialog being shown in the top left corner of the
+    // screen, which is completely unexpected, so prefer the default behaviour
+    // of centering the dialog on the screen in this case.
+    if ( parent && !::IsIconic(tdc.hwndParent) )
+        tdc.dwFlags |= TDF_POSITION_RELATIVE_TO_WINDOW;
 
     if ( wxApp::MSWGetDefaultLayout(parent) == wxLayout_RightToLeft )
         tdc.dwFlags |= TDF_RTL_LAYOUT;
@@ -748,6 +780,7 @@ void wxMSWTaskDialogConfig::MSWCommonTaskDialogInit(TASKDIALOGCONFIG &tdc)
     }
 
     tdc.pfCallback = wxTaskDialogCallback;
+    tdc.lpCallbackData = (LONG_PTR) &tdc;
 }
 
 void wxMSWTaskDialogConfig::AddTaskDialogButton(TASKDIALOGCONFIG &tdc,

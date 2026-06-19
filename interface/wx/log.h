@@ -331,6 +331,10 @@ public:
         active log target is set to @NULL a new default log target will be
         created when logging occurs.
 
+        @note The logging system will take ownership of the target you pass
+        in here. However, it is your responsibility to delete the target you
+        are replacing (i.e., the return value of this function).
+
         @see SetThreadActiveTarget()
     */
     static wxLog* SetActiveTarget(wxLog* logtarget);
@@ -1513,8 +1517,11 @@ void wxVLogVerbose(const char* formatString, va_list argPtr);
 /** @addtogroup group_funcmacro_log */
 ///@{
 /**
-    For warnings - they are also normally shown to the user, but don't
-    interrupt the program work.
+    The function to use for warning messages.
+
+    Warnings are less severe than errors but still should normally be
+    brought to the user's attention. The default processing is to show them
+    in a message box.
 
     @header{wx/log.h}
 */

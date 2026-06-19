@@ -225,7 +225,7 @@ void wxPropertyGridPageState::InitNonCatMode()
 
     m_abcArray = new wxPGRootProperty(wxS("<Root_NonCat>"));
     m_abcArray->SetParentState(this);
-    m_abcArray->SetFlag(wxPGPropertyFlags::ChildrenAreCopies);
+    m_abcArray->SetFlag(wxPGFlags::ChildrenAreCopies);
 
     // Must be called when state::m_properties still points to regularArray.
     wxPGProperty* oldProperties = m_properties;
@@ -395,8 +395,8 @@ wxPGProperty* wxPropertyGridPageState::GetLastItem( int flags )
     if ( !m_properties->HasAnyChild() )
         return nullptr;
 
-    wxPGPropertyFlags itemExMask;
-    wxPGPropertyFlags parentExMask;
+    wxPGFlags itemExMask;
+    wxPGFlags parentExMask;
     wxPGCreateIteratorMasks(flags, itemExMask, parentExMask);
 
     // First, get last child of last parent if children of 'pwc' should be iterated through
@@ -603,7 +603,7 @@ void wxPropertyGridPageState::DoSortChildren(wxPGProperty* p, wxPGPropertyValues
         return;
 
     // Never sort children of aggregate properties
-    if ( p->HasFlag(wxPGPropertyFlags::Aggregate) )
+    if ( p->HasFlag(wxPGFlags::Aggregate) )
         return;
 
     if ( !!(flags & wxPGPropertyValuesFlags::SortTopLevelOnly)
@@ -690,7 +690,7 @@ int wxPropertyGridPageState::GetColumnFitWidth(const wxDC& dc,
 {
     wxPropertyGrid* pg = m_pPropGrid;
     int maxW = 0;
-    int w, h;
+    int w;
 
     for ( unsigned int i = 0; i <pwc->GetChildCount(); i++ )
     {
@@ -699,7 +699,7 @@ int wxPropertyGridPageState::GetColumnFitWidth(const wxDC& dc,
         {
             wxString text;
             p->GetDisplayInfo(col, -1, 0, &text, (wxPGCell*)nullptr);
-            dc.GetTextExtent(text, &w, &h);
+            dc.GetTextExtent(text, &w, nullptr);
             if ( col == 0 )
                 w += ( (p->GetDepth()-1) * pg->m_subgroup_extramargin );
 
@@ -741,8 +741,7 @@ int wxPropertyGridPageState::GetColumnFitWidth(const wxPGProperty* p, unsigned i
         {
             wxString text;
             pc->GetDisplayInfo(col, -1, 0, &text, (wxPGCell*)nullptr);
-            int h;
-            pg->GetTextExtent(text, &w, &h);
+            pg->GetTextExtent(text, &w, nullptr);
             if ( col == 0 )
                 w += ((pc->GetDepth() - 1) * pg->m_subgroup_extramargin);
 
@@ -1383,12 +1382,12 @@ wxVariant wxPropertyGridPageState::DoGetPropertyValues(const wxString& listname,
     {
         if ( !!(flags & wxPGPropertyValuesFlags::KeepStructure) )
         {
-            wxASSERT( !pwc->HasFlag(wxPGPropertyFlags::Aggregate) );
+            wxASSERT( !pwc->HasFlag(wxPGFlags::Aggregate) );
 
             for ( unsigned int i = 0; i < pwc->GetChildCount(); i++ )
             {
                 wxPGProperty* p = pwc->Item(i);
-                if ( !p->HasAnyChild() || p->HasFlag(wxPGPropertyFlags::Aggregate) )
+                if ( !p->HasAnyChild() || p->HasFlag(wxPGFlags::Aggregate) )
                 {
                     wxVariant variant = p->GetValue();
                     variant.SetName( p->GetBaseName() );
@@ -1412,7 +1411,7 @@ wxVariant wxPropertyGridPageState::DoGetPropertyValues(const wxString& listname,
                 const wxPGProperty* p = it.GetProperty();
 
                 // Use a trick to ignore wxParentProperty itself, but not its sub-properties.
-                if ( !p->HasAnyChild() || p->HasFlag(wxPGPropertyFlags::Aggregate) )
+                if ( !p->HasAnyChild() || p->HasFlag(wxPGFlags::Aggregate) )
                 {
                     wxVariant variant = p->GetValue();
                     variant.SetName( p->GetName() );
@@ -1439,10 +1438,15 @@ void wxPropertyGridPageState::DoSetPropertyValues( const wxVariantList& list, wx
         if ( !origFrozen ) m_pPropGrid->Freeze();
     }
 
-    wxPropertyCategory* use_category = (wxPropertyCategory*)defaultCategory;
+    const auto asCategory = [](wxPGProperty* p) -> wxPropertyCategory*
+    {
+        return p && p->IsCategory() ? static_cast<wxPropertyCategory*>(p) : nullptr;
+    };
+
+    wxPropertyCategory* use_category = asCategory(defaultCategory);
 
     if ( !use_category )
-        use_category = (wxPropertyCategory*)m_properties;
+        use_category = asCategory(m_properties);
 
     // Let's iterate over the list of variants.
     int numSpecialEntries = 0;
@@ -1667,7 +1671,7 @@ wxPGProperty* wxPropertyGridPageState::DoInsert( wxPGProperty* parent, int index
     if ( !parent )
         parent = m_properties;
 
-    wxCHECK_MSG( !parent->HasFlag(wxPGPropertyFlags::Aggregate),
+    wxCHECK_MSG( !parent->HasFlag(wxPGFlags::Aggregate),
                  wxNullProperty,
                  wxS("when adding properties to fixed parents, use BeginAddChildren and EndAddChildren.") );
 
@@ -1737,7 +1741,7 @@ wxPGProperty* wxPropertyGridPageState::DoInsert( wxPGProperty* parent, int index
 
     // Update editor controls of all parents if they are containers of composed values.
     for( wxPGProperty *p = property->GetParent();
-         p && !p->IsRoot() && !p->IsCategory() && p->HasFlag(wxPGPropertyFlags::ComposedValue);
+         p && !p->IsRoot() && !p->IsCategory() && p->HasFlag(wxPGFlags::ComposedValue);
          p = p->GetParent() )
     {
         p->RefreshEditor();
@@ -1785,7 +1789,7 @@ void wxPropertyGridPageState::DoMarkChildrenAsDeleted(wxPGProperty* p,
     {
         wxPGProperty* child = p->Item(i);
 
-        child->SetFlag(wxPGPropertyFlags::BeingDeleted);
+        child->SetFlag(wxPGFlags::BeingDeleted);
 
         if ( recursive )
         {
@@ -1888,7 +1892,7 @@ void wxPropertyGridPageState::DoDelete( wxPGProperty* item, bool doDelete )
 
     wxPGProperty* parent = item->GetParent();
 
-    wxCHECK_RET( !parent->HasFlag(wxPGPropertyFlags::Aggregate),
+    wxCHECK_RET( !parent->HasFlag(wxPGFlags::Aggregate),
         wxS("wxPropertyGrid: Do not attempt to remove sub-properties.") );
 
     wxASSERT( item->GetParentState() == this );
@@ -1955,13 +1959,13 @@ void wxPropertyGridPageState::DoDelete( wxPGProperty* item, bool doDelete )
                   wxS("Current category cannot be deleted") );
 
     // Prevent property and its children from being re-selected
-    item->SetFlag(wxPGPropertyFlags::BeingDeleted);
+    item->SetFlag(wxPGFlags::BeingDeleted);
     DoMarkChildrenAsDeleted(item, true);
 
     unsigned int indinparent = item->GetIndexInParent();
 
     // Delete children
-    if ( item->HasAnyChild() && !item->HasFlag(wxPGPropertyFlags::Aggregate) )
+    if ( item->HasAnyChild() && !item->HasFlag(wxPGFlags::Aggregate) )
     {
         // deleting a category
         item->DeleteChildren();

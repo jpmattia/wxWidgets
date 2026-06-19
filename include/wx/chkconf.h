@@ -184,14 +184,6 @@
 #   endif
 #endif /* !defined(wxUSE_LOG) */
 
-#ifndef wxUSE_LONGLONG
-#   ifdef wxABORT_ON_CONFIG_ERROR
-#       error "wxUSE_LONGLONG must be defined, please read comment near the top of this file."
-#   else
-#       define wxUSE_LONGLONG 0
-#   endif
-#endif /* !defined(wxUSE_LONGLONG) */
-
 #ifndef wxUSE_MIMETYPE
 #   ifdef wxABORT_ON_CONFIG_ERROR
 #       error "wxUSE_MIMETYPE must be defined, please read comment near the top of this file."
@@ -1271,12 +1263,7 @@
 
 #if defined(__WINDOWS__)
 #  include "wx/msw/chkconf.h"
-#  if defined(__WXGTK__)
-#      include "wx/gtk/chkconf.h"
-#  endif
-#elif defined(__WXGTK__)
-#  include "wx/gtk/chkconf.h"
-#elif defined(__WXMAC__)
+#elif defined(__DARWIN__)
 #  include "wx/osx/chkconf.h"
 #elif defined(__WXDFB__)
 #  include "wx/dfb/chkconf.h"
@@ -1284,6 +1271,12 @@
 #  include "wx/x11/chkconf.h"
 #elif defined(__WXANDROID__)
 #  include "wx/android/chkconf.h"
+#endif
+
+/* Note that __WXGTK__ may be defined under Windows and Mac if we're using
+   the wxGTK port there, so do NOT use #elif for it. */
+#if defined(__WXGTK__)
+#  include "wx/gtk/chkconf.h"
 #endif
 
 /*
@@ -1343,6 +1336,15 @@
 #            undef wxUSE_PROTOCOL
 #            define wxUSE_PROTOCOL 1
 #        endif
+#   endif
+
+#   if !wxUSE_SOCKETS
+#       ifdef wxABORT_ON_CONFIG_ERROR
+#           error "wxUSE_URL requires wxUSE_SOCKETS"
+#        else
+#           undef wxUSE_SOCKETS
+#           define wxUSE_SOCKETS 1
+#       endif
 #   endif
 #endif /* wxUSE_URL */
 
@@ -1430,17 +1432,6 @@
 #       endif
 #   endif
 #endif /* wxUSE_FS_INET */
-
-#if wxUSE_STOPWATCH || wxUSE_DATETIME
-#    if !wxUSE_LONGLONG
-#        ifdef wxABORT_ON_CONFIG_ERROR
-#            error "wxUSE_STOPWATCH and wxUSE_DATETIME require wxUSE_LONGLONG"
-#        else
-#            undef wxUSE_LONGLONG
-#            define wxUSE_LONGLONG 1
-#        endif
-#    endif
-#endif /* wxUSE_STOPWATCH */
 
 #if wxUSE_MIMETYPE && !wxUSE_TEXTFILE
 #   ifdef wxABORT_ON_CONFIG_ERROR
@@ -1729,24 +1720,6 @@
 #   define wxUSE_ACTIVITYINDICATOR 0
 #endif /* wxUSE_ACTIVITYINDICATOR */
 
-#if wxUSE_GRAPHICS_CONTEXT && !wxUSE_GEOMETRY
-#   ifdef wxABORT_ON_CONFIG_ERROR
-#       error "wxUSE_GRAPHICS_CONTEXT requires wxUSE_GEOMETRY"
-#   else
-#       undef wxUSE_GRAPHICS_CONTEXT
-#       define wxUSE_GRAPHICS_CONTEXT 0
-#   endif
-#endif /* wxUSE_GRAPHICS_CONTEXT */
-
-#if wxUSE_DC_TRANSFORM_MATRIX && !wxUSE_GEOMETRY
-#   ifdef wxABORT_ON_CONFIG_ERROR
-#       error "wxUSE_DC_TRANSFORM_MATRIX requires wxUSE_GEOMETRY"
-#   else
-#       undef wxUSE_DC_TRANSFORM_MATRIX
-#       define wxUSE_DC_TRANSFORM_MATRIX 0
-#   endif
-#endif /* wxUSE_DC_TRANSFORM_MATRIX */
-
 /* generic controls dependencies */
 #if !defined(__WXMSW__) || defined(__WXUNIVERSAL__)
 #   if wxUSE_FONTDLG || wxUSE_FILEDLG || wxUSE_CHOICEDLG
@@ -1967,6 +1940,15 @@
 #        else
 #            undef wxUSE_LIBTIFF
 #            define wxUSE_LIBTIFF 0
+#        endif
+#   endif
+
+#   if wxUSE_LIBWEBP
+#        ifdef wxABORT_ON_CONFIG_ERROR
+#            error "wxUSE_LIBWEBP requires wxUSE_IMAGE"
+#        else
+#            undef wxUSE_LIBWEBP
+#            define wxUSE_LIBWEBP 0
 #        endif
 #   endif
 
@@ -2327,22 +2309,11 @@
 #endif /* wxUSE_PREFERENCES_EDITOR */
 
 #if wxUSE_PRIVATE_FONTS
-#   if !defined(__WXMSW__) && !defined(__WXGTK__) && !defined(__WXOSX__)
+#   if !defined(__WXMSW__) && !defined(__WXGTK__) && !defined(__WXQT__) && !defined(__WXOSX__)
 #       undef wxUSE_PRIVATE_FONTS
 #       define wxUSE_PRIVATE_FONTS 0
 #   endif
 #endif /* wxUSE_PRIVATE_FONTS */
-
-#if wxUSE_MEDIACTRL
-#   if !wxUSE_LONGLONG
-#       ifdef wxABORT_ON_CONFIG_ERROR
-#           error "wxMediaCtrl requires wxUSE_LONGLONG"
-#       else
-#           undef wxUSE_LONGLONG
-#           define wxUSE_LONGLONG 1
-#       endif
-#   endif
-#endif /* wxUSE_MEDIACTRL */
 
 #if wxUSE_STC
 #   if !wxUSE_STOPWATCH
@@ -2371,14 +2342,6 @@
 #       else
 #           undef wxUSE_RICHTEXT
 #           define wxUSE_RICHTEXT 0
-#       endif
-#   endif
-#   if !wxUSE_LONGLONG
-#       ifdef wxABORT_ON_CONFIG_ERROR
-#           error "wxRichTextCtrl requires wxUSE_LONGLONG"
-#       else
-#           undef wxUSE_LONGLONG
-#           define wxUSE_LONGLONG 1
 #       endif
 #   endif
 #   if !wxUSE_VARIANT

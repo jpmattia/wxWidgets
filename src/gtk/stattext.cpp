@@ -125,9 +125,9 @@ bool wxStaticText::Create(wxWindow *parent,
 
     gtk_label_set_line_wrap( GTK_LABEL(m_widget), TRUE );
 
-    SetLabel(label);
-
     m_parent->DoAddChild( this );
+
+    SetLabel(label);
 
     PostCreation(size);
 
@@ -152,10 +152,8 @@ void wxStaticText::GTKDoSetLabel(GTKLabelSetter setter, const wxString& label)
 
 void wxStaticText::SetLabel(const wxString& label)
 {
-    if ( label == m_labelOrig )
+    if ( !UpdateLabelOrig(label) )
         return;
-
-    m_labelOrig = label;
 
     GTKDoSetLabel(&wxStaticText::GTKSetLabelForLabel, label);
 }
@@ -168,7 +166,7 @@ bool wxStaticText::DoSetLabelMarkup(const wxString& markup)
     if ( stripped.empty() && !markup.empty() )
         return false;
 
-    m_labelOrig = stripped;
+    UpdateLabelOrig(stripped);
 
     GTKDoSetLabel(&wxStaticText::GTKSetLabelWithMarkupForLabel, markup);
 

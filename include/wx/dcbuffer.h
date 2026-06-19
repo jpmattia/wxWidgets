@@ -15,9 +15,12 @@
 #include "wx/dcclient.h"
 #include "wx/window.h"
 
-// All current ports use double buffering.
-#define wxALWAYS_NATIVE_DOUBLE_BUFFER       1
-
+// Only wxMSW doesn't use double buffering.
+#ifdef __WXMSW__
+    #define wxALWAYS_NATIVE_DOUBLE_BUFFER       0
+#else
+    #define wxALWAYS_NATIVE_DOUBLE_BUFFER       1
+#endif
 
 // ----------------------------------------------------------------------------
 // Double buffering helper.
@@ -87,7 +90,7 @@ public:
     {
         InitCommon(dc, style);
 
-        UseBuffer(area.x, area.y);
+        UseBuffer(area);
     }
 
     // Blits the buffer to the dc, and detaches the dc from the buffer (so it
@@ -113,7 +116,7 @@ private:
     }
 
     // check that the bitmap is valid and use it
-    void UseBuffer(wxCoord w = -1, wxCoord h = -1);
+    void UseBuffer(wxSize size = wxDefaultSize);
 
     // the underlying DC to which we copy everything drawn on this one in
     // UnMask()
@@ -146,31 +149,14 @@ class WXDLLIMPEXP_CORE wxBufferedPaintDC : public wxBufferedDC
 public:
     // If no bitmap is supplied by the user, a temporary one will be created.
     wxBufferedPaintDC(wxWindow *window, wxBitmap& buffer, int style = wxBUFFER_CLIENT_AREA)
-        : m_paintdc(window)
+        : wxBufferedPaintDC(window, &buffer, style)
     {
-        SetWindow(window);
-
-        // If we're buffering the virtual window, scale the paint DC as well
-        if (style & wxBUFFER_VIRTUAL_AREA)
-            window->PrepareDC( m_paintdc );
-
-        if( buffer.IsOk() )
-            Init(&m_paintdc, buffer, style);
-        else
-            Init(&m_paintdc, GetBufferedSize(window, style), style);
     }
 
     // If no bitmap is supplied by the user, a temporary one will be created.
-    wxBufferedPaintDC(wxWindow *window, int style = wxBUFFER_CLIENT_AREA)
-        : m_paintdc(window)
+    explicit wxBufferedPaintDC(wxWindow *window, int style = wxBUFFER_CLIENT_AREA)
+        : wxBufferedPaintDC(window, nullptr, style)
     {
-        SetWindow(window);
-
-        // If we're using the virtual window, scale the paint DC as well
-        if (style & wxBUFFER_VIRTUAL_AREA)
-            window->PrepareDC( m_paintdc );
-
-        Init(&m_paintdc, GetBufferedSize(window, style), style);
     }
 
     // default copy ctor ok.
@@ -192,6 +178,26 @@ protected:
     }
 
 private:
+    // If no bitmap is supplied, a temporary one will be created.
+    wxBufferedPaintDC(wxWindow *window, wxBitmap* buffer, int style)
+        : m_paintdc(window)
+    {
+        SetWindow(window);
+
+        // If we're buffering the virtual window, scale the paint DC as well
+        if (style & wxBUFFER_VIRTUAL_AREA)
+            window->PrepareDC( m_paintdc );
+
+        if ( buffer && buffer->IsOk() )
+            Init(&m_paintdc, *buffer, style);
+        else
+            Init(&m_paintdc, GetBufferedSize(window, style), style);
+
+        // This class should behave similarly to wxPaintDC, which inherits the
+        // font and colours of the associated window, so do it here as well.
+        GetImpl()->InheritAttributes(window);
+    }
+
     wxPaintDC m_paintdc;
 
     wxDECLARE_ABSTRACT_CLASS(wxBufferedPaintDC);
@@ -216,7 +222,7 @@ class WXDLLIMPEXP_CORE wxAutoBufferedPaintDC : public wxAutoBufferedPaintDCBase
 {
 public:
 
-    wxAutoBufferedPaintDC(wxWindow* win)
+    explicit wxAutoBufferedPaintDC(wxWindow* win)
         : wxAutoBufferedPaintDCBase(win)
     {
         wxASSERT_MSG( win->GetBackgroundStyle() == wxBG_STYLE_PAINT,

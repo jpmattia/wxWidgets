@@ -28,6 +28,13 @@ enum
     wxCompare_CaseInsensitive = 1
 };
 
+// Flags for wxLocaleIdent::RemoveLikelySubtags().
+enum
+{
+    wxSubtags_FavourRegion = 0,
+    wxSubtags_FavourScript = 1
+};
+
 // ----------------------------------------------------------------------------
 // wxLocaleIdent: allows to fully identify a locale under all platforms
 // ----------------------------------------------------------------------------
@@ -87,6 +94,11 @@ public:
         return m_language.empty();
     }
 
+    // Methods for internal use only
+    // Find the best match between desired and supported languages/locales.
+    static wxString GetBestMatch(const wxVector<wxString>& desired, const wxVector<wxString>& supported);
+    static wxString GetBestMatch(const wxString& desired, const wxVector<wxString>& supported);
+
 private:
     wxString m_tag;
 
@@ -97,6 +109,12 @@ private:
     wxString m_modifier;
     wxString m_extension;
     wxString m_sortorder;
+
+    // Add likely subtags to a given locale identifier.
+    static wxLocaleIdent AddLikelySubtags(const wxLocaleIdent& localeIdent);
+
+    // Remove likely subtags from a given locale identifier, favor region.
+    static wxLocaleIdent RemoveLikelySubtags(const wxLocaleIdent& localeIdent, int subtagsFavour = wxSubtags_FavourRegion);
 };
 
 // ----------------------------------------------------------------------------
@@ -115,7 +133,12 @@ public:
     // in the new code.
     static bool UseLocaleName(const wxString& localeName);
 
-    // Get the object corresponding to the currently used locale.
+    // Return true if the locale was set by calling either UseDefault() or
+    // UseLocaleName().
+    static bool IsSet();
+
+    // Get the object corresponding to the currently used locale, which is
+    // always valid: if IsSet() is false, "C" locale is returned.
     static const wxUILocale& GetCurrent();
 
     // A helper just to avoid writing wxUILocale(wxLocaleIdent::FromTag(...)).
@@ -134,6 +157,9 @@ public:
     // Check if the locale is actually supported by the current system: if it's
     // not supported, the other functions will behave as for the "C" locale.
     bool IsSupported() const;
+
+    // Check if the locale was instantiated via UseDefault()
+    bool IsDefault() const { return m_isDefault; }
 
     // Get the platform-dependent name of the current locale.
     wxString GetName() const;
@@ -162,6 +188,27 @@ public:
 
     // Query the layout direction of the current locale.
     wxLayoutDirection GetLayoutDirection() const;
+
+    // Query infos about number formatting of the current locale
+    wxLocaleNumberFormatting GetNumberFormatting() const;
+
+    // Query the curreny symbol of the current locale
+    wxString GetCurrencySymbol() const;
+
+    // Query the currency code of the current locale
+    wxString GetCurrencyCode() const;
+
+    // Query the currency symbol position of the current locale
+    wxCurrencySymbolPosition GetCurrencySymbolPosition() const;
+
+    // Query the currency infos of the current locale
+    wxLocaleCurrencyInfo GetCurrencyInfo() const;
+
+    // Query whether the current locale uses the metric system
+    wxMeasurementSystem UsesMetricSystem() const;
+
+    // Guess from the region whether the current locale uses the metric system
+    static wxMeasurementSystem GuessMetricSystemFromRegion(const wxLocaleIdent& idLocale);
 
     // Compares two strings in the order defined by this locale.
     int CompareStrings(const wxString& lhs, const wxString& rhs,
@@ -221,34 +268,15 @@ public:
     //        2) must be called before Init to have effect
     static void AddLanguage(const wxLanguageInfo& info);
 
-    // These two methods are for internal use only. First one creates the
-    // global language database if it doesn't already exist, second one destroys
-    // it.
-    static void CreateLanguagesDB();
-    static void DestroyLanguagesDB();
-
-    // These two methods are for internal use only.
-    // wxLocaleIdent expects script identifiers as listed in ISO 15924.
-    // However, directory names for translation catalogs follow the
-    // Unix convention, using script aliases as listed  in ISO 15924.
-    // First one converts a script name to its alias, second converts
-    // a script alias to its corresponding script name.
-    // Both methods return empty strings, if the script name or alias
-    // couldn't be found.
-    static wxString GetScriptAliasFromName(const wxString& scriptName);
-    static wxString GetScriptNameFromAlias(const wxString& scriptAlias);
-
 private:
     // This ctor is private and exists only for implementation reasons.
     // It takes ownership of the provided pointer.
     explicit wxUILocale(wxUILocaleImpl* impl = nullptr) : m_impl(impl) { }
 
-    // Creates the global tables of languages and scripts called by CreateLanguagesDB
-    static void InitLanguagesDB();
-
     static wxUILocale ms_current;
 
     wxUILocaleImpl* m_impl;
+    bool m_isDefault = false;
 };
 
 inline wxString wxGetUIDateFormat()

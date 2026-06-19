@@ -12,7 +12,6 @@
 #include <memory>
 
 class QShortcut;
-template < class T > class QList;
 
 class QAbstractScrollArea;
 class QPainter;
@@ -90,6 +89,7 @@ public:
     virtual void Update() override;
     virtual void Refresh( bool eraseBackground = true,
                           const wxRect *rect = nullptr ) override;
+    virtual void ClearBackground() override;
 
     virtual bool SetCursor( const wxCursor &cursor ) override;
     virtual bool SetFont(const wxFont& font) override;
@@ -99,7 +99,7 @@ public:
     virtual int GetCharWidth() const override;
     virtual double GetContentScaleFactor() const override;
 
-    virtual wxSize GetDPI() const;
+    virtual wxSize GetDPI() const override;
     virtual double GetDPIScaleFactor() const override;
 
     virtual void SetScrollbar( int orient,
@@ -117,6 +117,13 @@ public:
         // scroll window to the specified position
     virtual void ScrollWindow( int dx, int dy,
                                const wxRect* rect = nullptr ) override;
+
+    // LTR/RTL layout direction setter/getter
+    virtual void SetLayoutDirection(wxLayoutDirection dir) override;
+    virtual wxLayoutDirection GetLayoutDirection() const override;
+    virtual wxCoord AdjustForLayoutDirection(wxCoord x,
+                                             wxCoord width,
+                                             wxCoord widthTotal) const override;
 
     // Styles
     virtual void SetWindowStyleFlag( long style ) override;
@@ -195,6 +202,10 @@ protected:
     // capture/release the mouse, used by Capture/ReleaseMouse()
     virtual void DoCaptureMouse() override;
     virtual void DoReleaseMouse() override;
+
+    // freeze/thaw window updates
+    virtual void DoFreeze() override;
+    virtual void DoThaw() override;
 
     // retrieve the position/size of the window
     virtual void DoGetPosition(int *x, int *y) const override;

@@ -97,7 +97,7 @@ size_t wxGetAvailableDrives(wxArrayString &paths, wxArrayString &names, wxArrayI
 {
 #if defined(wxHAS_FILESYSTEM_VOLUMES) || defined(__APPLE__)
 
-#if (defined(__WIN32__) || defined(__WXOSX__)) && wxUSE_FSVOLUME
+#if (defined(__WIN32__) || defined(__APPLE__)) && wxUSE_FSVOLUME
     // TODO: this code (using wxFSVolumeBase) should be used for all platforms
     //       but unfortunately wxFSVolumeBase is not implemented everywhere
     const wxArrayString as = wxFSVolumeBase::GetVolumes();
@@ -1497,7 +1497,7 @@ int wxFileIconsTable::GetIconID(const wxString& extension, const wxString& mime)
 #endif
             {
                 // Double, using normal quality scaling.
-                img.Rescale(2*img.GetWidth(), 2*img.GetHeight());
+                img.Rescale(2*img.GetSize());
 
                 // Then scale to the desired size. This gives the best quality,
                 // and better than CreateAntialiasedBitmap.

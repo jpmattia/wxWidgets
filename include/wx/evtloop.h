@@ -15,7 +15,7 @@
 
 // TODO: implement wxEventLoopSource for MSW (it should wrap a HANDLE and be
 //       monitored using MsgWaitForMultipleObjects())
-#if defined(__WXOSX__) || (defined(__UNIX__) && !defined(__WINDOWS__))
+#if defined(__UNIX__) && !defined(__WINDOWS__)
     #define wxUSE_EVENTLOOP_SOURCE 1
 #else
     #define wxUSE_EVENTLOOP_SOURCE 0
@@ -103,7 +103,7 @@ public:
     // ask the event loop to exit with the given exit code, can be used even if
     // this loop is not running right now but the loop must have been started,
     // i.e. Run() should have been already called
-    virtual void ScheduleExit(int rc = 0) = 0;
+    void ScheduleExit(int rc = 0);
 
     // return true if any events are available
     virtual bool Pending() const = 0;
@@ -184,6 +184,9 @@ protected:
     // real implementation of Run()
     virtual int DoRun() = 0;
 
+    // Stop the (known to be currently running) loop.
+    virtual void DoStop(int rc) = 0;
+
     // And the real, port-specific, implementation of YieldFor().
     //
     // The base class version is pure virtual to ensure that it is overridden
@@ -224,7 +227,9 @@ private:
     wxDECLARE_NO_COPY_CLASS(wxEventLoopBase);
 };
 
-#if defined(__WINDOWS__) || defined(__WXMAC__) || defined(__WXDFB__) || (defined(__UNIX__) && !defined(__WXOSX__))
+#if defined(__WINDOWS__) || defined(__WXDFB__) || (defined(__UNIX__) && !defined(__DARWIN__))
+
+#define wxHAS_EVENTLOOP_MANUAL
 
 // this class can be used to implement a standard event loop logic using
 // Pending() and Dispatch()
@@ -235,14 +240,13 @@ class WXDLLIMPEXP_BASE wxEventLoopManual : public wxEventLoopBase
 public:
     wxEventLoopManual();
 
-    // sets the "should exit" flag and wakes up the loop so that it terminates
-    // soon
-    virtual void ScheduleExit(int rc = 0) override;
-
 protected:
     // enters a loop calling OnNextIteration(), Pending() and Dispatch() and
     // terminating when Exit() is called
     virtual int DoRun() override;
+
+    // asks for the loop to stop, called from ScheduleExit()
+    virtual void DoStop(int rc) override;
 
     // may be overridden to perform some action at the start of each new event
     // loop iteration
@@ -253,6 +257,9 @@ protected:
     int m_exitcode;
 
 private:
+    // run the event loop until it exits, either normally or via exception
+    void DoRunLoop();
+
     // process all already pending events and dispatch a new one (blocking
     // until it appears in the event queue if necessary)
     //
@@ -270,9 +277,9 @@ private:
 // integration with MFC) but currently this is not done for all ports yet (e.g.
 // wxX11) so fall back to the old wxGUIEventLoop definition below for them
 
+// Include wxCFEventLoop declaration which is needed by both the console and
+// GUI event loops under macOS.
 #if defined(__DARWIN__)
-    // CoreFoundation-based event loop is currently in wxBase so include it in
-    // any case too (although maybe it actually shouldn't be there at all)
     #include "wx/osx/core/evtloop.h"
 #endif
 
@@ -309,7 +316,6 @@ public:
     wxGUIEventLoop() { m_impl = nullptr; }
     virtual ~wxGUIEventLoop();
 
-    virtual void ScheduleExit(int rc = 0);
     virtual bool Pending() const;
     virtual bool Dispatch();
     virtual int DispatchTimeout(unsigned long timeout)
@@ -330,6 +336,7 @@ public:
 
 protected:
     virtual int DoRun();
+    virtual void DoStop(int rc);
     virtual void DoYieldFor(long eventsToProcess);
 
     // the pointer to the port specific implementation class

@@ -78,7 +78,6 @@ public:
     // required virtuals
     virtual void Init() override;
     virtual bool Create(wxWindow* parent) override;
-    virtual void SetFocus() override;
     virtual wxWindow *GetControl() override { return this; }
     virtual void SetStringValue( const wxString& value ) override;
     virtual wxString GetStringValue() const override;
@@ -259,6 +258,20 @@ public:
                      choices, style, validator, name);
     }
 
+    wxOwnerDrawnComboBox(wxWindow *parent,
+                wxWindowID id,
+                const wxString& value = wxEmptyString,
+                const wxPoint& pos = wxDefaultPosition,
+                const wxSize& size = wxDefaultSize,
+                long style = 0,
+                const wxValidator& validator = wxDefaultValidator,
+                const wxString& name = wxASCII_STR(wxComboBoxNameStr))
+    {
+        Init();
+
+        Create(parent, id, value, pos, size, style, validator, name);
+    }
+
     bool Create(wxWindow *parent,
                 wxWindowID id,
                 const wxString& value = wxEmptyString,
@@ -270,10 +283,10 @@ public:
 
     wxOwnerDrawnComboBox(wxWindow *parent,
                          wxWindowID id,
-                         const wxString& value = wxEmptyString,
-                         const wxPoint& pos = wxDefaultPosition,
-                         const wxSize& size = wxDefaultSize,
-                         const wxArrayString& choices = wxArrayString(),
+                         const wxString& value,
+                         const wxPoint& pos,
+                         const wxSize& size,
+                         const wxArrayString& choices,
                          long style = 0,
                          const wxValidator& validator = wxDefaultValidator,
                          const wxString& name = wxASCII_STR(wxComboBoxNameStr));

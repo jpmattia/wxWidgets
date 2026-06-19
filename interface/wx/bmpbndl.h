@@ -231,8 +231,11 @@ public:
      /**
         Create a bundle from bitmaps stored as files.
 
-        Looking in @a path for files using @a filename as prefix and potentionally a
-        suffix with scale, e.g. "_2x" or "@2x"
+        This function search in @a path for files using @a filename as prefix
+        and potentially a suffix with scale, e.g. "_2x" or "@2x".
+
+        Additionally, since wxWidgets 3.3.2, it also looks for the file in the
+        given name in the "2.0x" subdirectory (if it exists).
 
         @param path     Path of the directory containing the files
         @param filename Bitmap's filename without any scale suffix
@@ -246,15 +249,25 @@ public:
     /**
         Create a bundle from the SVG image.
 
-        Please note that the current implementation uses NanoSVG library
-        (https://github.com/memononen/nanosvg) for parsing and rasterizing SVG
-        images which imposes the following limitations:
+        Please note that the current implementation uses either NanoSVG
+        library (https://github.com/memononen/nanosvg) or, optionally, since
+        wxWidgets 3.3.2, LunaSVG library (https://github.com/sammycage/lunasvg)
+        for parsing and rasterizing SVG images which don't support some SVG
+        features, including:
 
-        - Text elements are not supported at all (see note for workaround).
-        - SVG 1.1 filters are not supported.
-        - Embedded images are not supported (see note for workaround).
+        - Text elements
+        - SVG 1.1 filters
+        - Embedded images
+        - Clip paths
 
-        These limitations will be relaxed in the future wxWidgets versions.
+        These limitations may be relaxed in future wxWidgets versions (they are
+        planned, but not yet implemented in LunaSVG).
+
+        @remark To enable LunaSVG library support, use `--with-lunasvg`
+            configure option, set `wxUSE_LUNASVG=ON` when using CMake or change
+            wxUSE_LUNASVG set to 1 in your setup.h file when using other build
+            systems. Note that you will also need to use a C++17 (or later)
+            compiler required by this library.
 
         Please also note that this method is only available in the ports
         providing raw bitmap access via wxPixelData. This is the case for all
@@ -272,18 +285,23 @@ public:
             extra parameter explicitly specifying the length of the input data,
             @e must be used.
         @param sizeDef The default size to return from GetDefaultSize() for
-            this bundle. As SVG images usually don't have any natural
-            default size, it should be provided when creating the bundle.
+            this bundle. If an empty wxSize or wxDefaultSize is provided,
+            the size of the SVG will be the default size.
 
         @note Converting text objects to path objects will allow them to be
             rasterized as expected. This can be done in an SVG editor such as
             Inkscape. (In Inkscape, select a text object and choose
-            "Object to Path" from the "Path" menu.)\n
+            "Object to Path" from the "Path" menu.)\n\n
             Converting embedded images to paths from an SVG editor will
             allow them to be rasterized. For example, selecting "Trace Bitmap"
             from the "Path" menu in Inkscape can perform this. This is only
             recommended for simple images, however, as more complex images
-            may not rasterize well.
+            may not rasterize well.\n\n
+            To work around lack of support for clip paths, you can manually cut and remove portions
+            of objects (rather than using a clip path to hide them).
+            In Inkscape, this can be done via either "Path" → "Difference"
+            or "Path" → "Division" (i.e., cookie-cutter subtraction).
+
      */
     static wxBitmapBundle FromSVG(char* data, const wxSize& sizeDef);
 
@@ -304,7 +322,8 @@ public:
         @param path Path to the SVG file. Notice that it should a local file,
             not an URL.
         @param sizeDef The default size to return from GetDefaultSize() for
-            this bundle.
+            this bundle. If an empty wxSize or wxDefaultSize is provided,
+            the size of the SVG will be the default size.
      */
     static wxBitmapBundle FromSVGFile(const wxString& path, const wxSize& sizeDef);
 
@@ -317,7 +336,8 @@ public:
             On MacOS, it must be a file with an extension "svg" placed in
             the "Resources" subdirectory of the application bundle.
         @param sizeDef The default size to return from GetDefaultSize() for
-            this bundle.
+            this bundle. If an empty wxSize or wxDefaultSize is provided,
+            the size of the SVG will be the default size.
 
         @see FromResources(), FromSVGFile()
      */

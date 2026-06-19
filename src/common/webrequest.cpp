@@ -13,6 +13,8 @@
 #if wxUSE_WEBREQUEST
 
 #include "wx/webrequest.h"
+
+#include "wx/base64.h"
 #include "wx/mstream.h"
 #include "wx/module.h"
 #include "wx/uri.h"
@@ -57,6 +59,22 @@ static const wxStringCharType* wxNO_IMPL_MSG
 #define wxCHECK_IMPL(rc) wxCHECK_MSG( m_impl, (rc), wxNO_IMPL_MSG )
 #define wxCHECK_IMPL_VOID() wxCHECK_RET( m_impl, wxNO_IMPL_MSG )
 
+namespace
+{
+
+// Create a pointer from an already owned object.
+inline
+wxWebSessionImplPtr FromOwned(wxWebSessionImpl& impl)
+{
+    // Artificially increase the reference count to compensate the one done by
+    // wxWebSessionImplPtr dtor: we don't want it to destroy the object owned
+    // by somebody else.
+    impl.IncRef();
+    return wxWebSessionImplPtr{&impl};
+}
+
+} // anonymous namespace
+
 //
 // wxWebRequestImpl
 //
@@ -65,7 +83,7 @@ wxWebRequestImpl::wxWebRequestImpl(wxWebSession& session,
                                    wxEvtHandler* handler,
                                    int id)
     : m_headers(sessionImpl.GetHeaders()),
-      m_sessionImpl(sessionImpl),
+      m_sessionImpl(FromOwned(sessionImpl)),
       m_session(&session),
       m_handler(handler),
       m_id(id)
@@ -74,7 +92,7 @@ wxWebRequestImpl::wxWebRequestImpl(wxWebSession& session,
 
 wxWebRequestImpl::wxWebRequestImpl(wxWebSessionImpl& sessionImpl)
     : m_headers(sessionImpl.GetHeaders()),
-      m_sessionImpl(sessionImpl),
+      m_sessionImpl(FromOwned(sessionImpl)),
       m_session(nullptr),
       m_handler(nullptr),
       m_id(wxID_NONE)
@@ -166,6 +184,22 @@ wxWebRequestImpl::SetData(std::unique_ptr<wxInputStream> dataStream,
     SetHeader("Content-Type", contentType);
 
     return true;
+}
+
+void wxWebRequestImpl::AddBasicAuthHeaderIfNecessary()
+{
+    if ( !m_basicAuthCred.IsOk() )
+        return;
+
+    const auto authInfo = wxString::Format("%s:%s",
+        m_basicAuthCred.GetUser(),
+        m_basicAuthCred.GetPassword().GetAsString()
+    );
+
+    const auto buf = authInfo.utf8_str();
+
+    SetHeader("Authorization",
+              "Basic " + wxBase64Encode(buf.data(), buf.length()));
 }
 
 wxFileOffset wxWebRequestImpl::GetBytesReceived() const
@@ -452,6 +486,20 @@ void wxWebRequestBase::SetStorage(Storage storage)
     wxCHECK_IMPL_VOID();
 
     m_impl->SetStorage(storage);
+}
+
+void wxWebRequestBase::SetTimeouts(long connectionTimeoutMs, long dataTimeoutMs)
+{
+    wxCHECK_IMPL_VOID();
+
+    m_impl->SetTimeouts(connectionTimeoutMs, dataTimeoutMs);
+}
+
+void wxWebRequestBase::UseBasicAuth(const wxWebCredentials& cred)
+{
+    wxCHECK_IMPL_VOID();
+
+    m_impl->UseBasicAuth(cred);
 }
 
 wxWebRequestBase::Storage wxWebRequestBase::GetStorage() const
@@ -843,6 +891,13 @@ wxString wxWebResponse::GetHeader(const wxString& name) const
     return m_impl->GetHeader(name);
 }
 
+std::vector<wxString> wxWebResponse::GetAllHeaderValues(const wxString& name) const
+{
+    wxCHECK_IMPL( std::vector<wxString>() );
+
+    return m_impl->GetAllHeaderValues(name);
+}
+
 wxString wxWebResponse::GetMimeType() const
 {
     wxCHECK_IMPL( wxString() );
@@ -1094,10 +1149,11 @@ wxString wxWebSessionBase::GetFullURL(const wxString& url) const
     wxURI absURL(url);
     absURL.Resolve(*baseURL);
 
-    wxLogTrace(wxTRACE_WEBREQUEST, "Relative URL: %s -> %s",
-               url, absURL.BuildURI());
+    wxString fullURL = absURL.BuildURI();
+    if ( fullURL != url )
+        wxLogTrace(wxTRACE_WEBREQUEST, "Relative URL: %s -> %s", url, fullURL);
 
-    return absURL.BuildURI();
+    return fullURL;
 }
 
 wxWebRequest
@@ -1178,6 +1234,14 @@ bool wxWebSessionBase::EnablePersistentStorage(bool enable)
     wxCHECK_IMPL( false );
 
     return m_impl->EnablePersistentStorage(enable);
+}
+
+void
+wxWebSessionBase::SetDebugLogger(std::unique_ptr<wxWebRequestDebugLogger> logger)
+{
+    wxCHECK_IMPL_VOID();
+
+    m_impl->SetDebugLogger(std::move(logger));
 }
 
 // ----------------------------------------------------------------------------

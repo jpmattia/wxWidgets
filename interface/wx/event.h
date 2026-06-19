@@ -48,7 +48,14 @@ enum wxEventCategory
     /// This category is for wxSocketEvent
     wxEVT_CATEGORY_SOCKET = 4,
 
-    /// This category is for wxTimerEvent
+    /**
+        This category is for wxTimerEvent.
+
+        @note Under wxMSW, if this category is not specified when calling
+        wxEventLoopBase::YieldFor, events from one-off timers may be lost,
+        so it's recommended to either pass this category to it or use
+        repeatedly firing timers instead.
+     */
     wxEVT_CATEGORY_TIMER = 8,
 
     /**
@@ -551,10 +558,6 @@ public:
 
          @param functor The functor to call.
 
-         @note This method is not available with Visual C++ before version 8
-               (Visual Studio 2005) as earlier versions of the compiler don't
-               have the required support for C++ templates to implement it.
-
          @since 3.0
      */
     template<typename T>
@@ -837,6 +840,10 @@ public:
 
         This overload takes the additional @a id parameter.
 
+        @remarks In case there are several functions in the event handler
+                 matching the specified parameters, only one of functions is
+                 disconnected.
+
         @beginWxPerlOnly
         Not supported by wxPerl.
         @endWxPerlOnly
@@ -876,7 +883,7 @@ public:
 
         This offers basically the same functionality as Connect(), but it is
         more flexible as it also allows you to use ordinary functions and
-        arbitrary functors as event handlers. It is also less restrictive then
+        arbitrary functors as event handlers. It is also less restrictive than
         Connect() because you can use an arbitrary method as an event handler,
         whereas Connect() requires a wxEvtHandler derived handler.
 
@@ -1359,30 +1366,36 @@ enum wxKeyCategoryFlags
     However for the key down and up events the returned key code will instead
     be @c A independently of the state of the modifier keys i.e. it depends
     only on physical key being pressed and is not translated to its logical
-    representation using the current keyboard state. Such untranslated key
-    codes are defined as follows:
-        - For the letters they correspond to the @e upper case value of the
-        letter.
-        - For the other alphanumeric keys (e.g. @c 7 or @c +), the untranslated
-        key code corresponds to the character produced by the key when it is
-        pressed without Shift. E.g. in standard US keyboard layout the
-        untranslated key code for the key @c =/+ in the upper right corner of
-        the keyboard is 61 which is the ASCII value of @c =.
-        - For the rest of the keys (i.e. special non-printable keys) it is the
-        same as the normal key code as no translation is used anyhow.
+    representation using the current keyboard state.
 
-    Notice that the first rule applies to all Unicode letters, not just the
-    usual Latin-1 ones. However for non-Latin-1 letters only GetUnicodeKey()
-    can be used to retrieve the key code as GetKeyCode() just returns @c
-    WXK_NONE in this case.
+    To summarize: you should handle @c wxEVT_CHAR if you need the character
+    that pressing the key would produce and @c wxEVT_KEY_DOWN if you only need
+    the value of the key itself, independent of the current keyboard state.
 
-    Also, note that @c wxEVT_CHAR events are not generated for keys which do
-    not have a wxWidgets mapping, so GetRawKeyCode() should never be required
-    for this event.
+    In more details, the key codes for the key down and up events are
+    determined as follows:
+        - For the ASCII letters they correspond to the @e upper case value of
+        the letter.
+        - For the other Latin-1 characters, including letters such as `ù` or
+        `ö` but also non-letter characters such as `²`, the key code is the
+        value of the corresponding character without conversion to upper case
+        (this behaviour is inconsistent but preserved for compatibility).
+        - For the other keys producing (non-Latin) printable characters, the
+        key code is the ASCII code of the character the same key would produce
+        in the standard US keyboard layout.
+        - For the special non-printable keys the code corresponds to the name
+        of the key, e.g. `WXK_INSERT` for the Insert key, and is the same as
+        for the char events as no translation is performed for such keys.
 
-    To summarize: you should handle @c wxEVT_CHAR if you need the translated
-    key and @c wxEVT_KEY_DOWN if you only need the value of the key itself,
-    independent of the current keyboard state.
+    For example, the key marked with `]` in the US layout generates the key
+    code `$` when using the standard French AZERTY layout because this is the
+    label of this key on the keyboards using this layout. However if the same
+    physical key is pressed in Ukrainian keyboard layout where it would
+    normally produce the non-ASCII letter `ï`, then the key code is the code of
+    the corresponding character in the standard US layout, i.e. `]`. This also
+    applies to the letters, i.e. the key code producing the Cyrillic letter `ц`
+    in Ukrainian layout generates the key code `W` corresponding to the letter
+    of this key in the US layout.
 
     @note Not all key down events may be generated by the user. As an example,
         @c wxEVT_KEY_DOWN with @c = key code can be generated using the
@@ -1390,7 +1403,12 @@ enum wxKeyCategoryFlags
         = key corresponds to Shift-0 key combination in this layout and the key
         code for it is @c 0, not @c =. Because of this you should avoid
         requiring your users to type key events that might be impossible to
-        enter on their keyboard.
+        enter on their keyboard. Similarly, not all possible accelerator can be
+        used in all keyboard layouts, e.g. `Ctrl-;` can't be activated when
+        using the standard French AZERTY layout because `;` is on the same key
+        as `.` in this layout and pressing it generates `Ctrl-.`. Hence it is
+        best to avoid using accelerators using non-alphanumeric characters for
+        the programs that can be used with different keyboard layouts.
 
 
     Another difference between key and char events is that another kind of
@@ -1400,11 +1418,23 @@ enum wxKeyCategoryFlags
     26 for Ctrl-Z. This is convenient for terminal-like applications and can be
     completely ignored by all the other ones (if you need to handle Ctrl-A it
     is probably a better idea to use the key event rather than the char one).
-    Notice that currently no translation is done for the presses of @c [, @c
-    \\, @c ], @c ^ and @c _ keys which might be mapped to ASCII values from 27
-    to 31.
+    For completeness, the same translation is done for the presses of @c [, @c
+    \\, @c ], @c ^ and @c _ keys which are mapped to ASCII values from 27 to
+    31.
     Since version 2.9.2, the enum values @c WXK_CONTROL_A - @c WXK_CONTROL_Z
     can be used instead of the non-descriptive constant values 1-26.
+
+    @note Unfortunately, some keys don't generate consistent events when used
+    with the Control key. Notably:
+        - `Ctrl-Backspace` generates events with both key code and Unicode code
+          of ::WXK_DELETE in wxMSW, but ::WXK_BACK in wxGTK.
+        - `Ctrl-Enter` generates events with both key code and Unicode code of
+          ::WXK_CONTROL_J in wxMSW, but ::WXK_RETURN in wxGTK.
+        - `Ctrl-Letter` generates events corresponding to the control code even
+        when the letter is mapped to a non-Latin letter in the current keyboard
+        layout in wxMSW, but doesn't generate any `wxEVT_CHAR` events at all in
+        this case in wxGTK. Don't rely on getting these events in wxMSW, this
+        behaviour is only preserved for compatibility.
 
     Finally, modifier keys only generate key events but no char events at all.
     The modifiers keys are @c WXK_SHIFT, @c WXK_CONTROL, @c WXK_ALT and various
@@ -1890,6 +1920,22 @@ public:
     */
     int GetPosition() const;
 
+    /**
+        Offset of the scroll position from the nearest position expressed in
+        scroll units.
+
+        In cases where scrolling is possible with single pixel precision,
+        such as when panning on a touch screen with fingers, this returns
+        the offset in pixels of the real position compared to the position
+        obtained by multiplying the current scroll position in scroll units by
+        the size of scroll unit in pixels. For example, if the scroll unit size
+        (pixels per line) is 20px, this function returns a value which can be
+        between 0 and 19.
+
+        @since 3.2.2
+    */
+    int GetPixelOffset() const;
+
     void SetOrientation(int orient);
     void SetPosition(int pos);
 };
@@ -1932,6 +1978,65 @@ public:
     wxSysColourChangedEvent();
 };
 
+
+/**
+    Possible values for wxSysMetricChangedEvent::GetMetric().
+
+    @since 3.3.0
+ */
+enum class wxSysMetric
+{
+    /**
+        Undetermined or unknown system metric has changed.
+     */
+    Other,
+
+    /**
+        The default system cursor size has changed.
+
+        The new value can be obtained by calling wxSystemSettings::GetMetric()
+        with ::wxSYS_CURSOR_SIZE parameter.
+     */
+    CursorSize
+};
+
+/**
+    @class wxSysMetricChangedEvent
+
+    Notification about a change in one of the global system metrics.
+
+    Currently this event is only sent by wxMSW.
+
+    Event handlers for this event can access the new system metric values through
+    wxSystemSettings::GetMetric().
+
+    @remarks
+        The default event handler for this event propagates the event to child windows,
+        since the system events are only sent to top-level windows.
+        If intercepting this event for a top-level window, remember to either call
+        wxEvent::Skip() on the event, call the base class handler, or pass the event
+        on to the window's children explicitly.
+
+    @beginEventTable{wxSysMetricChangedEvent}
+    @event{EVT_SYS_METRIC_CHANGED(func)}
+        Process a @c wxEVT_SYS_METRIC_CHANGED event.
+    @endEventTable
+
+    @library{wxcore}
+    @category{events}
+
+    @see @ref overview_events
+
+    @since 3.3.0
+*/
+class wxSysMetricChangedEvent : public wxEvent
+{
+public:
+    /**
+        Return the metric which has changed.
+     */
+    wxSysMetric GetMetric() const;
+};
 
 
 /**
@@ -2673,8 +2778,8 @@ enum wxMouseWheelAxis
     under Mac platforms with a single button mouse).
 
     For the @c wxEVT_ENTER_WINDOW and @c wxEVT_LEAVE_WINDOW events
-    purposes, the mouse is considered to be inside the window if it is in the
-    window client area and not inside one of its children. In other words, the
+    purposes, the mouse is considered to be inside the window if it is over the
+    window and not inside one of its children. In other words, the
     parent window receives @c wxEVT_LEAVE_WINDOW event not only when the
     mouse leaves the window entirely but also when it enters one of its children.
 
@@ -2975,6 +3080,13 @@ public:
         the mouse wheel instead of line scrolling.
     */
     bool IsPageScroll() const;
+
+    /**
+        Returns @true if the event was synthesized from a touch event.
+
+        @since 3.3.0
+    */
+    bool IsSynthesized() const;
 
     /**
         Returns @true if the mouse was leaving the window.
@@ -3746,6 +3858,11 @@ public:
     clicked-on window, and then either show some suitable help or call wxEvent::Skip()
     if the identifier is unrecognised.
 
+    Note that for some windows, such as wxToolBar, the event uses the ID of the
+    tool that was under the mouse, if any, and not the ID of the window itself.
+    If necessary, wxEvent::GetEventObject() may be used to get the pointer to
+    the toolbar itself.
+
     Calling Skip is important because it allows wxWidgets to generate further
     events for ancestors of the clicked-on window. Otherwise it would be impossible to
     show help for container windows, since processing would stop after the first window
@@ -3928,7 +4045,82 @@ public:
     void SetPosition(int pos);
 };
 
+/**
+    @class wxTouchSequenceId
 
+    wxTouchSequenceId is a small opaque class that represents the ID of a touch point.
+
+    It must hold a unique ID of type @e void* in its only field and can be converted
+    to and from it.
+
+    If the ID is @NULL the wxTouchSequenceId is invalid and wxTouchSequenceId::IsOk will
+    return @false.
+
+    @since 3.3.0
+*/
+class wxTouchSequenceId : public wxItemId<void*>
+{
+public:
+    /**
+        Constructor.
+    */
+    wxTouchSequenceId();
+
+    /**
+        Constructor.
+    */
+    explicit wxTouchSequenceId(void* id);
+};
+
+/** @class wxMultiTouchEvent
+
+    This event class contains information about the events generated by touch devices:
+    they include press and release events and move events.
+
+    @beginEventTable{wxMultiTouchEvent}
+    @event{EVT_TOUCH_BEGIN(func)}
+        Process a @c wxEVT_TOUCH_BEGIN event.
+    @event{EVT_TOUCH_MOVE(func)}
+        Process a @c wxEVT_TOUCH_MOVE event.
+    @event{EVT_TOUCH_END(func)}
+        Process a @c wxEVT_TOUCH_END event.
+    @event{EVT_TOUCH_CANCEL(func)}
+        Process a @c wxEVT_TOUCH_CANCEL event.
+    @event{EVT_TOUCH_EVENTS(func)}
+        Process all touch events.
+    @endEventTable
+
+    @note Touch events are not generated by default, you must call
+          wxWindow::EnableTouchEvents() with the wxTOUCH_RAW_EVENTS parameter.
+
+    @library{wxcore}
+    @category{events}
+
+    @since 3.3.0
+*/
+class wxMultiTouchEvent : public wxEvent
+{
+public:
+    /**
+        Constructor only used by wxWidgets itself.
+    */
+    wxMultiTouchEvent(wxWindowID winid = 0, wxEventType type = wxEVT_NULL);
+
+    /**
+        Returns the position where the event took effect, in client coordinates.
+    */
+    const wxPoint2DDouble& GetPosition() const;
+
+    /**
+        Returns @true if the event is a primary (mouse pointer emulating) event.
+    */
+    bool IsPrimary() const;
+
+    /**
+        Returns the ID of the touch. This allows to track the move of a specific touch point.
+    */
+    const wxTouchSequenceId& GetSequenceId() const;
+};
 
 /** @class wxGestureEvent
     This is the base class for all supported gesture events.
@@ -4562,8 +4754,13 @@ public:
     that it could still be executed and exit()s the process itself, without
     waiting for being killed. If this behaviour is for some reason undesirable,
     make sure that you define a handler for this event in your wxApp-derived
-    class and do not call @c event.Skip() in it (but be aware that the system
-    will still kill your application).
+    class and do not call @c event.Skip() in it, but be aware that the system
+    will still kill your application. Because of this, it is usually better to
+    skip this event and let the default handling take place. Please also note
+    that this handler must not be using any UI functionality (such as modal
+    dialogs asking whether the changes should be saved) as it is not safe to do
+    it any more, but it could, for example, save the program state into a file
+    unconditionally in order to restore it during the next program execution.
 
     @beginEventTable{wxCloseEvent}
     @event{EVT_CLOSE(func)}
@@ -4936,12 +5133,27 @@ public:
     const wxCursor& GetCursor() const;
 
     /**
+        Returns the mouse position for which the cursor is requested.
+
+        This position is expressed in the client coordinates of the window.
+
+        @see GetX(), GetY()
+
+        @since 3.3.0
+    */
+    wxPoint GetPosition() const;
+
+    /**
         Returns the X coordinate of the mouse in client coordinates.
+
+        @see GetPosition()
     */
     wxCoord GetX() const;
 
     /**
         Returns the Y coordinate of the mouse in client coordinates.
+
+        @see GetPosition()
     */
     wxCoord GetY() const;
 
@@ -4958,6 +5170,94 @@ public:
     */
     void SetCursor(const wxCursor& cursor);
 };
+/**
+    @class wxStylusEvent
+
+    A wxStylusEvent is generated from wxWindow when the graphical pen (stylus) is used.
+
+    Application can handle this event to process stylus actions based on
+    the current of the pen, pressure and other parameters.
+    processing based on the current position of the pen, pressure and other
+    parameters.
+
+    @beginEventTable{wxStylusEvent}
+    @event{EVT_STYLUS_DOWN(func)}
+        Process a @c wxEVT_STYLUS_DOWN event, which is generated when a pen makes
+        contact with the tablet.
+    @event{EVT_STYLUS_UP(func)}
+        Process a @c wxEVT_STYLUS_UP event, which is generated when a pen breaks contact
+        with the tablet.
+    @event{EVT_STYLUS_UPDATE(func)}
+        Process a @c wxEVT_STYLUS_UPDATE event, which is generated each time an update
+        (like movement) comes from a pen that is near or touches surface of the tablet.
+    @endEventTable
+
+    @library{wxcore}
+    @category{events}
+
+    @since 3.3.3
+ */
+class wxStylusEvent : public wxEvent
+{
+public:
+    /**
+        Constructor.
+     */
+    wxStylusEvent(wxWindowID winid = 0, wxEventType type = wxEVT_NULL);
+    /**
+        Get the pressure value. Range is from 0 to 1.
+     */
+    wxDouble GetPressure() const;
+    /**
+        Set the pressure value.
+     */
+    void SetPressure(wxDouble p);
+
+    /**
+        Get the x tilt value. Range is between -90 and +90.
+     */
+    wxDouble GetTiltX() const;
+    /**
+        Set the x tilt value.
+     */
+    void SetTiltX(wxDouble t);
+
+    /**
+        Get the y tilt value. Range is between -90 and +90.
+     */
+    wxDouble GetTiltY() const;
+    /**
+        Set the y tilt value.
+     */
+    void SetTiltY(wxDouble t);
+
+    /**
+        Get the rotation value. Range is between 0 and 360.
+     */
+    wxDouble GetRotation() const;
+    /**
+        Set the rotation.
+     */
+    void SetRotation(wxDouble r);
+    /**
+        Returns the position where the event happened relative to the window generating the event.
+     */
+    const wxPoint& GetPosition() const;
+    /**
+        Set the position.
+     */
+    void SetPosition(const wxPoint& pos);
+
+    /**
+        Tells if the pen used is an eraser.
+     */
+    bool IsUsingEraser() const;
+    /**
+        Update the eraser flag, true if eraser used, false otherwise.
+     */
+    void SetUsingEraser(bool eraser);
+};
+
 
 #endif // wxUSE_GUI
 
@@ -5246,6 +5546,10 @@ wxEventType wxEVT_SCROLLWIN_PAGEUP;
 wxEventType wxEVT_SCROLLWIN_PAGEDOWN;
 wxEventType wxEVT_SCROLLWIN_THUMBTRACK;
 wxEventType wxEVT_SCROLLWIN_THUMBRELEASE;
+wxEventType wxEVT_TOUCH_BEGIN;
+wxEventType wxEVT_TOUCH_MOVE;
+wxEventType wxEVT_TOUCH_END;
+wxEventType wxEVT_TOUCH_CANCEL;
 wxEventType wxEVT_GESTURE_PAN;
 wxEventType wxEVT_GESTURE_ZOOM;
 wxEventType wxEVT_GESTURE_ROTATE;
@@ -5275,6 +5579,7 @@ wxEventType wxEVT_MENU_CLOSE;
 wxEventType wxEVT_MENU_HIGHLIGHT;
 wxEventType wxEVT_CONTEXT_MENU;
 wxEventType wxEVT_SYS_COLOUR_CHANGED;
+wxEventType wxEVT_SYS_METRIC_CHANGED;
 wxEventType wxEVT_DISPLAY_CHANGED;
 wxEventType wxEVT_DPI_CHANGED;
 wxEventType wxEVT_QUERY_NEW_PALETTE;

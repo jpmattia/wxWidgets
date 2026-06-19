@@ -126,7 +126,6 @@ library:
 @itemdef{wxUSE_GENERIC_DRAGIMAGE, Used in wxDragImage sample.}
 @itemdef{wxUSE_GENERIC_DRAWELLIPSE, See comment in wx/dc.h file.}
 @itemdef{wxUSE_GENERIC_MDI_AS_NATIVE, This is not a user-settable symbol, it is only used internally in wx/generic/mdig.h.}
-@itemdef{wxUSE_GEOMETRY, Use common geometry classes}
 @itemdef{wxUSE_GIF, Use GIF wxImageHandler}
 @itemdef{wxUSE_GLCANVAS, Enables OpenGL support.}
 @itemdef{wxUSE_GRAPHICS_CONTEXT, Use wxGraphicsContext and related classes.}
@@ -154,9 +153,6 @@ library:
 @itemdef{wxUSE_LOG_DIALOG, Use wxLogDialog class.}
 @itemdef{wxUSE_LOGGUI, Use wxLogGui class.}
 @itemdef{wxUSE_LOGWINDOW, Use wxLogFrame class.}
-@itemdef{wxUSE_LONGLONG, Use wxLongLong class.}
-@itemdef{wxUSE_LONGLONG_NATIVE, Use native <tt>long long</tt> type in wxLongLong implementation.}
-@itemdef{wxUSE_LONGLONG_WX, Use generic wxLongLong implementation.}
 @itemdef{wxUSE_MARKUP, Provide wxControl::SetLabelMarkup() method.}
 @itemdef{wxUSE_MDI, Use wxMDIParentFrame, and wxMDIChildFrame}
 @itemdef{wxUSE_MDI_ARCHITECTURE, Use MDI-based document-view classes.}
@@ -171,6 +167,7 @@ library:
 @itemdef{wxUSE_NANOSVG, Use NanoSVG for rasterizing SVG (this option is new since wxWidgets 3.1.7).}
 @itemdef{wxUSE_NANOSVG_EXTERNAL, Use an external NanoSVG library when wxUSE_NANOSVG is enabled.}
 @itemdef{wxUSE_NANOSVG_EXTERNAL_ENABLE_IMPL, When the external NanoSVG library is header only, define this to enable its implementation.}
+@itemdef{wxUSE_LUNASVG, Use LunaSVG for rasterizing SVG (this option is new since wxWidgets 3.3.2).}
 @itemdef{wxUSE_NATIVE_DATAVIEWCTRL, Use native wxDataViewCtrl class (this option is new since wxWidgets 3.1.4).}
 @itemdef{wxUSE_NATIVE_STATUSBAR, Use native wxStatusBar class.}
 @itemdef{wxUSE_NOTEBOOK, Use wxNotebook and related classes.}
@@ -308,7 +305,6 @@ library:
 @itemdef{wxUSE_ACCESSIBILITY, Enable accessibility support}
 @itemdef{wxUSE_ACTIVEX, Use wxActiveXContainer and related classes.}
 @itemdef{wxUSE_COMBOCTRL_POPUP_ANIMATION, See wx/msw/combo.h file.}
-@itemdef{wxUSE_COMMON_DIALOGS, Enable use of windows common dialogs from header commdlg.h; example PRINTDLG.}
 @itemdef{wxUSE_CRASHREPORT, Use wxCrashReport class.}
 @itemdef{wxUSE_DATEPICKCTRL_GENERIC, Use generic wxDatePickerCtrl implementation in addition to the native one.}
 @itemdef{wxUSE_DC_CACHEING, cache temporary wxDC objects.}
@@ -332,7 +328,6 @@ the other compilers. See also wxUSE_NO_MANIFEST.}
 @itemdef{wxUSE_RICHEDIT, Enable use of riched32.dll in wxTextCtrl}
 @itemdef{wxUSE_RICHEDIT2, Enable use of riched20.dll in wxTextCtrl}
 @itemdef{wxUSE_VC_CRTDBG, See wx/msw/msvcrt.h file.}
-@itemdef{wxUSE_UXTHEME, Enable support for XP themes.}
 @itemdef{wxUSE_WIN_METAFILES_ALWAYS, Use wxMetaFile even when wxUSE_ENH_METAFILE=1.}
 @itemdef{wxUSE_WINRT, Enable WinRT support.}
 @itemdef{wxUSE_WXDIB, Use wxDIB class.}

@@ -279,14 +279,7 @@ bool wxTarHeaderBlock::SetPath(const wxString& name, wxMBConv& conv)
     // if the conversion fails make an approximation
     if (!nameBuf) {
         badconv = true;
-        size_t len = name.length();
-        wxCharBuffer approx(len);
-        for (size_t i = 0; i < len; i++)
-        {
-            wxChar c = name[i];
-            approx.data()[i] = c & ~0x7F ? '_' : c;
-        }
-        nameBuf = approx;
+        nameBuf = name.ToAscii();
     }
 
     const char *mbName = nameBuf;
@@ -940,8 +933,9 @@ bool wxTarInputStream::ReadExtendedHeader(wxTarHeaderRecords*& recs)
         while (isdigit((unsigned char) *p))
             recSize = recSize * 10 + *p++ - '0';
 
-        // validity checks
-        if (recPos + recSize > len)
+        // validity checks: write this carefully to avoid adding anything to
+        // recSize as addition could overflow
+        if (recSize > len - recPos)
             break;
         if (recSize < p - pRec + (size_t)3 || *p != ' '
                 || pRec[recSize - 1] != '\012') {

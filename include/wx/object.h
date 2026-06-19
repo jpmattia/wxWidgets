@@ -23,37 +23,6 @@
     #include "wx/string.h"
 #endif
 
-#define wxDECLARE_CLASS_INFO_ITERATORS()                                     \
-class WXDLLIMPEXP_BASE const_iterator                                    \
-    {                                                                        \
-    typedef wxHashTable_Node Node;                                       \
-    public:                                                                  \
-    typedef const wxClassInfo* value_type;                               \
-    typedef const value_type& const_reference;                           \
-    typedef const_iterator itor;                                         \
-    typedef value_type* ptr_type;                                        \
-    \
-    Node* m_node;                                                        \
-    wxHashTable* m_table;                                                \
-    public:                                                                  \
-    typedef const_reference reference_type;                              \
-    typedef ptr_type pointer_type;                                       \
-    \
-    const_iterator(Node* node, wxHashTable* table)                       \
-    : m_node(node), m_table(table) { }                               \
-    const_iterator() : m_node(nullptr), m_table(nullptr) { }                   \
-    value_type operator*() const;                                        \
-    itor& operator++();                                                  \
-    const itor operator++(int);                                          \
-    bool operator!=(const itor& it) const                                \
-            { return it.m_node != m_node; }                                  \
-            bool operator==(const itor& it) const                                \
-            { return it.m_node == m_node; }                                  \
-    };                                                                       \
-    \
-    static const_iterator begin_classinfo();                                 \
-    static const_iterator end_classinfo()
-
 // based on the value of wxUSE_EXTENDED_RTTI symbol,
 // only one of the RTTI system will be compiled:
 // - the "old" one (defined by rtti.h) or
@@ -147,10 +116,9 @@ name##PluginSentinel  m_pluginsentinel
 // note that it still has different semantics from dynamic_cast<> and so can't
 // be replaced by it as long as there are any compilers not supporting it
 #define wxDynamicCast(obj, className) \
-    ((className *) wxCheckDynamicCast( \
-        const_cast<wxObject *>(static_cast<const wxObject *>(\
-          const_cast<className *>(static_cast<const className *>(obj)))), \
-        &className::ms_classInfo))
+    (static_cast<className*>(wxCheckDynamicCast( \
+        const_cast<wxObject *>(static_cast<const wxObject *>(obj)), \
+        &className::ms_classInfo)))
 
 // The 'this' pointer is always true, so use this version
 // to cast the this pointer and avoid compiler warnings.
@@ -173,7 +141,6 @@ inline T *wxCheckCast(const void *ptr)
 // (note that also some wx-prefixed macro do _not_ require a semicolon because
 // it's not always possible to force the compiler to require it)
 
-#define DECLARE_CLASS_INFO_ITERATORS()                              wxDECLARE_CLASS_INFO_ITERATORS();
 #define DECLARE_ABSTRACT_CLASS(n)                                   wxDECLARE_ABSTRACT_CLASS(n);
 #define DECLARE_DYNAMIC_CLASS_NO_ASSIGN(n)                          wxDECLARE_DYNAMIC_CLASS_NO_ASSIGN(n);
 #define DECLARE_DYNAMIC_CLASS_NO_COPY(n)                            wxDECLARE_DYNAMIC_CLASS_NO_COPY(n);
@@ -258,6 +225,16 @@ public:
     }
 
     T *get() const { return m_ptr; }
+
+    bool operator==(const wxObjectDataPtr<T>& other) const
+    {
+        return m_ptr == other.m_ptr;
+    }
+
+    bool operator!=(const wxObjectDataPtr<T>& other) const
+    {
+        return !(*this == other);
+    }
 
     // test for pointer validity: defining conversion to unspecified_bool_type
     // and not more obvious bool to avoid implicit conversions to integer types
@@ -428,7 +405,7 @@ protected:
     virtual wxObjectRefData *CreateRefData() const;
 
     // create a new m_refData initialized with the given one
-    virtual wxObjectRefData *CloneRefData(const wxObjectRefData *data) const;
+    wxNODISCARD virtual wxObjectRefData *CloneRefData(const wxObjectRefData *data) const;
 
     wxObjectRefData *m_refData;
 };
@@ -436,6 +413,15 @@ protected:
 inline wxObject *wxCheckDynamicCast(wxObject *obj, wxClassInfo *classInfo)
 {
     return obj && obj->GetClassInfo()->IsKindOf(classInfo) ? obj : nullptr;
+}
+
+// ensure that an object that should be a particular type is what it should be,
+// then static cast it
+template <class T>
+inline T* wxCheckedStaticCast(wxObject* obj)
+{
+    wxCHECK_MSG(wxDynamicCast(obj, T), nullptr, "Pointer of wrong type?");
+    return static_cast<T*>(obj);
 }
 
 #include "wx/xti2.h"

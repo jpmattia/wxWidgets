@@ -20,6 +20,8 @@
     #include "wx/math.h"
 #endif //WX_PRECOMP
 
+#include <vector>
+
 namespace
 {
 
@@ -78,20 +80,31 @@ wxDataInputStream::wxDataInputStream(wxInputStream& s, const wxMBConv& conv)
 {
 }
 
-#if wxHAS_INT64
+bool wxDataInputStream::ReadBytes(void *buffer, size_t size)
+{
+    if ( m_input->Read(buffer, size).LastRead() == size )
+        return true;
+
+    // We didn't get as many bytes as requested, so the stream is truncated and
+    // we can't return any meaningful data: mark it as being in error to let
+    // the caller know about it instead of silently returning wrong values.
+    m_input->Reset(wxSTREAM_READ_ERROR);
+    return false;
+}
+
 wxUint64 wxDataInputStream::Read64()
 {
-  wxUint64 tmp;
+  wxUint64 tmp = 0;
   Read64(&tmp, 1);
   return tmp;
 }
-#endif // wxHAS_INT64
 
 wxUint32 wxDataInputStream::Read32()
 {
   wxUint32 i32;
 
-  m_input->Read(&i32, 4);
+  if ( !ReadBytes(&i32, 4) )
+    return 0;
 
   if (m_be_order)
     return wxUINT32_SWAP_ON_LE(i32);
@@ -103,7 +116,8 @@ wxUint16 wxDataInputStream::Read16()
 {
   wxUint16 i16;
 
-  m_input->Read(&i16, 2);
+  if ( !ReadBytes(&i16, 2) )
+    return 0;
 
   if (m_be_order)
     return wxUINT16_SWAP_ON_LE(i16);
@@ -115,7 +129,9 @@ wxUint8 wxDataInputStream::Read8()
 {
   wxUint8 buf;
 
-  m_input->Read(&buf, 1);
+  if ( !ReadBytes(&buf, 1) )
+    return 0;
+
   return (wxUint8)buf;
 }
 
@@ -126,7 +142,9 @@ double wxDataInputStream::ReadDouble()
     {
         char buf[10];
 
-        m_input->Read(buf, 10);
+        if ( !ReadBytes(buf, 10) )
+            return 0.0;
+
         return wxConvertFromIeeeExtended((const wxInt8 *)buf);
     }
     else
@@ -176,24 +194,30 @@ wxString wxDataInputStream::ReadString()
         wxCharBuffer tmp(len);
         if ( tmp )
         {
-            m_input->Read(tmp.data(), len);
-            ret = m_conv->cMB2WC(tmp.data(), len, nullptr);
+            // Only decode the string if we could read all of its bytes: a
+            // shorter read means the stream is truncated and the rest of the
+            // buffer is uninitialised, so don't let it leak into the result.
+            if ( ReadBytes(tmp.data(), len) )
+                ret = m_conv->cMB2WC(tmp.data(), len, nullptr);
         }
     }
 
     return ret;
 }
 
-#if wxUSE_LONGLONG
-
 template <class T>
 static
 void DoReadLL(T *buffer, size_t size, wxInputStream *input, bool be_order)
 {
     typedef T DataType;
-    unsigned char *pchBuffer = new unsigned char[size * 8];
+    std::vector<unsigned char> pchBuffer(size * 8);
     // TODO: Check for overflow when size is of type uint and is > than 512m
-    input->Read(pchBuffer, size * 8);
+    if ( input->Read(pchBuffer.data(), size * 8).LastRead() != size * 8 )
+    {
+        // Stream is truncated, don't use the partially read data.
+        input->Reset(wxSTREAM_READ_ERROR);
+        return;
+    }
     size_t idx_base = 0;
     if ( be_order )
     {
@@ -202,8 +226,8 @@ void DoReadLL(T *buffer, size_t size, wxInputStream *input, bool be_order)
             buffer[uiIndex] = 0l;
             for ( unsigned ui = 0; ui != 8; ++ui )
             {
-                buffer[uiIndex] = buffer[uiIndex] * 256l +
-                            DataType((unsigned long) pchBuffer[idx_base + ui]);
+                buffer[uiIndex] <<= 8;
+                buffer[uiIndex] += DataType((unsigned long) pchBuffer[idx_base + ui]);
             }
 
             idx_base += 8;
@@ -215,19 +239,21 @@ void DoReadLL(T *buffer, size_t size, wxInputStream *input, bool be_order)
         {
             buffer[uiIndex] = 0l;
             for ( unsigned ui=0; ui!=8; ++ui )
-                buffer[uiIndex] = buffer[uiIndex] * 256l +
-                    DataType((unsigned long) pchBuffer[idx_base + 7 - ui]);
+            {
+                buffer[uiIndex] <<= 8;
+                buffer[uiIndex] += DataType((unsigned long) pchBuffer[idx_base + 7 - ui]);
+            }
+
             idx_base += 8;
         }
     }
-    delete[] pchBuffer;
 }
 
 template <class T>
 static void DoWriteLL(const T *buffer, size_t size, wxOutputStream *output, bool be_order)
 {
     typedef T DataType;
-    unsigned char *pchBuffer = new unsigned char[size * 8];
+    std::vector<unsigned char> pchBuffer(size * 8);
     size_t idx_base = 0;
     if ( be_order )
     {
@@ -261,13 +287,8 @@ static void DoWriteLL(const T *buffer, size_t size, wxOutputStream *output, bool
     }
 
     // TODO: Check for overflow when size is of type uint and is > than 512m
-    output->Write(pchBuffer, size * 8);
-    delete[] pchBuffer;
+    output->Write(pchBuffer.data(), size * 8);
 }
-
-#endif // wxUSE_LONGLONG
-
-#ifdef wxLongLong_t
 
 template <class T>
 static
@@ -276,7 +297,12 @@ void DoReadI64(T *buffer, size_t size, wxInputStream *input, bool be_order)
     typedef T DataType;
     unsigned char *pchBuffer = (unsigned char*) buffer;
     // TODO: Check for overflow when size is of type uint and is > than 512m
-    input->Read(pchBuffer, size * 8);
+    if ( input->Read(pchBuffer, size * 8).LastRead() != size * 8 )
+    {
+        // Stream is truncated, don't use the partially read data.
+        input->Reset(wxSTREAM_READ_ERROR);
+        return;
+    }
     if ( be_order )
     {
         for ( wxUint32 i = 0; i < size; i++ )
@@ -320,30 +346,17 @@ void DoWriteI64(const T *buffer, size_t size, wxOutputStream *output, bool be_or
   }
 }
 
-#endif // wxLongLong_t
 
-
-#if wxHAS_INT64
 void wxDataInputStream::Read64(wxUint64 *buffer, size_t size)
 {
-#ifndef wxLongLong_t
-    DoReadLL(buffer, size, m_input, m_be_order);
-#else
     DoReadI64(buffer, size, m_input, m_be_order);
-#endif
 }
 
 void wxDataInputStream::Read64(wxInt64 *buffer, size_t size)
 {
-#ifndef wxLongLong_t
-    DoReadLL(buffer, size, m_input, m_be_order);
-#else
     DoReadI64(buffer, size, m_input, m_be_order);
-#endif
 }
-#endif // wxHAS_INT64
 
-#if defined(wxLongLong_t) && wxUSE_LONGLONG
 void wxDataInputStream::Read64(wxULongLong *buffer, size_t size)
 {
     DoReadLL(buffer, size, m_input, m_be_order);
@@ -353,9 +366,7 @@ void wxDataInputStream::Read64(wxLongLong *buffer, size_t size)
 {
     DoReadLL(buffer, size, m_input, m_be_order);
 }
-#endif // wxLongLong_t
 
-#if wxUSE_LONGLONG
 void wxDataInputStream::ReadLL(wxULongLong *buffer, size_t size)
 {
     DoReadLL(buffer, size, m_input, m_be_order);
@@ -368,15 +379,15 @@ void wxDataInputStream::ReadLL(wxLongLong *buffer, size_t size)
 
 wxLongLong wxDataInputStream::ReadLL(void)
 {
-    wxLongLong ll;
+    wxLongLong ll = 0;
     DoReadLL(&ll, (size_t)1, m_input, m_be_order);
     return ll;
 }
-#endif // wxUSE_LONGLONG
 
 void wxDataInputStream::Read32(wxUint32 *buffer, size_t size)
 {
-    m_input->Read(buffer, size * 4);
+    if ( !ReadBytes(buffer, size * 4) )
+        return;
 
     if (m_be_order)
     {
@@ -398,7 +409,8 @@ void wxDataInputStream::Read32(wxUint32 *buffer, size_t size)
 
 void wxDataInputStream::Read16(wxUint16 *buffer, size_t size)
 {
-  m_input->Read(buffer, size * 2);
+  if ( !ReadBytes(buffer, size * 2) )
+    return;
 
   if (m_be_order)
   {
@@ -420,7 +432,7 @@ void wxDataInputStream::Read16(wxUint16 *buffer, size_t size)
 
 void wxDataInputStream::Read8(wxUint8 *buffer, size_t size)
 {
-  m_input->Read(buffer, size);
+  ReadBytes(buffer, size);
 }
 
 void wxDataInputStream::ReadDouble(double *buffer, size_t size)
@@ -481,7 +493,6 @@ wxDataInputStream& wxDataInputStream::operator>>(wxUint32& i)
   return *this;
 }
 
-#if wxHAS_INT64
 wxDataInputStream& wxDataInputStream::operator>>(wxUint64& i)
 {
   i = Read64();
@@ -493,9 +504,7 @@ wxDataInputStream& wxDataInputStream::operator>>(wxInt64& i)
   i = Read64();
   return *this;
 }
-#endif // wxHAS_INT64
 
-#if defined(wxLongLong_t) && wxUSE_LONGLONG
 wxDataInputStream& wxDataInputStream::operator>>(wxULongLong& i)
 {
   i = ReadLL();
@@ -507,7 +516,6 @@ wxDataInputStream& wxDataInputStream::operator>>(wxLongLong& i)
   i = ReadLL();
   return *this;
 }
-#endif // wxLongLong_t
 
 wxDataInputStream& wxDataInputStream::operator>>(double& d)
 {
@@ -531,7 +539,6 @@ wxDataOutputStream::wxDataOutputStream(wxOutputStream& s, const wxMBConv& conv)
 {
 }
 
-#if wxHAS_INT64
 void wxDataOutputStream::Write64(wxUint64 i)
 {
   Write64(&i, 1);
@@ -541,7 +548,6 @@ void wxDataOutputStream::Write64(wxInt64 i)
 {
   Write64(&i, 1);
 }
-#endif // wxHAS_INT64
 
 void wxDataOutputStream::Write32(wxUint32 i)
 {
@@ -627,27 +633,16 @@ void wxDataOutputStream::WriteFloat(float f)
     }
 }
 
-#if wxHAS_INT64
 void wxDataOutputStream::Write64(const wxUint64 *buffer, size_t size)
 {
-#ifndef wxLongLong_t
-    DoWriteLL(buffer, size, m_output, m_be_order);
-#else
     DoWriteI64(buffer, size, m_output, m_be_order);
-#endif
 }
 
 void wxDataOutputStream::Write64(const wxInt64 *buffer, size_t size)
 {
-#ifndef wxLongLong_t
-    DoWriteLL(buffer, size, m_output, m_be_order);
-#else
     DoWriteI64(buffer, size, m_output, m_be_order);
-#endif
 }
-#endif // wxHAS_INT64
 
-#if defined(wxLongLong_t) && wxUSE_LONGLONG
 void wxDataOutputStream::Write64(const wxULongLong *buffer, size_t size)
 {
     DoWriteLL(buffer, size, m_output, m_be_order);
@@ -657,9 +652,7 @@ void wxDataOutputStream::Write64(const wxLongLong *buffer, size_t size)
 {
     DoWriteLL(buffer, size, m_output, m_be_order);
 }
-#endif // wxLongLong_t
 
-#if wxUSE_LONGLONG
 void wxDataOutputStream::WriteLL(const wxULongLong *buffer, size_t size)
 {
     DoWriteLL(buffer, size, m_output, m_be_order);
@@ -679,7 +672,6 @@ void wxDataOutputStream::WriteLL(const wxULongLong &ll)
 {
     WriteLL(&ll, 1);
 }
-#endif // wxUSE_LONGLONG
 
 void wxDataOutputStream::Write32(const wxUint32 *buffer, size_t size)
 {
@@ -788,7 +780,6 @@ wxDataOutputStream& wxDataOutputStream::operator<<(wxUint32 i)
   return *this;
 }
 
-#if wxHAS_INT64
 wxDataOutputStream& wxDataOutputStream::operator<<(wxUint64 i)
 {
   Write64(i);
@@ -800,9 +791,7 @@ wxDataOutputStream& wxDataOutputStream::operator<<(wxInt64 i)
   Write64(i);
   return *this;
 }
-#endif // wxHAS_INT64
 
-#if defined(wxLongLong_t) && wxUSE_LONGLONG
 wxDataOutputStream& wxDataOutputStream::operator<<(const wxULongLong &i)
 {
   WriteLL(i);
@@ -814,7 +803,6 @@ wxDataOutputStream& wxDataOutputStream::operator<<(const wxLongLong &i)
   WriteLL(i);
   return *this;
 }
-#endif // wxLongLong_t
 
 wxDataOutputStream& wxDataOutputStream::operator<<(double d)
 {

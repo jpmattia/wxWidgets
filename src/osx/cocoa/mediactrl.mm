@@ -469,22 +469,22 @@ bool wxAVMediaBackend::Stop()
 
 double wxAVMediaBackend::GetVolume()
 {
-    return [m_player volume];
+    return double([m_player volume]);
 }
 
 bool wxAVMediaBackend::SetVolume(double dVolume)
 {
-    [m_player setVolume:dVolume];
+    [m_player setVolume:(float)dVolume];
     return true;
 }
 double wxAVMediaBackend::GetPlaybackRate()
 {
-    return [m_player rate];
+    return double([m_player rate]);
 }
 
 bool wxAVMediaBackend::SetPlaybackRate(double dRate)
 {
-    [m_player setRate:dRate];
+    [m_player setRate:(float)dRate];
     return true;
 }
 
@@ -498,7 +498,7 @@ bool wxAVMediaBackend::SetPosition(wxLongLong where)
 
 wxLongLong wxAVMediaBackend::GetPosition()
 {
-    return CMTimeGetSeconds([m_player currentTime])*1000.0;
+    return (long long)(CMTimeGetSeconds([m_player currentTime]) * 1000);
 }
 
 wxLongLong wxAVMediaBackend::GetDuration()
@@ -506,9 +506,9 @@ wxLongLong wxAVMediaBackend::GetDuration()
     AVPlayerItem *playerItem = [m_player currentItem];
 
     if ([playerItem status] == AVPlayerItemStatusReadyToPlay)
-        return CMTimeGetSeconds([[playerItem asset] duration])*1000.0;
-    else
-        return 0.f;
+        return (long long)(CMTimeGetSeconds([[playerItem asset] duration]) * 1000);
+
+    return 0;
 }
 
 wxMediaState wxAVMediaBackend::GetState()

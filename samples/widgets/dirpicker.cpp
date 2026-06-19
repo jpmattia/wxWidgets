@@ -63,7 +63,7 @@ enum
 class DirPickerWidgetsPage : public WidgetsPage
 {
 public:
-    DirPickerWidgetsPage(WidgetsBookCtrl *book, wxImageList *imaglist);
+    DirPickerWidgetsPage(WidgetsBookCtrl *book, wxVector<wxBitmapBundle>& imaglist);
 
     virtual wxWindow *GetWidget() const override { return m_dirPicker; }
     virtual void RecreateWidget() override { RecreatePicker(); }
@@ -136,7 +136,7 @@ IMPLEMENT_WIDGETS_PAGE(DirPickerWidgetsPage, "DirPicker",
                        PICKER_CTRLS | FAMILY_CTRLS);
 
 DirPickerWidgetsPage::DirPickerWidgetsPage(WidgetsBookCtrl *book,
-                                     wxImageList *imaglist)
+                                     wxVector<wxBitmapBundle>& imaglist)
                   : WidgetsPage(book, imaglist, dirpicker_xpm)
 {
 }
@@ -249,6 +249,12 @@ void DirPickerWidgetsPage::OnButtonReset(wxCommandEvent& WXUNUSED(event))
 
 void DirPickerWidgetsPage::OnDirChange(wxFileDirPickerEvent& event)
 {
+    wxLogMessage("The directory changed to '%s' (the control has '%s')."
+                 "The current working directory is '%s'",
+                 event.GetPath(),
+                 m_dirPicker->GetDirName().GetFullPath(),
+                 wxGetCwd());
+
     wxLogMessage("The directory changed to '%s' ! The current working directory is '%s'",
                  event.GetPath(), wxGetCwd());
 }

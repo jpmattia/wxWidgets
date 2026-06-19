@@ -228,7 +228,7 @@ TEST_CASE("StdString::AssignOp", "[stdstring]")
 
 TEST_CASE("StdString::Compare", "[stdstring]")
 {
-    wxString s1, s2, s3, s4, s5, s6, s7, s8;
+    wxString s1, s2, s3, s4, s5, s6;
 
     s1 = wxT("abcdefgh");
     s2 = wxT("abcdefgh");
@@ -250,14 +250,12 @@ TEST_CASE("StdString::Compare", "[stdstring]")
 
 TEST_CASE("StdString::Erase", "[stdstring]")
 {
-    wxString s1, s2, s3, s4, s5, s6, s7;
+    wxString s1, s2, s3, s4, s7;
 
     s1 = wxT("abcdefgh");
     s2 = wxT("abcdefgh");
     s3 = wxT("abc");
     s4 = wxT("abcdefghi");
-    s5 = wxT("aaa");
-    s6 = wxT("zzz");
     s7 = wxT("zabcdefg");
 
     s1.erase(1, 1);
@@ -549,10 +547,9 @@ TEST_CASE("StdString::Resize", "[stdstring]")
     CHECK( s3 == wxT("abcABCdefDEF  ") );
     CHECK( s4 == wxT("abcABCdefDEFWW") );
 
-    wxString s =
-        wxString::FromUTF8("\xd0\x9f\xd1\x80\xd0\xb8\xd0\xb2\xd0\xb5\xd1\x82");
+    wxString s = wxString::FromUTF8("Привет");
     s.resize(3);
-    CHECK( s == wxString::FromUTF8("\xd0\x9f\xd1\x80\xd0\xb8") );
+    CHECK( s == wxString::FromUTF8("При") );
 }
 
 TEST_CASE("StdString::Riter", "[stdstring]")

@@ -81,8 +81,6 @@
 #endif
 
 
-#define wxPG_GUTTER_DIV                 3 // gutter is max(iconwidth/gutter_div,gutter_min)
-#define wxPG_GUTTER_MIN                 3 // gutter before and after image of [+] or [-]
 #define wxPG_YSPACING_MIN               1
 #define wxPG_DEFAULT_VSPACING           2 // This matches .NET propertygrid's value,
                                           // but causes normal combobox to spill out under MSW
@@ -306,7 +304,7 @@ wxEND_EVENT_TABLE()
 // -----------------------------------------------------------------------
 
 wxPropertyGrid::wxPropertyGrid()
-    : wxScrolled<wxControl>()
+    : wxSystemThemedControl<wxScrolled<wxControl>>()
 {
     Init1();
 }
@@ -319,7 +317,7 @@ wxPropertyGrid::wxPropertyGrid( wxWindow *parent,
                                 const wxSize& size,
                                 long style,
                                 const wxString& name )
-    : wxScrolled<wxControl>()
+    : wxSystemThemedControl<wxScrolled<wxControl>>()
 {
     Init1();
     Create(parent,id,pos,size,style,name);
@@ -350,6 +348,8 @@ bool wxPropertyGrid::Create( wxWindow *parent,
                       (style & wxWINDOW_STYLE_MASK) | wxScrolledWindowStyle,
                       wxDefaultValidator,
                       name);
+
+    EnableSystemThemeByDefault();
 
     m_windowStyle |= (style & wxPG_WINDOW_STYLE_MASK);
 
@@ -409,17 +409,6 @@ void wxPropertyGrid::Init1()
 
     m_doubleBuffer = nullptr;
 
-#ifndef wxPG_ICON_WIDTH
-    m_iconWidth = 11;
-    m_iconHeight = 11;
-#else
-    m_iconWidth = wxPG_ICON_WIDTH;
-    m_iconHeight = wxPG_ICON_WIDTH;
-#endif
-
-    m_gutterWidth = wxPG_GUTTER_MIN;
-    m_subgroup_extramargin = 10;
-
     m_lineHeight = 0;
 
     m_width = m_height = 0;
@@ -476,7 +465,13 @@ void wxPropertyGrid::Init2()
 
     m_iconWidth = s_expandbmp.GetWidth();
     m_iconHeight = s_expandbmp.GetHeight();
+#else
+    m_iconWidth = FromDIP(wxPG_ICON_WIDTH);
+    m_iconHeight = FromDIP(wxPG_ICON_WIDTH);
 #endif
+
+    m_gutterWidth = wxMax(0, (FromDIP(16) - m_iconWidth) / 2);
+    m_subgroup_extramargin = m_iconWidth + m_gutterWidth;
 
     m_curcursor = wxCURSOR_ARROW;
     m_cursorSizeWE = wxCursor(wxCURSOR_SIZEWE);
@@ -523,6 +518,8 @@ void wxPropertyGrid::Init2()
 
 wxPropertyGrid::~wxPropertyGrid()
 {
+    SendDestroyEvent();
+
 #if wxUSE_THREADS
     wxCriticalSectionLocker lock(wxPGGlobalVars->m_critSect);
 #endif
@@ -957,11 +954,11 @@ void wxPropertyGrid::MakeColumnEditable( unsigned int column,
                                          bool editable )
 {
     // The second column is always editable. To make it read-only is a property
-    // by property decision by setting its wxPGPropertyFlags::ReadOnly flag.
+    // by property decision by setting its wxPGFlags::ReadOnly flag.
     wxASSERT_MSG
     (
          column != 1,
-         wxS("Set wxPGPropertyFlags::ReadOnly property flag instead")
+         wxS("Set wxPGFlags::ReadOnly property flag instead")
     );
 
     if ( editable )
@@ -1286,7 +1283,7 @@ void wxPropertyGrid::SetScrollbars(int pixelsPerUnitX, int pixelsPerUnitY,
 {
     int oldX;
     CalcUnscrolledPosition(0, 0, &oldX, nullptr);
-    wxScrolled<wxControl>::SetScrollbars(pixelsPerUnitX, pixelsPerUnitY,
+    wxSystemThemedControl<wxScrolled<wxControl>>::SetScrollbars(pixelsPerUnitX, pixelsPerUnitY,
                                   noUnitsX, noUnitsY, xPos, yPos, noRefresh);
     int newX;
     CalcUnscrolledPosition(0, 0, &newX, nullptr);
@@ -1309,27 +1306,21 @@ void wxPropertyGrid::CalculateFontAndBitmapStuff( int vspacing )
     m_captionFont = wxControl::GetFont();
 
     GetTextExtent(wxS("jG"), &x, &y, nullptr, nullptr, &m_captionFont);
-    m_subgroup_extramargin = x + (x/2);
     m_fontHeight = y;
 
-#if wxPG_USE_RENDERER_NATIVE
-    m_iconWidth = FromDIP(wxPG_ICON_WIDTH);
-#elif wxPG_ICON_WIDTH
-    // scale icon
-    m_iconWidth = (m_fontHeight * wxPG_ICON_WIDTH) / 13;
-    if ( m_iconWidth < 5 ) m_iconWidth = 5;
-    else if ( !(m_iconWidth & 0x01) ) m_iconWidth++; // must be odd
-
-#endif
-
 #ifdef wxPG_ICON_WIDTH
-    // Icons are always square in this case.
-    m_iconHeight = m_iconWidth;
+#if wxPG_USE_RENDERER_NATIVE
+    wxSize iconSize = wxRendererNative::Get().GetExpanderSize(this);
+#else
+    wxSize iconSize = wxRendererNative::GetGeneric().GetExpanderSize(this);
+#endif
+    m_iconWidth = iconSize.GetWidth();
+    m_iconHeight = iconSize.GetHeight();
 #endif
 
-    m_gutterWidth = m_iconWidth / wxPG_GUTTER_DIV;
-    if ( m_gutterWidth < wxPG_GUTTER_MIN )
-        m_gutterWidth = wxPG_GUTTER_MIN;
+    m_gutterWidth = wxMax(0, (FromDIP(16) - m_iconWidth) / 2);
+
+    m_subgroup_extramargin = m_iconWidth + m_gutterWidth;
 
     int vdiv = 6;
     if ( vspacing <= 1 ) vdiv = 12;
@@ -1376,7 +1367,19 @@ void wxPropertyGrid::OnSysColourChanged( wxSysColourChangedEvent &WXUNUSED(event
 void wxPropertyGrid::OnDPIChanged(wxDPIChangedEvent &event)
 {
     CalculateFontAndBitmapStuff(m_vspacing);
+
+    if ( !HasExtraStyle(wxPG_EX_NATIVE_DOUBLE_BUFFERING) )
+    {
+        // Recreate the back buffer with correct DPI.
+        delete m_doubleBuffer;
+        m_doubleBuffer = nullptr;
+        ReallocDoubleBufferIfNeeded();
+    }
+
     Refresh();
+
+    if ( wxPGProperty* const selected = GetSelection() )
+        RefreshProperty(selected);
 
     event.Skip();
 }
@@ -1437,18 +1440,28 @@ void wxPropertyGrid::RegainColours()
 {
     if ( !(m_coloursCustomized & CustomColour_CaptionBg) )
     {
-        wxColour col = wxSystemSettings::GetColour( wxSYS_COLOUR_BTNFACE );
-
-        // Make sure colour is dark enough
-    #ifdef __WXGTK__
-        int colDec = wxPGGetColAvg(col) - 230;
-    #else
-        int colDec = wxPGGetColAvg(col) - 200;
-    #endif
-        if ( colDec > 0 )
-            m_colCapBack = wxPGAdjustColour(col,-colDec);
+        wxColour col = wxSystemSettings::GetColour( wxSYS_COLOUR_GRIDLINES );
+    #ifdef __WXOSX__
+        if ( wxSystemSettings::GetAppearance().IsDark() )
+        {
+            // Make sure colour is light enough
+            int colDec = wxPGGetColAvg(col);
+            if ( colDec < 30 )
+                col = wxPGAdjustColour(col, 20);
+        }
         else
-            m_colCapBack = col;
+    #endif
+        {
+            // Make sure colour is dark enough
+        #ifdef __WXGTK__
+            int colDec = wxPGGetColAvg(col) - 230;
+        #else
+            int colDec = wxPGGetColAvg(col) - 200;
+        #endif
+            if ( colDec > 0 )
+                col = wxPGAdjustColour(col,-colDec);
+        }
+        m_colCapBack = col;
         m_categoryDefaultCell.GetData()->SetBgCol(m_colCapBack);
     }
 
@@ -1851,33 +1864,20 @@ bool wxPropertyGrid::IsSmallScreen()
 
 // -----------------------------------------------------------------------
 
+#if WXWIN_COMPATIBILITY_3_2
 // static
 wxBitmap wxPropertyGrid::RescaleBitmap(const wxBitmap& srcBmp,
                                        double scaleX, double scaleY)
 {
-    int w = wxRound(srcBmp.GetWidth()*scaleX);
-    int h = wxRound(srcBmp.GetHeight()*scaleY);
+    wxSize size = srcBmp.GetSize();
+    size.x = wxRound(size.x * scaleX);
+    size.y = wxRound(size.y * scaleY);
 
-#if wxUSE_IMAGE
-    // Here we use high-quality wxImage scaling functions available
-    wxImage img = srcBmp.ConvertToImage();
-    img.Rescale(w, h, wxIMAGE_QUALITY_HIGH);
-    wxBitmap dstBmp(img);
-#else // !wxUSE_IMAGE
-    wxBitmap dstBmp(w, h, srcBmp.GetDepth());
-#if defined(__WXMSW__) || defined(__WXOSX__)
-    // wxBitmap::UseAlpha() is used only on wxMSW and wxOSX.
-    dstBmp.UseAlpha(srcBmp.HasAlpha());
-#endif // __WXMSW__ || __WXOSX__
-    {
-        wxMemoryDC dc(dstBmp);
-        dc.SetUserScale(scaleX, scaleY);
-        dc.DrawBitmap(srcBmp, 0, 0);
-    }
-#endif // wxUSE_IMAGE/!wxUSE_IMAGE
-
+    wxBitmap dstBmp(srcBmp);
+    wxBitmap::Rescale(dstBmp, size);
     return dstBmp;
 }
+#endif // WXWIN_COMPATIBILITY_3_2
 
 // -----------------------------------------------------------------------
 
@@ -1958,23 +1958,21 @@ void wxPropertyGrid::DrawExpanderButton( wxDC& dc, const wxRect& rect,
     // wxRenderer functions are non-mutating in nature, so it
     // should be safe to cast "const wxPropertyGrid*" to "wxWindow*".
     // Hopefully this does not cause problems.
-#if wxPG_USE_RENDERER_NATIVE
-    wxRendererNative::Get().DrawTreeItemButton(
-            const_cast<wxPropertyGrid*>(this),
-            dc,
-            r,
-            property->IsExpanded() ? wxCONTROL_EXPANDED : wxCONTROL_NONE
-        );
-#elif wxPG_ICON_WIDTH
-    wxRendererNative::GetGeneric().DrawTreeItemButton(
-            const_cast<wxPropertyGrid*>(this),
-            dc,
-            r,
-            property->IsExpanded() ? wxCONTROL_EXPANDED : wxCONTROL_NONE
-        );
-#else
+#ifndef wxPG_ICON_WIDTH
     wxBitmap bmp = property->IsExpanded() ? s_collbmp : s_expandbmp;
-    dc.DrawBitmap( bmp, r.x, r.y, true );
+    dc.DrawBitmap(bmp, r.x, r.y, true);
+#else
+#if wxPG_USE_RENDERER_NATIVE
+    wxRendererNative::Get().
+#else
+    wxRendererNative::GetGeneric().
+#endif
+        DrawTreeItemButton(
+            const_cast<wxPropertyGrid*>(this),
+            dc,
+            r,
+            property->IsExpanded() ? wxCONTROL_EXPANDED : wxCONTROL_NONE
+        );
 #endif
 }
 
@@ -2137,7 +2135,7 @@ int wxPropertyGrid::DoDrawItems( wxDC& dc,
     {
         const wxPGProperty* p = *it;
 
-        if ( !p->HasFlag(wxPGPropertyFlags::Hidden) )
+        if ( !p->HasFlag(wxPGFlags::Hidden) )
         {
             visPropArray.push_back(const_cast<wxPGProperty*>(p));
 
@@ -2344,7 +2342,7 @@ int wxPropertyGrid::DoDrawItems( wxDC& dc,
             if ( butRect.x > 0 )
                 butRect.x += IN_CELL_EXPANDER_BUTTON_X_ADJUST;
 
-            if ( p->HasFlag(wxPGPropertyFlags::Modified) &&
+            if ( p->HasFlag(wxPGFlags::Modified) &&
                  (windowStyle & wxPG_BOLD_MODIFIED) )
             {
                 dc.SetFont(m_captionFont);
@@ -2565,6 +2563,8 @@ void wxPropertyGrid::DrawItems( const wxPGProperty* p1, const wxPGProperty* p2 )
 
 void wxPropertyGrid::RefreshProperty( wxPGProperty* p )
 {
+    wxCHECK_RET( p, wxS("invalid property id") );
+
     if ( m_pState->DoIsPropertySelected(p) || p->IsChildSelected(true) )
     {
         // NB: We must copy the selection.
@@ -2583,6 +2583,8 @@ void wxPropertyGrid::RefreshProperty( wxPGProperty* p )
 
 void wxPropertyGrid::DrawItemAndValueRelated( wxPGProperty* p )
 {
+    wxCHECK_RET( p, wxS("invalid property id") );
+
     if ( IsFrozen() )
         return;
 
@@ -2979,7 +2981,7 @@ bool wxPropertyGrid::PerformValidation( wxPGProperty* p, wxVariant& pendingValue
     wxVariant* pPendingValue = &pendingValue;
     wxVariant* pList = nullptr;
 
-    // If parent has wxPGPropertyFlags::Aggregate flag, or uses composite
+    // If parent has wxPGFlags::Aggregate flag, or uses composite
     // string value, then we need treat as it was changed instead
     // (or, in addition, as is the case with composite string parent).
     // This includes creating list variant for child values.
@@ -2993,7 +2995,7 @@ bool wxPropertyGrid::PerformValidation( wxPGProperty* p, wxVariant& pendingValue
     listValue.SetName(p->GetBaseName());
 
     while ( pwc &&
-            (pwc->HasFlag(wxPGPropertyFlags::Aggregate) || pwc->HasFlag(wxPGPropertyFlags::ComposedValue)) )
+            (pwc->HasFlag(wxPGFlags::Aggregate) || pwc->HasFlag(wxPGFlags::ComposedValue)) )
     {
         wxVariantList tempList;
         wxVariant lv(tempList, pwc->GetBaseName());
@@ -3001,7 +3003,7 @@ bool wxPropertyGrid::PerformValidation( wxPGProperty* p, wxVariant& pendingValue
         listValue = lv;
         pPendingValue = &listValue;
 
-        if ( pwc->HasFlag(wxPGPropertyFlags::Aggregate) )
+        if ( pwc->HasFlag(wxPGFlags::Aggregate) )
         {
             baseChangedProperty = pwc;
             bcpPendingList = lv;
@@ -3031,9 +3033,9 @@ bool wxPropertyGrid::PerformValidation( wxPGProperty* p, wxVariant& pendingValue
     {
         // FIXME: After proper ValueToString()s added, remove
         // this. It is just a temporary fix, as evt_changing
-        // will simply not work for wxPGPropertyFlags::ComposedValue
+        // will simply not work for wxPGFlags::ComposedValue
         // (unless it is selected, and textctrl editor is open).
-        if ( changedProperty->HasFlag(wxPGPropertyFlags::ComposedValue) )
+        if ( changedProperty->HasFlag(wxPGFlags::ComposedValue) )
         {
             evtChangingProperty = baseChangedProperty;
             if ( evtChangingProperty != p )
@@ -3046,7 +3048,7 @@ bool wxPropertyGrid::PerformValidation( wxPGProperty* p, wxVariant& pendingValue
             }
         }
 
-        if ( evtChangingProperty->HasFlag(wxPGPropertyFlags::ComposedValue) )
+        if ( evtChangingProperty->HasFlag(wxPGFlags::ComposedValue) )
         {
             if ( changedProperty == GetSelection() )
             {
@@ -3173,7 +3175,7 @@ bool wxPropertyGrid::OnValidationFailure( wxPGProperty* property,
     {
         // When property selection is being changed, do not display any
         // messages, if some were already shown for this property.
-        if ( property->HasFlag(wxPGPropertyFlags::InvalidValue) )
+        if ( property->HasFlag(wxPGFlags::InvalidValue) )
         {
             m_validationInfo.SetFailureBehavior(
                 vfb & (~(wxPGVFBFlags::ShowMessage |
@@ -3195,7 +3197,7 @@ bool wxPropertyGrid::OnValidationFailure( wxPGProperty* property,
         property->GetEditorClass()->UpdateControl(property, editor);
     }
 
-    property->SetFlag(wxPGPropertyFlags::InvalidValue);
+    property->SetFlag(wxPGFlags::InvalidValue);
 
     return res;
 }
@@ -3208,7 +3210,7 @@ bool wxPropertyGrid::DoOnValidationFailure( wxPGProperty* property, wxVariant& W
         ::wxBell();
 
     if ( !!(vfb & wxPGVFBFlags::MarkCell) &&
-         !property->HasFlag(wxPGPropertyFlags::InvalidValue) )
+         !property->HasFlag(wxPGFlags::InvalidValue) )
     {
         unsigned int colCount = m_pState->GetColumnCount();
 
@@ -3360,9 +3362,9 @@ bool wxPropertyGrid::DoPropertyChanged( wxPGProperty* p, wxPGSelectPropertyFlags
     wxWindow* editor = GetEditorControl();
 
     // Set as Modified (not if dragging just began)
-    if ( !p->HasFlag(wxPGPropertyFlags::Modified) )
+    if ( !p->HasFlag(wxPGFlags::Modified) )
     {
-        p->SetFlag(wxPGPropertyFlags::Modified);
+        p->SetFlag(wxPGFlags::Modified);
         if ( p == selected && (m_windowStyle & wxPG_BOLD_MODIFIED) )
         {
             if ( editor )
@@ -3377,7 +3379,7 @@ bool wxPropertyGrid::DoPropertyChanged( wxPGProperty* p, wxPGSelectPropertyFlags
 
     while ( prevPwc != topPaintedProperty )
     {
-        pwc->SetFlag(wxPGPropertyFlags::Modified);
+        pwc->SetFlag(wxPGFlags::Modified);
 
         if ( pwc == selected && (m_windowStyle & wxPG_BOLD_MODIFIED) )
         {
@@ -3408,11 +3410,11 @@ bool wxPropertyGrid::DoPropertyChanged( wxPGProperty* p, wxPGSelectPropertyFlags
     }
 
     // Sanity check
-    wxASSERT( !changedProperty->GetParent()->HasFlag(wxPGPropertyFlags::Aggregate) );
+    wxASSERT( !changedProperty->GetParent()->HasFlag(wxPGFlags::Aggregate) );
 
     // If top parent has composite string value, then send to child parents,
     // starting from baseChangedProperty.
-    if ( changedProperty->HasFlag(wxPGPropertyFlags::ComposedValue) )
+    if ( changedProperty->HasFlag(wxPGFlags::ComposedValue) )
     {
         pwc = m_chgInfo_baseChangedProperty;
 
@@ -3540,7 +3542,7 @@ bool wxPropertyGrid::HandleCustomEditorEvent( wxEvent &event )
     // Somehow, event is handled after property has been deselected.
     // Possibly, but very rare.
     if ( !selected ||
-          selected->HasFlag(wxPGPropertyFlags::BeingDeleted) ||
+          selected->HasFlag(wxPGFlags::BeingDeleted) ||
           m_inOnValidationFailure ||
           // Also don't handle editor event if wxEVT_PG_CHANGED or
           // similar is currently doing something (showing a
@@ -4020,7 +4022,7 @@ bool wxPropertyGrid::DoSelectProperty( wxPGProperty* p, wxPGSelectPropertyFlags 
 
     prevFirstSel = prevSelection.empty()? nullptr: prevSelection[0];
 
-    if ( prevFirstSel && prevFirstSel->HasFlag(wxPGPropertyFlags::BeingDeleted) )
+    if ( prevFirstSel && prevFirstSel->HasFlag(wxPGFlags::BeingDeleted) )
         prevFirstSel = nullptr;
 
     // Always send event, as this is indirect call
@@ -4134,7 +4136,7 @@ bool wxPropertyGrid::DoSelectProperty( wxPGProperty* p, wxPGSelectPropertyFlags 
 
             //
             // Only create editor for non-disabled non-caption
-            if ( !p->IsCategory() && !p->HasFlag(wxPGPropertyFlags::Disabled) )
+            if ( !p->IsCategory() && !p->HasFlag(wxPGFlags::Disabled) )
             {
             // do this for non-caption items
 
@@ -4142,7 +4144,7 @@ bool wxPropertyGrid::DoSelectProperty( wxPGProperty* p, wxPGSelectPropertyFlags 
 
                 // Do we need to paint the custom image, if any?
                 m_iFlags &= ~(wxPG_FL_CUR_USES_CUSTOM_IMAGE);
-                if ( p->HasFlag(wxPGPropertyFlags::CustomImage) &&
+                if ( p->HasFlag(wxPGFlags::CustomImage) &&
                      !p->GetEditorClass()->CanContainCustomImage()
                    )
                     m_iFlags |= wxPG_FL_CUR_USES_CUSTOM_IMAGE;
@@ -4208,7 +4210,7 @@ bool wxPropertyGrid::DoSelectProperty( wxPGProperty* p, wxPGSelectPropertyFlags 
 
                     // If it has modified status, use bold font
                     // (must be done before capturing m_ctrlXAdjust)
-                    if ( p->HasFlag(wxPGPropertyFlags::Modified) &&
+                    if ( p->HasFlag(wxPGFlags::Modified) &&
                          (m_windowStyle & wxPG_BOLD_MODIFIED) )
                         SetCurControlBoldFont();
                     // Store x relative to splitter (we'll need it).
@@ -4399,7 +4401,7 @@ void wxPropertyGrid::RefreshEditor()
     // calling UpdateControl().
     if ( HasFlag(wxPG_BOLD_MODIFIED) )
     {
-        if ( p->HasFlag(wxPGPropertyFlags::Modified) )
+        if ( p->HasFlag(wxPGFlags::Modified) )
             wnd->SetFont(GetCaptionFont());
         else
             wnd->SetFont(GetFont());
@@ -4568,6 +4570,38 @@ void wxPropertyGrid::RecalculateVirtualSize( int forceXPos )
 
 // -----------------------------------------------------------------------
 
+void wxPropertyGrid::ReallocDoubleBufferIfNeeded()
+{
+    if ( !HasExtraStyle(wxPG_EX_NATIVE_DOUBLE_BUFFERING) )
+    {
+        double scaleFactor = GetDPIScaleFactor();
+        int dblh = (m_lineHeight*2);
+        if ( !m_doubleBuffer )
+        {
+            // Create double buffer bitmap to draw on, if none
+            int w = wxMax(m_width, FromDIP(250));
+            int h = wxMax(m_height + dblh, FromDIP(400));
+            m_doubleBuffer = new wxBitmap;
+            m_doubleBuffer->CreateWithLogicalSize( w, h, scaleFactor );
+        }
+        else
+        {
+            int w = m_doubleBuffer->GetLogicalWidth();
+            int h = m_doubleBuffer->GetLogicalHeight();
+
+            // Double buffer must be large enough
+            if ( w < m_width || h < (m_height+dblh) )
+            {
+                if ( w < m_width ) w = m_width;
+                if ( h < (m_height+dblh) ) h = m_height + dblh;
+                delete m_doubleBuffer;
+                m_doubleBuffer = new wxBitmap;
+                m_doubleBuffer->CreateWithLogicalSize( w, h, scaleFactor );
+            }
+        }
+    }
+}
+
 void wxPropertyGrid::OnResize( wxSizeEvent& event )
 {
     if ( !(m_iFlags & wxPG_FL_INITIALIZED) )
@@ -4579,34 +4613,7 @@ void wxPropertyGrid::OnResize( wxSizeEvent& event )
     m_width = width;
     m_height = height;
 
-    if ( !HasExtraStyle(wxPG_EX_NATIVE_DOUBLE_BUFFERING) )
-    {
-        double scaleFactor = GetDPIScaleFactor();
-        int dblh = (m_lineHeight*2);
-        if ( !m_doubleBuffer )
-        {
-            // Create double buffer bitmap to draw on, if none
-            int w = wxMax(width, FromDIP(250));
-            int h = wxMax(height + dblh, FromDIP(400));
-            m_doubleBuffer = new wxBitmap;
-            m_doubleBuffer->CreateWithLogicalSize( w, h, scaleFactor );
-        }
-        else
-        {
-            int w = m_doubleBuffer->GetLogicalWidth();
-            int h = m_doubleBuffer->GetLogicalHeight();
-
-            // Double buffer must be large enough
-            if ( w < width || h < (height+dblh) )
-            {
-                if ( w < width ) w = width;
-                if ( h < (height+dblh) ) h = height + dblh;
-                delete m_doubleBuffer;
-                m_doubleBuffer = new wxBitmap;
-                m_doubleBuffer->CreateWithLogicalSize( w, h, scaleFactor );
-            }
-        }
-    }
+    ReallocDoubleBufferIfNeeded();
 
     m_pState->OnClientWidthChange( width, event.GetSize().x - m_ncWidth, true );
     m_ncWidth = event.GetSize().x;
@@ -5102,7 +5109,7 @@ bool wxPropertyGrid::HandleMouseMove( int x, unsigned int y,
                         space -= (wxPG_XBEFORETEXT + 1);
                         int tw, th;
                         const wxFont* font = nullptr;
-                        if ( (m_windowStyle & wxPG_BOLD_MODIFIED) && m_propHover->HasFlag(wxPGPropertyFlags::Modified) )
+                        if ( (m_windowStyle & wxPG_BOLD_MODIFIED) && m_propHover->HasFlag(wxPGFlags::Modified) )
                             font = &m_captionFont;
                         if ( cell.GetFont().IsOk() )
                             font = &cell.GetFont();
@@ -5174,7 +5181,7 @@ bool wxPropertyGrid::HandleMouseMove( int x, unsigned int y,
 
             // Since categories cannot be selected along with 'other'
             // properties, exclude them from iterator flags.
-            int iterFlags = wxPG_ITERATE_VISIBLE & (~wxPGPropertyFlags::Category);
+            int iterFlags = wxPG_ITERATE_VISIBLE & (~wxPGFlags::Category);
 
             for ( int i=(selection.size()-1); i>=0; i-- )
             {
@@ -5721,7 +5728,7 @@ void wxPropertyGrid::HandleKeyEvent( wxKeyEvent &event, bool fromChild )
         if ( action == wxPGKeyboardAction::Edit && !editorFocused )
         {
             // Mark as handled only for editable property
-            if ( !p->IsCategory() && p->IsEnabled() && !p->HasFlag(wxPGPropertyFlags::ReadOnly) )
+            if ( !p->IsCategory() && p->IsEnabled() && !p->HasFlag(wxPGFlags::ReadOnly) )
             {
                 DoSelectProperty( p, wxPGSelectPropertyFlags::Focus );
                 wasHandled = true;
@@ -6364,7 +6371,7 @@ wxPGProperty* wxPropertyGridPopulator::Add( const wxString& propClass,
     wxClassInfo* classInfo = wxClassInfo::FindClass(propClass);
     wxPGProperty* parent = GetCurParent();
 
-    if ( parent->HasFlag(wxPGPropertyFlags::Aggregate) )
+    if ( parent->HasFlag(wxPGFlags::Aggregate) )
     {
         ProcessError(wxString::Format(wxS("new children cannot be added to '%s'"),parent->GetName()));
         return nullptr;

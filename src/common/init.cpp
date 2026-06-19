@@ -26,9 +26,9 @@
 #endif
 
 #include "wx/init.h"
-#include "wx/atomic.h"
 
-#include "wx/except.h"
+#include "wx/atomic.h"
+#include "wx/scopeguard.h"
 
 #if defined(__WINDOWS__)
     #include "wx/msw/private.h"
@@ -50,6 +50,7 @@
 
 #include "wx/private/init.h"
 #include "wx/private/localeset.h"
+#include "wx/private/safecall.h"
 
 #include <memory>
 
@@ -107,15 +108,6 @@ public:
 private:
     wxAppConsole *m_app;
 };
-
-// ----------------------------------------------------------------------------
-// private functions
-// ----------------------------------------------------------------------------
-
-// suppress warnings about unused variables
-static inline void Use(void *) { }
-
-#define WX_SUPPRESS_UNUSED_WARN(x) Use(&x)
 
 // ----------------------------------------------------------------------------
 // initialization data
@@ -265,13 +257,15 @@ void wxInitData::Free()
         // If argvMSW is non-null, argv must be the same value, so reset it too.
         argv = argvMSW = nullptr;
     }
-#else
-    for ( int i = 0; i < argc; i++ )
-    {
-        free(argv[i]);
-    }
-    wxDELETEA(argv);
+    else
 #endif // __WINDOWS__
+    {
+        for ( int i = 0; i < argc; i++ )
+        {
+            free(argv[i]);
+        }
+        wxDELETEA(argv);
+    }
 
     if ( argc )
     {
@@ -553,7 +547,7 @@ int wxEntryReal(int& argc, wxChar **argv)
         return wxApp::GetFatalErrorExitCode();
     }
 
-    wxTRY
+    return wxSafeCall<int>([]()
     {
         // app initialization
         if ( !wxTheApp->CallOnInit() )
@@ -563,21 +557,15 @@ int wxEntryReal(int& argc, wxChar **argv)
         }
 
         // ensure that OnExit() is called if OnInit() had succeeded
-        class CallOnExit
-        {
-        public:
-            ~CallOnExit() { wxTheApp->OnExit(); }
-        } callOnExit;
-
-        WX_SUPPRESS_UNUSED_WARN(callOnExit);
+        wxON_BLOCK_EXIT_OBJ0(*wxTheApp, wxAppConsoleBase::CallOnExit);
 
         // app execution
         return wxTheApp->OnRun();
-    }
-    wxCATCH_ALL(
-        wxTheApp->OnUnhandledException();
+    }, []()
+    {
+        wxApp::CallOnUnhandledException();
         return wxApp::GetFatalErrorExitCode();
-    )
+    });
 }
 
 // as with wxEntryStart, we provide an ANSI wrapper

@@ -148,7 +148,6 @@ wxRendererNative& wxRendererNative::GetDefault()
 }
 
 #ifdef __WXGTK3__
-#define NULL_RECT
 typedef cairo_t wxGTKDrawable;
 
 static cairo_t* wxGetGTKDrawable(const wxDC& dc)
@@ -335,6 +334,8 @@ wxRendererGTK::DrawTreeItemButton(wxWindow* WXUNUSED_IN_GTK3(win),
     }
     if (flags & wxCONTROL_CURRENT)
         state |= GTK_STATE_FLAG_PRELIGHT;
+    if (flags & wxCONTROL_SELECTED)
+        state |= GTK_STATE_FLAG_SELECTED;
 
     int expander_size;
     gtk_widget_style_get(tree, "expander-size", &expander_size, nullptr);

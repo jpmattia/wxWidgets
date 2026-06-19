@@ -77,13 +77,13 @@ extern "C"
 static void
 TIFFwxWarningHandler(const char* module, const char *fmt, va_list ap)
 {
-    wxLogWarning("%s", FormatTiffMessage(module, fmt, ap));
+    wxLogWarning(FormatTiffMessage(module, fmt, ap));
 }
 
 static void
 TIFFwxErrorHandler(const char* module, const char *fmt, va_list ap)
 {
-    wxLogError("%s", FormatTiffMessage(module, fmt, ap));
+    wxLogError(FormatTiffMessage(module, fmt, ap));
 }
 
 } // extern "C"
@@ -94,13 +94,13 @@ TIFFwxErrorHandler(const char* module, const char *fmt, va_list ap)
 
 wxIMPLEMENT_DYNAMIC_CLASS(wxTIFFHandler,wxImageHandler);
 
-wxTIFFHandler::wxTIFFHandler()
+wxTIFFHandler::wxTIFFHandler() : wxImageHandler(
+    wxT("TIFF file"),
+    wxT("tif"),
+    wxBITMAP_TYPE_TIFF,
+    wxT("image/tiff"))
 {
-    m_name = wxT("TIFF file");
-    m_extension = wxT("tif");
     m_altExtensions.Add(wxT("tiff"));
-    m_type = wxBITMAP_TYPE_TIFF;
-    m_mime = wxT("image/tiff");
     TIFFSetWarningHandler((TIFFErrorHandler) TIFFwxWarningHandler);
     TIFFSetErrorHandler((TIFFErrorHandler) TIFFwxErrorHandler);
 }
@@ -918,7 +918,7 @@ bool wxTIFFHandler::DoCanRead( wxInputStream& stream )
 
     wxString copyright;
     const wxString desc = ver.BeforeFirst('\n', &copyright);
-    copyright.Replace("\n", wxString());
+    copyright.Trim(false).Trim(true);
 
     return wxVersionInfo("libtiff", major, minor, micro, desc, copyright);
 }

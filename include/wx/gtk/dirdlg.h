@@ -6,8 +6,10 @@
 // Licence:     wxWindows licence
 /////////////////////////////////////////////////////////////////////////////
 
-#ifndef __GTKDIRDLGH__
-#define __GTKDIRDLGH__
+#ifndef _WX_GTKDIRDLG_H_
+#define _WX_GTKDIRDLG_H_
+
+typedef struct _GtkFileChooser GtkFileChooser;
 
 //-------------------------------------------------------------------------
 // wxDirDialog
@@ -15,6 +17,7 @@
 
 class WXDLLIMPEXP_CORE wxDirDialog : public wxDirDialogBase
 {
+    typedef wxDirDialogBase BaseType;
 public:
     wxDirDialog() = default;
 
@@ -32,18 +35,17 @@ public:
                 const wxPoint& pos = wxDefaultPosition,
                 const wxSize& size = wxDefaultSize,
                 const wxString& name = wxASCII_STR(wxDirDialogNameStr));
-    virtual ~wxDirDialog() = default;
+    ~wxDirDialog();
 
-
-public:     // overrides from wxGenericDirDialog
-
+    virtual int ShowModal() override;
+    virtual void EndModal(int retCode) override;
     void SetPath(const wxString& path) override;
-
 
     // Implementation only.
 
     void GTKOnAccept();
     void GTKOnCancel();
+    void GTKDropNative();
 
 protected:
     // override this from wxTLW since the native
@@ -54,7 +56,10 @@ protected:
 
 
 private:
+    void GTKAccept();
+    GtkFileChooser* m_fileChooser = nullptr;
+
     wxDECLARE_DYNAMIC_CLASS(wxDirDialog);
 };
 
-#endif // __GTKDIRDLGH__
+#endif // _WX_GTKDIRDLG_H_

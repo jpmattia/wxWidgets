@@ -568,7 +568,7 @@ wxString wxJoin(const wxArrayString& arr, const wxChar sep, const wxChar escape)
                   i != end;
                   ++i )
             {
-                const wxChar ch = *i;
+                const wxUniChar ch = *i;
                 if ( ch == sep )
                     str += escape;      // escape this separator
                 str += ch;
@@ -596,7 +596,7 @@ wxArrayString wxSplit(const wxString& str, const wxChar sep, const wxChar escape
           i != end;
           ++i )
     {
-        const wxChar ch = *i;
+        const wxUniChar ch = *i;
 
         // Order of tests matters here in the uncommon, but possible, case when
         // the separator is the same as the escape character: it has to be
@@ -810,7 +810,7 @@ int wxCMPFUNC_CONV wxCmpNaturalGeneric(const wxString& s1, const wxString& s2)
 // ----------------------------------------------------------------------------
 
 // If native natural sort function isn't available, use the generic version.
-#if !(defined(__WINDOWS__) || defined(__DARWIN__) || defined(__WXOSX_IPHONE__))
+#if !(defined(__WINDOWS__) || defined(__DARWIN__))
 
 int wxCMPFUNC_CONV wxCmpNatural(const wxString& s1, const wxString& s2)
 {

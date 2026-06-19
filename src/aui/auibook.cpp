@@ -26,6 +26,7 @@
     #include "wx/frame.h"
 #endif
 
+#include "wx/aui/serializer.h"
 #include "wx/aui/tabmdi.h"
 #include "wx/wupdlock.h"
 
@@ -34,6 +35,10 @@
 #ifdef __WXMAC__
 #include "wx/osx/private.h"
 #endif
+
+#include <algorithm>
+#include <stack>
+#include <unordered_set>
 
 wxDEFINE_EVENT(wxEVT_AUINOTEBOOK_PAGE_CLOSE, wxAuiNotebookEvent);
 wxDEFINE_EVENT(wxEVT_AUINOTEBOOK_PAGE_CLOSED, wxAuiNotebookEvent);
@@ -56,6 +61,97 @@ wxIMPLEMENT_CLASS(wxAuiNotebook, wxBookCtrlBase);
 wxIMPLEMENT_CLASS(wxAuiTabCtrl, wxControl);
 wxIMPLEMENT_DYNAMIC_CLASS(wxAuiNotebookEvent, wxBookCtrlEvent);
 
+
+// Local helper functions
+namespace
+{
+
+// Build the vector of buttons for the page depending on the notebook flags.
+std::vector<wxAuiTabContainerButton> MakePageButtons(unsigned int flags)
+{
+    std::vector<wxAuiTabContainerButton> buttons;
+
+    // Pin/unpin button can be only shown if one of the styles enabling it is
+    // used and depends on the current tab state, so make it hidden by default.
+    if (flags & (wxAUI_NB_PIN_ON_ACTIVE_TAB | wxAUI_NB_UNPIN_ON_ALL_PINNED))
+        buttons.push_back({wxAUI_BUTTON_PIN, wxRIGHT, wxAUI_BUTTON_STATE_HIDDEN});
+
+    // Close button is hidden by default, it will be shown depending on the
+    // exact style used and, for wxAUI_NB_CLOSE_ON_ACTIVE_TAB, on whether the
+    // tab is current.
+    if (flags & (wxAUI_NB_CLOSE_ON_ALL_TABS | wxAUI_NB_CLOSE_ON_ACTIVE_TAB))
+        buttons.push_back({wxAUI_BUTTON_CLOSE, wxRIGHT, wxAUI_BUTTON_STATE_HIDDEN});
+
+    return buttons;
+}
+
+} // anonymous namespace
+
+
+// wxAuiTabEventSource
+//
+// This class is the "attorney" in "attorney-client" idiom used to allow
+// wxAuiTabCtrl to call some (but not all) wxAuiNotebook private functions.
+class wxAuiTabEventSource
+{
+private:
+    static void TabClicked(wxAuiTabCtrl* ctrl, int tabIdx)
+    {
+        ctrl->GetBook()->OnTabClicked(ctrl, tabIdx);
+    }
+
+    static void TabBeginDrag(wxAuiTabCtrl* ctrl, int tabIdx)
+    {
+        ctrl->GetBook()->OnTabBeginDrag(ctrl, tabIdx);
+    }
+
+    static void TabDragMotion(wxAuiTabCtrl* ctrl, int tabIdx)
+    {
+        ctrl->GetBook()->OnTabDragMotion(ctrl, tabIdx);
+    }
+
+    static void TabEndDrag(wxAuiTabCtrl* ctrl, int tabIdx)
+    {
+        ctrl->GetBook()->OnTabEndDrag(ctrl, tabIdx);
+    }
+
+    static void TabCancelDrag(wxAuiTabCtrl* ctrl, int tabIdx)
+    {
+        ctrl->GetBook()->OnTabCancelDrag(ctrl, tabIdx);
+    }
+
+    static void TabButton(wxAuiTabCtrl* ctrl, int tabIdx, int button_id)
+    {
+        ctrl->GetBook()->OnTabButton(ctrl, tabIdx, button_id);
+    }
+
+    static void TabMiddleDown(wxAuiTabCtrl* ctrl, int tabIdx)
+    {
+        ctrl->GetBook()->OnTabMiddleDown(ctrl, tabIdx);
+    }
+
+    static void TabMiddleUp(wxAuiTabCtrl* ctrl, int tabIdx)
+    {
+        ctrl->GetBook()->OnTabMiddleUp(ctrl, tabIdx);
+    }
+
+    static void TabRightDown(wxAuiTabCtrl* ctrl, int tabIdx)
+    {
+        ctrl->GetBook()->OnTabRightDown(ctrl, tabIdx);
+    }
+
+    static void TabRightUp(wxAuiTabCtrl* ctrl, int tabIdx)
+    {
+        ctrl->GetBook()->OnTabRightUp(ctrl, tabIdx);
+    }
+
+    static void TabBgDClick(wxAuiTabCtrl* ctrl)
+    {
+        ctrl->GetBook()->OnTabBgDClick(ctrl);
+    }
+
+    friend class wxAuiTabCtrl;
+};
 
 // -- wxAuiTabContainer class implementation --
 
@@ -105,8 +201,6 @@ wxAuiTabArt* wxAuiTabContainer::GetArtProvider() const
 
 void wxAuiTabContainer::SetFlags(unsigned int flags)
 {
-    m_flags = flags;
-
     // check for new close button settings
     RemoveButton(wxAUI_BUTTON_LEFT);
     RemoveButton(wxAUI_BUTTON_RIGHT);
@@ -114,7 +208,7 @@ void wxAuiTabContainer::SetFlags(unsigned int flags)
     RemoveButton(wxAUI_BUTTON_CLOSE);
 
 
-    if (flags & wxAUI_NB_SCROLL_BUTTONS)
+    if ((flags & wxAUI_NB_SCROLL_BUTTONS) && !(flags & wxAUI_NB_MULTILINE))
     {
         AddButton(wxAUI_BUTTON_LEFT, wxLEFT);
         AddButton(wxAUI_BUTTON_RIGHT, wxRIGHT);
@@ -130,17 +224,28 @@ void wxAuiTabContainer::SetFlags(unsigned int flags)
         AddButton(wxAUI_BUTTON_CLOSE, wxRIGHT);
     }
 
+    // Also synchronize the tabs buttons with the new settings if any of the
+    // flags affecting them changed.
+    const auto flagsAffectingButtons =
+        wxAUI_NB_PIN_ON_ACTIVE_TAB |
+        wxAUI_NB_UNPIN_ON_ALL_PINNED |
+        wxAUI_NB_CLOSE_ON_ALL_TABS |
+        wxAUI_NB_CLOSE_ON_ACTIVE_TAB;
+    if ((m_flags & flagsAffectingButtons) != (flags & flagsAffectingButtons))
+    {
+        for (auto& page : m_pages)
+        {
+            page.buttons = MakePageButtons(flags);
+        }
+    }
+
     if (m_art)
     {
-        m_art->SetFlags(m_flags);
+        m_art->SetFlags(flags);
     }
-}
 
-unsigned int wxAuiTabContainer::GetFlags() const
-{
-    return m_flags;
+    m_flags = flags;
 }
-
 
 void wxAuiTabContainer::SetNormalFont(const wxFont& font)
 {
@@ -177,43 +282,27 @@ void wxAuiTabContainer::SetRect(const wxRect& rect, wxWindow* wnd)
     }
 }
 
-bool wxAuiTabContainer::AddPage(wxWindow* page,
-                                const wxAuiNotebookPage& info)
+void wxAuiTabContainer::SetRowHeight(int rowHeight)
 {
-    wxAuiNotebookPage page_info;
-    page_info = info;
-    page_info.window = page;
-    page_info.hover = false;
-
-    m_pages.Add(page_info);
-
-    // let the art provider know how many pages we have
-    if (m_art)
-    {
-        m_art->SetSizingInfo(m_rect.GetSize(), m_pages.GetCount(), page);
-    }
-
-    return true;
+    m_tabRowHeight = rowHeight;
 }
 
-bool wxAuiTabContainer::InsertPage(wxWindow* page,
-                                   const wxAuiNotebookPage& info,
+bool wxAuiTabContainer::AddPage(const wxAuiNotebookPage& info)
+{
+    return InsertPage(info, m_pages.GetCount());
+}
+
+bool wxAuiTabContainer::InsertPage(const wxAuiNotebookPage& info,
                                    size_t idx)
 {
-    wxAuiNotebookPage page_info;
-    page_info = info;
-    page_info.window = page;
-    page_info.hover = false;
+    const auto it = m_pages.insert(m_pages.begin() + idx, info);
 
-    if (idx >= m_pages.GetCount())
-        m_pages.Add(page_info);
-    else
-        m_pages.Insert(page_info, idx);
+    it->buttons = MakePageButtons(m_flags);
 
     // let the art provider know how many pages we have
     if (m_art)
     {
-        m_art->SetSizingInfo(m_rect.GetSize(), m_pages.GetCount(), page);
+        m_art->SetSizingInfo(m_rect.GetSize(), m_pages.GetCount(), info.window);
     }
 
     return true;
@@ -226,49 +315,59 @@ bool wxAuiTabContainer::MovePage(wxWindow* page,
     if (idx == -1)
         return false;
 
-    // get page entry, make a copy of it
-    wxAuiNotebookPage p = GetPage(idx);
+    return MovePage(static_cast<size_t>(idx), new_idx);
+}
 
-    // remove old page entry
-    RemovePage(page);
-
-    // insert page where it should be
-    InsertPage(page, p, new_idx);
+bool wxAuiTabContainer::MovePage(size_t old_idx, size_t new_idx)
+{
+    const auto b = m_pages.begin();
+    if (old_idx < new_idx)
+        std::rotate(b + old_idx, b + old_idx + 1, b + new_idx + 1);
+    else if (old_idx > new_idx)
+        std::rotate(b + new_idx, b + old_idx, b + old_idx + 1);
+    else // nothing to do
+        return false;
 
     return true;
 }
 
-bool wxAuiTabContainer::RemovePage(wxWindow* wnd)
+bool wxAuiTabContainer::RemovePage(wxWindow* page)
 {
-    size_t i, page_count = m_pages.GetCount();
-    for (i = 0; i < page_count; ++i)
-    {
-        wxAuiNotebookPage& page = m_pages.Item(i);
-        if (page.window == wnd)
-        {
-            m_pages.RemoveAt(i);
+    int idx = GetIdxFromWindow(page);
+    if (idx == -1)
+        return false;
 
-            // let the art provider know how many pages we have
-            if (m_art)
-            {
-                m_art->SetSizingInfo(m_rect.GetSize(), m_pages.GetCount(), wnd);
-            }
+    RemovePageAt(idx);
 
-            return true;
-        }
-    }
-
-    return false;
+    return true;
 }
 
-bool wxAuiTabContainer::SetActivePage(wxWindow* wnd)
+void wxAuiTabContainer::RemovePageAt(size_t idx)
+{
+    wxCHECK_RET( idx < m_pages.GetCount(), "invalid page index" );
+
+    wxWindow* const wnd = m_pages[idx].window;
+
+    m_pages.RemoveAt(idx);
+
+    // let the art provider know how many pages we have
+    if (m_art)
+    {
+        m_art->SetSizingInfo(m_rect.GetSize(), m_pages.GetCount(), wnd);
+    }
+}
+
+void wxAuiTabContainer::RemoveAll()
+{
+    m_pages.Clear();
+}
+
+bool wxAuiTabContainer::SetActivePage(const wxWindow* wnd)
 {
     bool found = false;
 
-    size_t i, page_count = m_pages.GetCount();
-    for (i = 0; i < page_count; ++i)
+    for ( auto& page : m_pages )
     {
-        wxAuiNotebookPage& page = m_pages.Item(i);
         if (page.window == wnd)
         {
             page.active = true;
@@ -285,10 +384,8 @@ bool wxAuiTabContainer::SetActivePage(wxWindow* wnd)
 
 void wxAuiTabContainer::SetNoneActive()
 {
-    size_t i, page_count = m_pages.GetCount();
-    for (i = 0; i < page_count; ++i)
+    for ( auto& page : m_pages )
     {
-        wxAuiNotebookPage& page = m_pages.Item(i);
         page.active = false;
     }
 }
@@ -348,7 +445,7 @@ const wxAuiNotebookPage& wxAuiTabContainer::GetPage(size_t idx) const
     return m_pages[idx];
 }
 
-wxAuiNotebookPageArray& wxAuiTabContainer::GetPages()
+const wxAuiNotebookPageArray& wxAuiTabContainer::GetPages() const
 {
     return m_pages;
 }
@@ -360,28 +457,20 @@ size_t wxAuiTabContainer::GetPageCount() const
 
 void wxAuiTabContainer::AddButton(int id,
                                   int location,
-                                  const wxBitmapBundle& normalBitmap,
-                                  const wxBitmapBundle& disabledBitmap)
+                                  const wxBitmapBundle& WXUNUSED(normalBitmap),
+                                  const wxBitmapBundle& WXUNUSED(disabledBitmap))
 {
-    wxAuiTabContainerButton button;
-    button.id = id;
-    button.bitmap = normalBitmap;
-    button.disBitmap = disabledBitmap;
-    button.location = location;
-    button.curState = wxAUI_BUTTON_STATE_NORMAL;
-
-    m_buttons.Add(button);
+    // We ignore the bitmaps as they are never used currently.
+    m_buttons.push_back({id, location});
 }
 
 void wxAuiTabContainer::RemoveButton(int id)
 {
-    size_t i, button_count = m_buttons.GetCount();
-
-    for (i = 0; i < button_count; ++i)
+    for (auto it = m_buttons.begin(); it != m_buttons.end(); ++it)
     {
-        if (m_buttons.Item(i).id == id)
+        if (it->id == id)
         {
-            m_buttons.RemoveAt(i);
+            m_buttons.erase(it);
             return;
         }
     }
@@ -396,53 +485,236 @@ size_t wxAuiTabContainer::GetTabOffset() const
 
 void wxAuiTabContainer::SetTabOffset(size_t offset)
 {
+    // It doesn't make sense to set the offset when multiple lines of tabs are
+    // used as it is not used in this case.
+    wxASSERT( !IsFlagSet(wxAUI_NB_MULTILINE) );
+
     m_tabOffset = offset;
 }
 
 
-
-int wxAuiTabContainer::GetCloseButtonState(const wxAuiNotebookPage& page) const
+void
+wxAuiTabContainer::UpdateButtonsState(wxAuiNotebookPage& page, bool forceActive)
 {
-    // determine if a close button is on this tab
-    return ((m_flags & wxAUI_NB_CLOSE_ON_ALL_TABS) != 0 ||
-            ((m_flags & wxAUI_NB_CLOSE_ON_ACTIVE_TAB) != 0 && page.active))
-            ? wxAUI_BUTTON_STATE_NORMAL
-            : wxAUI_BUTTON_STATE_HIDDEN;
+    const bool isActive = forceActive || page.active;
+    for (auto& button : page.buttons)
+    {
+        bool shown = false;
+        switch ( page.kind )
+        {
+            case wxAuiTabKind::Normal:
+            case wxAuiTabKind::Pinned:
+                switch ( button.id )
+                {
+                    case wxAUI_BUTTON_CLOSE:
+                        if (IsFlagSet(wxAUI_NB_CLOSE_ON_ALL_TABS))
+                        {
+                            shown = true;
+                        }
+                        else if (IsFlagSet(wxAUI_NB_CLOSE_ON_ACTIVE_TAB))
+                        {
+                            if (isActive)
+                                shown = true;
+                        }
+                        break;
+
+                    case wxAUI_BUTTON_PIN:
+                        if (IsFlagSet(wxAUI_NB_PIN_ON_ACTIVE_TAB))
+                        {
+                            if (isActive)
+                            {
+                                shown = true;
+
+                                if ( page.kind == wxAuiTabKind::Pinned )
+                                    button.curState |= wxAUI_BUTTON_STATE_CHECKED;
+                                else
+                                    button.curState &= ~wxAUI_BUTTON_STATE_CHECKED;
+                            }
+                        }
+
+                        // This is not an "else" of the above "if" as when both
+                        // styles are used, we show "pin" button only on the
+                        // active tab, but also show "unpin" on all the pinned
+                        // tabs.
+                        if (IsFlagSet(wxAUI_NB_UNPIN_ON_ALL_PINNED))
+                        {
+                            if ( page.kind == wxAuiTabKind::Pinned )
+                            {
+                                shown = true;
+
+                                button.curState |= wxAUI_BUTTON_STATE_CHECKED;
+                            }
+                        }
+                        break;
+                }
+                break;
+
+            case wxAuiTabKind::Locked:
+                // A locked page can't be closed or pinned, leave the button
+                // in its default hidden state.
+                break;
+        }
+
+        // Leave the other flags unchanged, this doesn't matter when hiding
+        // the button but does when showing it as it could be pressed or
+        // under the mouse.
+        if ( shown )
+            button.curState &= ~wxAUI_BUTTON_STATE_HIDDEN;
+        else
+            button.curState |= wxAUI_BUTTON_STATE_HIDDEN;
+    }
 }
 
+// Combined border between the tabs and the buttons in DIPs.
+static const int wxAUI_BUTTONS_BORDER = 2;
 
-// Render() renders the tab catalog to the specified DC
-// It is a virtual function and can be overridden to
-// provide custom drawing capabilities
-void wxAuiTabContainer::Render(wxDC* raw_dc, wxWindow* wnd)
+int wxAuiTabContainer::GetAvailableForTabs(const wxRect& rect,
+                                           wxReadOnlyDC& dc,
+                                           wxWindow* wnd)
 {
-    if (!raw_dc || !raw_dc->IsOk())
-        return;
-
-    if (m_rect.IsEmpty())
-        return;
+    // This function is similar to RenderButtons() but is only used when
+    // wxAUI_NB_MULTILINE is on, so we can simplify things here compared to
+    // the other functions, notable we can assume that all tabs are visible.
 
     size_t i;
-    size_t page_count = m_pages.GetCount();
-    size_t button_count = m_buttons.GetCount();
+    const size_t button_count = m_buttons.size();
 
-#if wxALWAYS_NATIVE_DOUBLE_BUFFER
-    wxDC& dc = *raw_dc;
-#else
-    wxMemoryDC dc;
+    int right_buttons_width = 0;
 
-    // use the same layout direction as the window DC uses to ensure that the
-    // text is rendered correctly
-    dc.SetLayoutDirection(raw_dc->GetLayoutDirection());
+    // measure the buttons on the right side
+    for (i = 0; i < button_count; ++i)
+    {
+        wxAuiTabContainerButton& button = m_buttons.at(button_count - i - 1);
 
-    wxBitmap bmp;
-    // create off-screen bitmap
-    bmp.Create(m_rect.GetWidth(), m_rect.GetHeight(),*raw_dc);
-    dc.SelectObject(bmp);
+        if (button.location != wxRIGHT)
+            continue;
+        if (button.curState & wxAUI_BUTTON_STATE_HIDDEN)
+            continue;
+        if (button.id == wxAUI_BUTTON_RIGHT) // Never used in multi-line mode.
+            continue;
 
-    if (!dc.IsOk())
-        return;
-#endif
+        wxRect button_rect = rect;
+        button_rect.SetY(1);
+        button_rect.SetWidth(rect.width - right_buttons_width);
+
+        const int buttonWidth = m_art->GetButtonRect(dc,
+                                                     wnd,
+                                                     button_rect,
+                                                     button.id,
+                                                     button.curState,
+                                                     wxRIGHT);
+
+        right_buttons_width += buttonWidth;
+    }
+
+
+    int left_buttons_width = 0;
+
+    // measure the buttons on the left side
+
+    for (i = 0; i < button_count; ++i)
+    {
+        wxAuiTabContainerButton& button = m_buttons.at(button_count - i - 1);
+
+        if (button.location != wxLEFT)
+            continue;
+        if (button.curState & wxAUI_BUTTON_STATE_HIDDEN)
+            continue;
+        if (button.id == wxAUI_BUTTON_LEFT) // Never used in multi-line mode.
+            continue;
+
+        wxRect button_rect(left_buttons_width, 1, 1000, rect.height);
+
+        const int buttonWidth = m_art->GetButtonRect(dc,
+                                                     wnd,
+                                                     button_rect,
+                                                     button.id,
+                                                     button.curState,
+                                                     wxLEFT);
+
+        left_buttons_width += buttonWidth;
+    }
+
+    if (left_buttons_width == 0)
+        left_buttons_width = m_art->GetIndentSize();
+
+    return rect.width - left_buttons_width - right_buttons_width - wnd->FromDIP(wxAUI_BUTTONS_BORDER);
+}
+
+int wxAuiTabContainer::LayoutMultiLineTabs(const wxRect& rect, wxWindow* wnd)
+{
+    wxInfoDC dc(wnd);
+
+    const int availableWidth = GetAvailableForTabs(rect, dc, wnd);
+
+    int extraHeight = 0;
+
+    int widthRow = 0;
+    bool firstTabInRow = true;
+    bool* lastRowEnd = nullptr; // Pointer to the flag in the last tab.
+    for ( auto& page : m_pages )
+    {
+        // When using wxAUI_NB_{CLOSE,PIN}_ON_ACTIVE_TAB, we need to reserve
+        // enough space in each row to show the corresponding button on the
+        // active tab if it's in this row to avoid redoing the layout when the
+        // selection changes (as this would be very confusing). So we
+        // always measure the first tab in the row as if it had the button(s).
+        // This relies on the extra increment in the width being constant for
+        // all tabs, but this seems to be a safe enough assumption.
+        //
+        // Note that for non-wxAUI_NB_CLOSE_ON_ACTIVE_TAB cases, it doesn't
+        // matter, as "Close" is either never shown at all or always shown
+        // regardless of the page active status.
+        //
+        // Also note that we don't need to update the buttons state for the
+        // locked pages as they never change, so the layout doesn't depend on
+        // whether they're active or not and if the entire row consists of only
+        // locked tabs, we never have to add any extra space.
+        if ( page.kind != wxAuiTabKind::Locked )
+        {
+            UpdateButtonsState(page, firstTabInRow);
+            firstTabInRow = false;
+        }
+
+        const auto size = m_art->GetPageTabSize(dc, wnd, page);
+
+        widthRow += size.x;
+
+        // Reset it by default, it will be set during the next loop
+        // iteration or after the loop if it's the last tab in the row.
+        page.rowEnd = false;
+
+        // Start a new row if this tab doesn't fit into the current one.
+        if ( widthRow > availableWidth )
+        {
+            widthRow = size.x;
+
+            // We assume that all tabs have the same height: if they don't,
+            // things are not going to look well no matter what.
+            extraHeight += size.y;
+
+            firstTabInRow = true;
+
+            if ( lastRowEnd )
+                *lastRowEnd = true;
+        }
+
+        lastRowEnd = &page.rowEnd;
+    }
+
+    if ( lastRowEnd )
+        *lastRowEnd = true;
+
+    return extraHeight;
+}
+
+void wxAuiTabContainer::RenderButtons(wxDC& dc, wxWindow* wnd,
+                                      int& left_buttons_width,
+                                      int& right_buttons_width)
+{
+    size_t i;
+    const size_t page_count = m_pages.GetCount();
+    const size_t button_count = m_buttons.size();
 
     // ensure we show as many tabs as possible
     while (m_tabOffset > 0 && IsTabVisible(page_count-1, m_tabOffset-1, &dc, wnd))
@@ -456,14 +728,10 @@ void wxAuiTabContainer::Render(wxDC* raw_dc, wxWindow* wnd)
     {
         wxAuiNotebookPage& page = m_pages.Item(i);
 
+        UpdateButtonsState(page);
+
         int x_extent = 0;
-        wxSize size = m_art->GetTabSize(dc,
-                            wnd,
-                            page.caption,
-                            page.bitmap,
-                            page.active,
-                            GetCloseButtonState(page),
-                            &x_extent);
+        const wxSize size = m_art->GetPageTabSize(dc, wnd, page, &x_extent);
 
         if (i+1 < page_count)
             total_width += x_extent;
@@ -484,7 +752,7 @@ void wxAuiTabContainer::Render(wxDC* raw_dc, wxWindow* wnd)
         // show left/right buttons
         for (i = 0; i < button_count; ++i)
         {
-            wxAuiTabContainerButton& button = m_buttons.Item(i);
+            wxAuiTabContainerButton& button = m_buttons.at(i);
             if (button.id == wxAUI_BUTTON_LEFT ||
                 button.id == wxAUI_BUTTON_RIGHT)
             {
@@ -497,7 +765,7 @@ void wxAuiTabContainer::Render(wxDC* raw_dc, wxWindow* wnd)
         // hide left/right buttons
         for (i = 0; i < button_count; ++i)
         {
-            wxAuiTabContainerButton& button = m_buttons.Item(i);
+            wxAuiTabContainerButton& button = m_buttons.at(i);
             if (button.id == wxAUI_BUTTON_LEFT ||
                 button.id == wxAUI_BUTTON_RIGHT)
             {
@@ -506,10 +774,10 @@ void wxAuiTabContainer::Render(wxDC* raw_dc, wxWindow* wnd)
         }
     }
 
-    // determine whether left button should be enabled
+    // determine whether various buttons should be enabled
     for (i = 0; i < button_count; ++i)
     {
-        wxAuiTabContainerButton& button = m_buttons.Item(i);
+        wxAuiTabContainerButton& button = m_buttons.at(i);
         if (button.id == wxAUI_BUTTON_LEFT)
         {
             if (m_tabOffset == 0)
@@ -517,33 +785,49 @@ void wxAuiTabContainer::Render(wxDC* raw_dc, wxWindow* wnd)
             else
                 button.curState &= ~wxAUI_BUTTON_STATE_DISABLED;
         }
-        if (button.id == wxAUI_BUTTON_RIGHT)
+        else if (button.id == wxAUI_BUTTON_RIGHT)
         {
             int button_width = 0;
-            for (i = 0; i < button_count; ++i)
-                button_width += m_buttons.Item(button_count - i - 1).rect.GetWidth();
+            for ( const auto& b : m_buttons )
+                button_width += b.rect.GetWidth();
 
             if (visible_width < m_rect.GetWidth() - button_width)
                 button.curState |= wxAUI_BUTTON_STATE_DISABLED;
             else
                 button.curState &= ~wxAUI_BUTTON_STATE_DISABLED;
         }
+        else if (button.id == wxAUI_BUTTON_CLOSE)
+        {
+            button.curState &= ~wxAUI_BUTTON_STATE_DISABLED;
+
+            // Disable "Close" button if the current page is locked, as such
+            // pages can't be closed.
+            for (const auto& page : m_pages)
+            {
+                if (page.active)
+                {
+                    switch ( page.kind )
+                    {
+                        case wxAuiTabKind::Normal:
+                        case wxAuiTabKind::Pinned:
+                            break;
+
+                        case wxAuiTabKind::Locked:
+                            button.curState |= wxAUI_BUTTON_STATE_DISABLED;
+                            break;
+                    }
+                    break;
+                }
+            }
+        }
     }
 
-
-
-    // draw background
-    m_art->DrawBackground(dc, wnd, m_rect);
-
-    // draw buttons
-    int left_buttons_width = 0;
-    int right_buttons_width = 0;
+    right_buttons_width = 0;
 
     // draw the buttons on the right side
-    int offset = m_rect.x + m_rect.width;
     for (i = 0; i < button_count; ++i)
     {
-        wxAuiTabContainerButton& button = m_buttons.Item(button_count - i - 1);
+        wxAuiTabContainerButton& button = m_buttons.at(button_count - i - 1);
 
         if (button.location != wxRIGHT)
             continue;
@@ -552,7 +836,7 @@ void wxAuiTabContainer::Render(wxDC* raw_dc, wxWindow* wnd)
 
         wxRect button_rect = m_rect;
         button_rect.SetY(1);
-        button_rect.SetWidth(offset);
+        button_rect.SetWidth(m_rect.width - right_buttons_width);
 
         m_art->DrawButton(dc,
                           wnd,
@@ -562,26 +846,25 @@ void wxAuiTabContainer::Render(wxDC* raw_dc, wxWindow* wnd)
                           wxRIGHT,
                           &button.rect);
 
-        offset -= button.rect.GetWidth();
         right_buttons_width += button.rect.GetWidth();
     }
 
 
 
-    offset = 0;
+    left_buttons_width = 0;
 
     // draw the buttons on the left side
 
     for (i = 0; i < button_count; ++i)
     {
-        wxAuiTabContainerButton& button = m_buttons.Item(button_count - i - 1);
+        wxAuiTabContainerButton& button = m_buttons.at(button_count - i - 1);
 
         if (button.location != wxLEFT)
             continue;
         if (button.curState & wxAUI_BUTTON_STATE_HIDDEN)
             continue;
 
-        wxRect button_rect(offset, 1, 1000, m_rect.height);
+        wxRect button_rect(left_buttons_width, 1, 1000, m_rect.height);
 
         m_art->DrawButton(dc,
                           wnd,
@@ -591,128 +874,128 @@ void wxAuiTabContainer::Render(wxDC* raw_dc, wxWindow* wnd)
                           wxLEFT,
                           &button.rect);
 
-        offset += button.rect.GetWidth();
         left_buttons_width += button.rect.GetWidth();
     }
 
-    offset = left_buttons_width;
-
-    if (offset == 0)
-        offset += m_art->GetIndentSize();
+    if (left_buttons_width == 0)
+        left_buttons_width = m_art->GetIndentSize();
 
 
-    // prepare the tab-close-button array
+    // update the tab buttons visibility
     // make sure tab button entries which aren't used are marked as hidden
-    for (i = page_count; i < m_tabCloseButtons.GetCount(); ++i)
-        m_tabCloseButtons.Item(i).curState = wxAUI_BUTTON_STATE_HIDDEN;
-
-    // make sure there are enough tab button entries to accommodate all tabs
-    while (m_tabCloseButtons.GetCount() < page_count)
+    for (i = page_count; i < m_pages.GetCount(); ++i)
     {
-        wxAuiTabContainerButton tempbtn;
-        tempbtn.id = wxAUI_BUTTON_CLOSE;
-        tempbtn.location = wxCENTER;
-        tempbtn.curState = wxAUI_BUTTON_STATE_HIDDEN;
-        m_tabCloseButtons.Add(tempbtn);
+        for (auto& button : m_pages[i].buttons)
+            button.curState |= wxAUI_BUTTON_STATE_HIDDEN;
     }
-
 
     // buttons before the tab offset must be set to hidden
     for (i = 0; i < m_tabOffset; ++i)
     {
-        m_tabCloseButtons.Item(i).curState = wxAUI_BUTTON_STATE_HIDDEN;
+        for (auto& button : m_pages[i].buttons)
+            button.curState |= wxAUI_BUTTON_STATE_HIDDEN;
     }
+}
 
+
+// Render() renders the tab catalog to the specified DC
+// It is a virtual function and can be overridden to
+// provide custom drawing capabilities
+void wxAuiTabContainer::Render(wxDC* pdc, wxWindow* wnd)
+{
+    if (m_rect.IsEmpty())
+        return;
+
+    size_t i;
+    size_t page_count = m_pages.GetCount();
+
+    wxDC& dc = *pdc;
+
+    // draw background
+    m_art->DrawBackground(dc, wnd, m_rect);
+
+    // draw buttons
+    int left_buttons_width = 0;
+    int right_buttons_width = 0;
+    RenderButtons(dc, wnd, left_buttons_width, right_buttons_width);
+
+    int offset = left_buttons_width;
 
     // draw the tabs
 
-    size_t active = 999;
-    int active_offset = 0;
+    size_t active = (size_t)-1;
     wxRect active_rect;
 
-    int x_extent = 0;
     wxRect rect = m_rect;
     rect.y = 0;
-    rect.height = m_rect.height;
+
+    if (IsFlagSet(wxAUI_NB_MULTILINE) && page_count)
+    {
+        // We assume vertical size of all tabs is the same, so it doesn't
+        // matter which one we use for measuring.
+        const wxAuiNotebookPage& page = m_pages.Item(0);
+
+        const auto size = m_art->GetPageTabSize(dc, wnd, page);
+
+        rect.height = size.y;
+    }
+    else
+    {
+        rect.height = m_tabRowHeight;
+    }
+
+    // Note that this must be consistent with GetAvailableForTabs().
+    const int rightBorder = m_rect.width - right_buttons_width - wnd->FromDIP(wxAUI_BUTTONS_BORDER);
 
     for (i = m_tabOffset; i < page_count; ++i)
     {
         wxAuiNotebookPage& page = m_pages.Item(i);
-        wxAuiTabContainerButton& tab_button = m_tabCloseButtons.Item(i);
 
-        // determine if a close button is on this tab
-        if ((m_flags & wxAUI_NB_CLOSE_ON_ALL_TABS) != 0 ||
-            ((m_flags & wxAUI_NB_CLOSE_ON_ACTIVE_TAB) != 0 && page.active))
+        UpdateButtonsState(page);
+
+        // Check if this tab is at least partially visible when using a single
+        // row (otherwise all rows are visible).
+        if (!IsFlagSet(wxAUI_NB_MULTILINE) && offset >= rightBorder)
         {
-            if (tab_button.curState == wxAUI_BUTTON_STATE_HIDDEN)
-            {
-                tab_button.id = wxAUI_BUTTON_CLOSE;
-                tab_button.curState = wxAUI_BUTTON_STATE_NORMAL;
-                tab_button.location = wxCENTER;
-            }
-        }
-        else
-        {
-            tab_button.curState = wxAUI_BUTTON_STATE_HIDDEN;
+            // This (and, hence, all the subsequent) tab(s) would be completely
+            // hidden, stop drawing.
+            break;
         }
 
         rect.x = offset;
-        rect.width = m_rect.width - right_buttons_width - offset - wnd->FromDIP(2);
+        rect.width = rightBorder - offset;
 
-        if (rect.width <= 0)
-            break;
-
-        m_art->DrawTab(dc,
-                       wnd,
-                       page,
-                       rect,
-                       tab_button.curState,
-                       &page.rect,
-                       &tab_button.rect,
-                       &x_extent);
+        offset += m_art->DrawPageTab(dc, wnd, page, rect);
 
         if (page.active)
         {
             active = i;
-            active_offset = offset;
             active_rect = rect;
         }
 
-        offset += x_extent;
+        // Start a new row if necessary when using multiple rows.
+        if (IsFlagSet(wxAUI_NB_MULTILINE) && page.rowEnd)
+        {
+            offset = left_buttons_width;
+
+            rect.y += rect.height;
+        }
     }
 
 
     // make sure to deactivate buttons which are off the screen to the right
-    for (++i; i < m_tabCloseButtons.GetCount(); ++i)
+    for (++i; i < m_pages.GetCount(); ++i)
     {
-        m_tabCloseButtons.Item(i).curState = wxAUI_BUTTON_STATE_HIDDEN;
+        for (auto& button : m_pages[i].buttons)
+            button.curState |= wxAUI_BUTTON_STATE_HIDDEN;
     }
 
 
     // draw the active tab again so it stands in the foreground
     if (active >= m_tabOffset && active < m_pages.GetCount())
     {
-        wxAuiNotebookPage& page = m_pages.Item(active);
-
-        wxAuiTabContainerButton& tab_button = m_tabCloseButtons.Item(active);
-
-        rect.x = active_offset;
-        m_art->DrawTab(dc,
-                       wnd,
-                       page,
-                       active_rect,
-                       tab_button.curState,
-                       &page.rect,
-                       &tab_button.rect,
-                       &x_extent);
+        m_art->DrawPageTab(dc, wnd, m_pages.Item(active), active_rect);
     }
-
-
-#if !wxALWAYS_NATIVE_DOUBLE_BUFFER
-    raw_dc->Blit(m_rect.x, m_rect.y,
-                 m_rect.GetWidth(), m_rect.GetHeight(),
-                 &dc, 0, 0);
-#endif
 }
 
 // Is the tab visible?
@@ -721,20 +1004,20 @@ bool wxAuiTabContainer::IsTabVisible(int tabPage, int tabOffset, wxReadOnlyDC* d
     if (!dc || !dc->IsOk())
         return false;
 
+    // All tabs are always visible when multiple lines are used.
+    if (IsFlagSet(wxAUI_NB_MULTILINE))
+        return true;
+
     size_t i;
     size_t page_count = m_pages.GetCount();
-    size_t button_count = m_buttons.GetCount();
-
-    // Hasn't been rendered yet; assume it's visible
-    if (m_tabCloseButtons.GetCount() < page_count)
-        return true;
+    size_t button_count = m_buttons.size();
 
     // First check if both buttons are disabled - if so, there's no need to
     // check further for visibility.
     int arrowButtonVisibleCount = 0;
     for (i = 0; i < button_count; ++i)
     {
-        wxAuiTabContainerButton& button = m_buttons.Item(i);
+        wxAuiTabContainerButton& button = m_buttons.at(i);
         if (button.id == wxAUI_BUTTON_LEFT ||
             button.id == wxAUI_BUTTON_RIGHT)
         {
@@ -759,7 +1042,7 @@ bool wxAuiTabContainer::IsTabVisible(int tabPage, int tabOffset, wxReadOnlyDC* d
     int offset = m_rect.x + m_rect.width;
     for (i = 0; i < button_count; ++i)
     {
-        wxAuiTabContainerButton& button = m_buttons.Item(button_count - i - 1);
+        wxAuiTabContainerButton& button = m_buttons.at(button_count - i - 1);
 
         if (button.location != wxRIGHT)
             continue;
@@ -775,7 +1058,7 @@ bool wxAuiTabContainer::IsTabVisible(int tabPage, int tabOffset, wxReadOnlyDC* d
     // calculate size of the buttons on the left side
     for (i = 0; i < button_count; ++i)
     {
-        wxAuiTabContainerButton& button = m_buttons.Item(button_count - i - 1);
+        wxAuiTabContainerButton& button = m_buttons.at(button_count - i - 1);
 
         if (button.location != wxLEFT)
             continue;
@@ -798,19 +1081,15 @@ bool wxAuiTabContainer::IsTabVisible(int tabPage, int tabOffset, wxReadOnlyDC* d
     {
         wxAuiNotebookPage& page = m_pages.Item(i);
 
-        rect.width = m_rect.width - right_buttons_width - offset - wnd->FromDIP(2);
+        rect.width = m_rect.width - right_buttons_width - offset - wnd->FromDIP(wxAUI_BUTTONS_BORDER);
 
         if (rect.width <= 0)
             return false; // haven't found the tab, and we've run out of space, so return false
 
+        UpdateButtonsState(page);
+
         int x_extent = 0;
-        m_art->GetTabSize(*dc,
-                            wnd,
-                            page.caption,
-                            page.bitmap,
-                            page.active,
-                            GetCloseButtonState(page),
-                            &x_extent);
+        m_art->GetPageTabSize(*dc, wnd, page, &x_extent);
 
         offset += x_extent;
 
@@ -818,7 +1097,7 @@ bool wxAuiTabContainer::IsTabVisible(int tabPage, int tabOffset, wxReadOnlyDC* d
         {
             // If not all of the tab is visible, and supposing there's space to display it all,
             // we could do better so we return false.
-            if (((m_rect.width - right_buttons_width - offset - wnd->FromDIP(2)) <= 0) && ((m_rect.width - right_buttons_width - left_buttons_width) > x_extent))
+            if (((m_rect.width - right_buttons_width - offset - wnd->FromDIP(wxAUI_BUTTONS_BORDER)) <= 0) && ((m_rect.width - right_buttons_width - left_buttons_width) > x_extent))
                 return false;
             else
                 return true;
@@ -849,79 +1128,80 @@ void wxAuiTabContainer::MakeTabVisible(int tabPage, wxWindow* win)
     }
 }
 
-// TabHitTest() tests if a tab was hit, passing the window pointer
-// back if that condition was fulfilled.  The function returns
-// true if a tab was hit, otherwise false
-bool wxAuiTabContainer::TabHitTest(int x, int y, wxWindow** hit) const
+// TabHitTest() tests if a tab was hit, returning the struct containing the
+// window that was hit together with its position or null pointer otherwise.
+wxAuiTabContainer::HitTestResult
+wxAuiTabContainer::TabHitTest(const wxPoint& pt, int flags) const
 {
-    if (!m_rect.Contains(x,y))
-        return false;
+    if (!m_rect.Contains(pt))
+        return {};
 
-    wxAuiTabContainerButton* btn = nullptr;
-    if (ButtonHitTest(x, y, &btn) && !(btn->curState & wxAUI_BUTTON_STATE_DISABLED))
+    const wxAuiTabContainerButton* const btn = ButtonHitTest(pt);
+    if (btn && !(btn->curState & wxAUI_BUTTON_STATE_DISABLED))
     {
         for ( const auto& button : m_buttons )
         {
             if ( btn == &button )
-                return false;
+                return {};
         }
     }
 
-    size_t i, page_count = m_pages.GetCount();
-
-    for (i = m_tabOffset; i < page_count; ++i)
+    const size_t page_count = m_pages.GetCount();
+    for (size_t i = m_tabOffset; i < page_count; ++i)
     {
         wxAuiNotebookPage& page = m_pages.Item(i);
-        if (page.rect.Contains(x,y))
+        if (page.rect.Contains(pt))
         {
-            if (hit)
-                *hit = page.window;
-            return true;
+            return { page.window, static_cast<int>(i) };
+        }
+
+        // Also optionally check if the point lies over the blank space after
+        // the last tab in the row if this should be allowed.
+        if ((flags & HitTest_AllowAfterTab) && page.rowEnd)
+        {
+            if (pt.x >= page.rect.x &&
+                    pt.y >= page.rect.y &&
+                        pt.y < page.rect.y + page.rect.height)
+            {
+                return { page.window, static_cast<int>(i) };
+            }
         }
     }
 
-    return false;
+    return {};
 }
 
 // ButtonHitTest() tests if a button was hit. The function returns
-// true if a button was hit, otherwise false
-bool wxAuiTabContainer::ButtonHitTest(int x, int y,
-                                      wxAuiTabContainerButton** hit) const
+// the button if one was hit and null pointer otherwise
+wxAuiTabContainerButton*
+wxAuiTabContainer::ButtonHitTest(const wxPoint& pt) const
 {
-    if (!m_rect.Contains(x,y))
-        return false;
+    if (!m_rect.Contains(pt))
+        return nullptr;
 
-    size_t i, button_count;
-
-
-    button_count = m_buttons.GetCount();
-    for (i = 0; i < button_count; ++i)
+    for ( auto& button : m_buttons )
     {
-        wxAuiTabContainerButton& button = m_buttons.Item(i);
-        if (button.rect.Contains(x,y) &&
+        if (button.rect.Contains(pt) &&
             !(button.curState & wxAUI_BUTTON_STATE_HIDDEN ))
         {
-            if (hit)
-                *hit = &button;
-            return true;
+            return const_cast<wxAuiTabContainerButton*>(&button);
         }
     }
 
-    button_count = m_tabCloseButtons.GetCount();
-    for (i = 0; i < button_count; ++i)
+    for ( const auto& page : m_pages )
     {
-        wxAuiTabContainerButton& button = m_tabCloseButtons.Item(i);
-        if (button.rect.Contains(x,y) &&
-            !(button.curState & (wxAUI_BUTTON_STATE_HIDDEN |
-                                   wxAUI_BUTTON_STATE_DISABLED)))
+        for ( const auto& button : page.buttons )
         {
-            if (hit)
-                *hit = &button;
-            return true;
+            if (button.rect.Contains(pt) &&
+                !(button.curState & (wxAUI_BUTTON_STATE_HIDDEN |
+                                       wxAUI_BUTTON_STATE_DISABLED)))
+            {
+                return const_cast<wxAuiTabContainerButton*>(&button);
+            }
         }
     }
 
-    return false;
+    return nullptr;
 }
 
 
@@ -949,13 +1229,11 @@ static void ShowWnd(wxWindow* wnd, bool show)
 // hides all of the other windows (in that order)
 void wxAuiTabContainer::DoShowHide()
 {
-    wxAuiNotebookPageArray& pages = GetPages();
-    size_t i, page_count = pages.GetCount();
+    const wxAuiNotebookPageArray& pages = GetPages();
 
     // show new active page first
-    for (i = 0; i < page_count; ++i)
+    for ( const auto& page : pages )
     {
-        wxAuiNotebookPage& page = pages.Item(i);
         if (page.active)
         {
             ShowWnd(page.window, true);
@@ -964,17 +1242,41 @@ void wxAuiTabContainer::DoShowHide()
     }
 
     // hide all other pages
-    for (i = 0; i < page_count; ++i)
+    for ( const auto& page : pages )
     {
-        wxAuiNotebookPage& page = pages.Item(i);
         if (!page.active)
             ShowWnd(page.window, false);
     }
 }
 
 
+int wxAuiTabContainer::GetFirstTabOfKind(wxAuiTabKind kind) const
+{
+    int pos = 0;
+    for ( const auto& page : m_pages )
+    {
+        if ( page.kind == kind )
+            break;
 
+        pos++;
+    }
 
+    return pos;
+}
+
+int wxAuiTabContainer::GetFirstTabNotOfKind(wxAuiTabKind kind) const
+{
+    int pos = 0;
+    for ( const auto& page : m_pages )
+    {
+        if ( page.kind != kind )
+            break;
+
+        pos++;
+    }
+
+    return pos;
+}
 
 
 // -- wxAuiTabCtrl class implementation --
@@ -983,7 +1285,6 @@ void wxAuiTabContainer::DoShowHide()
 
 wxBEGIN_EVENT_TABLE(wxAuiTabCtrl, wxControl)
     EVT_PAINT(wxAuiTabCtrl::OnPaint)
-    EVT_ERASE_BACKGROUND(wxAuiTabCtrl::OnEraseBackground)
     EVT_SIZE(wxAuiTabCtrl::OnSize)
     EVT_LEFT_DOWN(wxAuiTabCtrl::OnLeftDown)
     EVT_LEFT_DCLICK(wxAuiTabCtrl::OnLeftDClick)
@@ -994,33 +1295,44 @@ wxBEGIN_EVENT_TABLE(wxAuiTabCtrl, wxControl)
     EVT_RIGHT_UP(wxAuiTabCtrl::OnRightUp)
     EVT_MOTION(wxAuiTabCtrl::OnMotion)
     EVT_LEAVE_WINDOW(wxAuiTabCtrl::OnLeaveWindow)
-    EVT_AUINOTEBOOK_BUTTON(wxID_ANY, wxAuiTabCtrl::OnButton)
     EVT_SET_FOCUS(wxAuiTabCtrl::OnSetFocus)
     EVT_KILL_FOCUS(wxAuiTabCtrl::OnKillFocus)
     EVT_CHAR(wxAuiTabCtrl::OnChar)
     EVT_MOUSE_CAPTURE_LOST(wxAuiTabCtrl::OnCaptureLost)
     EVT_SYS_COLOUR_CHANGED(wxAuiTabCtrl::OnSysColourChanged)
-    EVT_DPI_CHANGED(wxAuiTabCtrl::OnDpiChanged)
+    EVT_DPI_CHANGED(wxAuiTabCtrl::OnDPIChanged)
 wxEND_EVENT_TABLE()
 
 
-wxAuiTabCtrl::wxAuiTabCtrl(wxWindow* parent,
-                           wxWindowID id,
-                           const wxPoint& pos,
-                           const wxSize& size,
-                           long style) : wxControl(parent, id, pos, size, style)
+wxAuiTabCtrl::wxAuiTabCtrl(wxAuiNotebook* parent, wxWindowID id)
+            : wxControl(parent, id,
+                        wxDefaultPosition,
+                        wxDefaultSize,
+                        wxNO_BORDER | wxWANTS_CHARS,
+                        wxDefaultValidator,
+                        wxT("wxAuiTabCtrl"))
 {
-    SetName(wxT("wxAuiTabCtrl"));
+    SetBackgroundStyle(wxBG_STYLE_PAINT);
 }
 
-wxAuiTabCtrl::~wxAuiTabCtrl()
+wxAuiTabCtrl::~wxAuiTabCtrl() = default;
+
+// Our parent is always wxAuiNotebook, by construction, so the cast is safe.
+wxAuiNotebook* wxAuiTabCtrl::GetBook() const
 {
+    return static_cast<wxAuiNotebook*>(GetParent());
 }
 
 void wxAuiTabCtrl::DoShowTab(int idx)
 {
     DoShowHide();
     MakeTabVisible(idx, this);
+}
+
+void wxAuiTabCtrl::DoUpdateActive()
+{
+    DoShowHide();
+    Refresh();
 }
 
 void wxAuiTabCtrl::DoEndDragging()
@@ -1030,11 +1342,48 @@ void wxAuiTabCtrl::DoEndDragging()
     m_clickTab = nullptr;
 }
 
+void wxAuiTabCtrl::DoApplyRect(const wxRect& rect, int tabCtrlHeight)
+{
+    // Save the full rectangle for GetHintScreenRect().
+    m_fullRect = rect;
+
+    // Save the height of a single tab row before possibly changing it below in
+    // multi-line case.
+    SetRowHeight(tabCtrlHeight);
+
+    if (IsFlagSet(wxAUI_NB_MULTILINE))
+    {
+        tabCtrlHeight += LayoutMultiLineTabs(rect, this);
+    }
+
+    if (IsFlagSet(wxAUI_NB_BOTTOM))
+    {
+        SetSize(rect.x, rect.y + rect.height - tabCtrlHeight,
+                rect.width, tabCtrlHeight);
+        SetRect(wxRect(0, 0, rect.width, tabCtrlHeight));
+    }
+    else //TODO: if (IsFlagSet(wxAUI_NB_TOP))
+    {
+        SetSize(rect.x, rect.y, rect.width, tabCtrlHeight);
+        SetRect(wxRect(0, 0, rect.width, tabCtrlHeight));
+    }
+    // TODO: else if (IsFlagSet(wxAUI_NB_LEFT)){}
+    // TODO: else if (IsFlagSet(wxAUI_NB_RIGHT)){}
+
+    Refresh();
+    Update();
+}
+
+wxRect wxAuiTabCtrl::GetHintScreenRect() const
+{
+    wxRect rect = m_fullRect;
+    GetParent()->ClientToScreen(&rect.x, &rect.y);
+    return rect;
+}
+
 void wxAuiTabCtrl::OnPaint(wxPaintEvent&)
 {
-    wxPaintDC dc(this);
-
-    dc.SetFont(GetFont());
+    wxAutoBufferedPaintDC dc(this);
 
     if (GetPageCount() > 0)
         Render(&dc, this);
@@ -1050,10 +1399,6 @@ void wxAuiTabCtrl::OnSysColourChanged(wxSysColourChangedEvent &event)
     }
 }
 
-void wxAuiTabCtrl::OnEraseBackground(wxEraseEvent& WXUNUSED(evt))
-{
-}
-
 void wxAuiTabCtrl::OnSize(wxSizeEvent& evt)
 {
     wxSize s = evt.GetSize();
@@ -1067,39 +1412,37 @@ void wxAuiTabCtrl::OnLeftDown(wxMouseEvent& evt)
 
     // Reset any previous values first.
     DoEndDragging();
-    m_pressedButton = nullptr;
 
+    const wxPoint pos = evt.GetPosition();
+    wxAuiTabContainerButton* const buttonUnderMouse = ButtonHitTest(pos);
 
-    wxWindow* wnd;
-    if (TabHitTest(evt.m_x, evt.m_y, &wnd))
+    if ( auto const tabInfo = TabHitTest(pos) )
     {
-        int new_selection = GetIdxFromWindow(wnd);
+        int new_selection = tabInfo.pos;
 
         // wxAuiNotebooks always want to receive this event
         // even if the tab is already active, because they may
         // have multiple tab controls
-        if ((new_selection != GetActivePage() ||
-            wxDynamicCast(GetParent(), wxAuiNotebook)) && !m_hoverButton)
+        if ((new_selection != GetActivePage()) && !buttonUnderMouse)
         {
-            wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_PAGE_CHANGING, m_windowId);
-            e.SetSelection(new_selection);
-            e.SetOldSelection(GetActivePage());
-            e.SetEventObject(this);
-            ProcessWindowEvent(e);
+            wxAuiTabEventSource::TabClicked(this, new_selection);
         }
 
         m_clickPt.x = evt.m_x;
         m_clickPt.y = evt.m_y;
-        m_clickTab = wnd;
+        m_clickTab = tabInfo.window;
     }
 
-    if (m_hoverButton)
+    auto* const pressedButton = FindPressedButton();
+    if ( buttonUnderMouse != pressedButton )
     {
-        m_pressedButton = m_hoverButton;
-        m_pressedButton->curState = wxAUI_BUTTON_STATE_PRESSED;
-        Refresh();
-        Update();
+        if ( pressedButton )
+            ClearButtonState(*pressedButton, wxAUI_BUTTON_STATE_PRESSED);
+
+        if ( buttonUnderMouse )
+            SetButtonState(*buttonUnderMouse, wxAUI_BUTTON_STATE_PRESSED);
     }
+    //else: No button state to change.
 }
 
 void wxAuiTabCtrl::OnCaptureLost(wxMouseCaptureLostEvent& WXUNUSED(event))
@@ -1110,12 +1453,16 @@ void wxAuiTabCtrl::OnCaptureLost(wxMouseCaptureLostEvent& WXUNUSED(event))
 
         DoEndDragging();
 
-        wxAuiNotebookEvent evt(wxEVT_AUINOTEBOOK_CANCEL_DRAG, m_windowId);
-        evt.SetSelection(GetIdxFromWindow(clickTab));
-        evt.SetOldSelection(evt.GetSelection());
-        evt.SetEventObject(this);
-        ProcessWindowEvent(evt);
+        wxAuiTabEventSource::TabCancelDrag(this, GetIdxFromWindow(clickTab));
     }
+
+    auto* const pressedButton = FindPressedButton();
+    if ( pressedButton )
+        ClearButtonState(*pressedButton, wxAUI_BUTTON_STATE_PRESSED);
+
+    auto* const hoverButton = FindHoverButton();
+    if ( hoverButton )
+        ClearButtonState(*hoverButton, wxAUI_BUTTON_STATE_HOVER);
 }
 
 void wxAuiTabCtrl::OnLeftUp(wxMouseEvent& evt)
@@ -1129,42 +1476,28 @@ void wxAuiTabCtrl::OnLeftUp(wxMouseEvent& evt)
 
         DoEndDragging();
 
-        wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_END_DRAG, m_windowId);
-        e.SetSelection(GetIdxFromWindow(clickTab));
-        e.SetOldSelection(e.GetSelection());
-        e.SetEventObject(this);
-        ProcessWindowEvent(e);
+        wxAuiTabEventSource::TabEndDrag(this, GetIdxFromWindow(clickTab));
 
         return;
     }
 
-    if (m_pressedButton)
+    if (auto* const pressedButton = FindPressedButton())
     {
+        ClearButtonState(*pressedButton, wxAUI_BUTTON_STATE_PRESSED);
+
         // make sure we're still clicking the button
-        wxAuiTabContainerButton* button = nullptr;
-        if (!ButtonHitTest(evt.m_x, evt.m_y, &button) ||
-            button->curState & wxAUI_BUTTON_STATE_DISABLED)
+        const wxAuiTabContainerButton* const
+            button = ButtonHitTest(evt.GetPosition());
+        if (!button || button->curState & wxAUI_BUTTON_STATE_DISABLED)
             return;
 
-        if (button != m_pressedButton)
-        {
-            m_pressedButton = nullptr;
+        if (button != pressedButton)
             return;
-        }
 
-        Refresh();
-        Update();
-
-        if (!(m_pressedButton->curState & wxAUI_BUTTON_STATE_DISABLED))
+        if (!(pressedButton->curState & wxAUI_BUTTON_STATE_DISABLED))
         {
-            wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_BUTTON, m_windowId);
-            e.SetSelection(GetIdxFromWindow(m_clickTab));
-            e.SetInt(m_pressedButton->id);
-            e.SetEventObject(this);
-            ProcessWindowEvent(e);
+            OnButton(GetIdxFromWindow(m_clickTab), pressedButton->id);
         }
-
-        m_pressedButton = nullptr;
     }
 
     DoEndDragging();
@@ -1172,61 +1505,47 @@ void wxAuiTabCtrl::OnLeftUp(wxMouseEvent& evt)
 
 void wxAuiTabCtrl::OnMiddleUp(wxMouseEvent& evt)
 {
-    wxWindow* wnd = nullptr;
-    if (!TabHitTest(evt.m_x, evt.m_y, &wnd))
+    auto const tabInfo = TabHitTest(evt.GetPosition());
+    if (!tabInfo)
         return;
 
-    wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_TAB_MIDDLE_UP, m_windowId);
-    e.SetEventObject(this);
-    e.SetSelection(GetIdxFromWindow(wnd));
-    ProcessWindowEvent(e);
+    wxAuiTabEventSource::TabMiddleUp(this, tabInfo.pos);
 }
 
 void wxAuiTabCtrl::OnMiddleDown(wxMouseEvent& evt)
 {
-    wxWindow* wnd = nullptr;
-    if (!TabHitTest(evt.m_x, evt.m_y, &wnd))
+    auto const tabInfo = TabHitTest(evt.GetPosition());
+    if (!tabInfo)
         return;
 
-    wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_TAB_MIDDLE_DOWN, m_windowId);
-    e.SetEventObject(this);
-    e.SetSelection(GetIdxFromWindow(wnd));
-    ProcessWindowEvent(e);
+    wxAuiTabEventSource::TabMiddleDown(this, tabInfo.pos);
 }
 
 void wxAuiTabCtrl::OnRightUp(wxMouseEvent& evt)
 {
-    wxWindow* wnd = nullptr;
-    if (!TabHitTest(evt.m_x, evt.m_y, &wnd))
+    auto const tabInfo = TabHitTest(evt.GetPosition());
+    if (!tabInfo)
         return;
 
-    wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_TAB_RIGHT_UP, m_windowId);
-    e.SetEventObject(this);
-    e.SetSelection(GetIdxFromWindow(wnd));
-    ProcessWindowEvent(e);
+    wxAuiTabEventSource::TabRightUp(this, tabInfo.pos);
 }
 
 void wxAuiTabCtrl::OnRightDown(wxMouseEvent& evt)
 {
-    wxWindow* wnd = nullptr;
-    if (!TabHitTest(evt.m_x, evt.m_y, &wnd))
+    auto const tabInfo = TabHitTest(evt.GetPosition());
+    if (!tabInfo)
         return;
 
-    wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_TAB_RIGHT_DOWN, m_windowId);
-    e.SetEventObject(this);
-    e.SetSelection(GetIdxFromWindow(wnd));
-    ProcessWindowEvent(e);
+    wxAuiTabEventSource::TabRightDown(this, tabInfo.pos);
 }
 
 void wxAuiTabCtrl::OnLeftDClick(wxMouseEvent& evt)
 {
-    wxWindow* wnd;
-    wxAuiTabContainerButton* button;
-    if (!TabHitTest(evt.m_x, evt.m_y, &wnd) && !ButtonHitTest(evt.m_x, evt.m_y, &button))
+    wxPoint pos = evt.GetPosition();
+
+    if (!TabHitTest(pos) && !ButtonHitTest(pos))
     {
-        wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_BG_DCLICK, m_windowId);
-        e.SetEventObject(this);
-        ProcessWindowEvent(e);
+        wxAuiTabEventSource::TabBgDClick(this);
     }
 }
 
@@ -1234,54 +1553,54 @@ void wxAuiTabCtrl::OnMotion(wxMouseEvent& evt)
 {
     wxPoint pos = evt.GetPosition();
 
-    // check if the mouse is hovering above a button
-    wxAuiTabContainerButton* button;
-    if (ButtonHitTest(pos.x, pos.y, &button) && !(button->curState & wxAUI_BUTTON_STATE_DISABLED))
+    // Don't highlight any buttons while dragging the tab itself.
+    if ( !m_isDragging )
     {
-        if (m_hoverButton && button != m_hoverButton)
+        // check if the mouse is hovering above a button and, if so, if it's the
+        // same one as before or a different one
+        auto* const hoverButton = FindHoverButton();
+        wxAuiTabContainerButton* const button = ButtonHitTest(pos);
+        if ( button != hoverButton )
         {
-            m_hoverButton->curState = wxAUI_BUTTON_STATE_NORMAL;
-            m_hoverButton = nullptr;
-            Refresh();
-            Update();
+            if ( hoverButton )
+                ClearButtonState(*hoverButton, wxAUI_BUTTON_STATE_HOVER);
+
+            if ( button && !(button->curState & wxAUI_BUTTON_STATE_DISABLED) )
+                SetButtonState(*button, wxAUI_BUTTON_STATE_HOVER);
         }
 
-        if (button->curState != wxAUI_BUTTON_STATE_HOVER)
-        {
-            button->curState = wxAUI_BUTTON_STATE_HOVER;
-            Refresh();
-            Update();
-
-            m_hoverButton = button;
+        // Don't do anything else if we're hovering over a button, even a
+        // disabled one.
+        if ( button )
             return;
-        }
-    }
-    else
-    {
-        if (m_hoverButton)
-        {
-            m_hoverButton->curState = wxAUI_BUTTON_STATE_NORMAL;
-            m_hoverButton = nullptr;
-            Refresh();
-            Update();
-        }
+
+        // Also skip the rest if we're moving the mouse while a button is
+        // pressed.
+        if ( FindPressedButton() )
+            return;
     }
 
-    wxWindow* wnd = nullptr;
-    if (evt.Moving() && TabHitTest(evt.m_x, evt.m_y, &wnd))
+    bool hovering = false;
+    if (evt.Moving())
     {
-        SetHoverTab(wnd);
+        if ( auto const tabInfo = TabHitTest(pos) )
+        {
+            hovering = true;
+
+            SetHoverTab(tabInfo.window);
 
 #if wxUSE_TOOLTIPS
-        wxString tooltip(m_pages[GetIdxFromWindow(wnd)].tooltip);
+            wxString tooltip(m_pages[tabInfo.pos].tooltip);
 
-        // If the text changes, set it else, keep old, to avoid
-        // 'moving tooltip' effect
-        if (GetToolTipText() != tooltip)
-            SetToolTip(tooltip);
+            // If the text changes, set it else, keep old, to avoid
+            // 'moving tooltip' effect
+            if (GetToolTipText() != tooltip)
+                SetToolTip(tooltip);
 #endif // wxUSE_TOOLTIPS
+        }
     }
-    else
+
+    if (!hovering)
     {
         SetHoverTab(nullptr);
 
@@ -1295,11 +1614,7 @@ void wxAuiTabCtrl::OnMotion(wxMouseEvent& evt)
 
     if (m_isDragging)
     {
-        wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_DRAG_MOTION, m_windowId);
-        e.SetSelection(GetIdxFromWindow(m_clickTab));
-        e.SetOldSelection(e.GetSelection());
-        e.SetEventObject(this);
-        ProcessWindowEvent(e);
+        wxAuiTabEventSource::TabDragMotion(this, GetIdxFromWindow(m_clickTab));
         return;
     }
 
@@ -1310,11 +1625,22 @@ void wxAuiTabCtrl::OnMotion(wxMouseEvent& evt)
     if (abs(pos.x - m_clickPt.x) > drag_x_threshold ||
         abs(pos.y - m_clickPt.y) > drag_y_threshold)
     {
-        wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_BEGIN_DRAG, m_windowId);
-        e.SetSelection(GetIdxFromWindow(m_clickTab));
-        e.SetOldSelection(e.GetSelection());
-        e.SetEventObject(this);
-        ProcessWindowEvent(e);
+        const int idx = GetIdxFromWindow(m_clickTab);
+        if ( idx != wxNOT_FOUND )
+        {
+            switch ( GetPage(idx).kind )
+            {
+                case wxAuiTabKind::Normal:
+                case wxAuiTabKind::Pinned:
+                    break;
+
+                case wxAuiTabKind::Locked:
+                    // Don't allow dragging locked tabs.
+                    return;
+            }
+        }
+
+        wxAuiTabEventSource::TabBeginDrag(this, idx);
 
         m_isDragging = true;
     }
@@ -1322,21 +1648,60 @@ void wxAuiTabCtrl::OnMotion(wxMouseEvent& evt)
 
 void wxAuiTabCtrl::OnLeaveWindow(wxMouseEvent& WXUNUSED(event))
 {
-    if (m_hoverButton)
+    auto* const hoverButton = FindHoverButton();
+    if (hoverButton)
     {
-        m_hoverButton->curState = wxAUI_BUTTON_STATE_NORMAL;
-        m_hoverButton = nullptr;
-        Refresh();
-        Update();
+        ClearButtonState(*hoverButton, wxAUI_BUTTON_STATE_HOVER);
     }
 
     SetHoverTab(nullptr);
 }
 
-void wxAuiTabCtrl::OnButton(wxAuiNotebookEvent& event)
+wxAuiTabContainerButton*
+wxAuiTabCtrl::FindButtonIn(wxAuiPaneButtonState state) const
 {
-    int button = event.GetInt();
+    for ( const auto& button : m_buttons )
+    {
+        if ( button.curState & state )
+            return const_cast<wxAuiTabContainerButton*>(&button);
+    }
 
+    for ( const auto& page : m_pages )
+    {
+        for ( const auto& button : page.buttons )
+        {
+            if ( button.curState & state )
+                return const_cast<wxAuiTabContainerButton*>(&button);
+        }
+    }
+
+    return nullptr;
+}
+
+bool
+wxAuiTabCtrl::UpdateButtonStateAndRefresh(wxAuiTabContainerButton& button,
+                                          wxAuiPaneButtonState state,
+                                          bool on)
+{
+    int newState = button.curState;
+    if ( on )
+        newState |= state;
+    else
+        newState &= ~state;
+
+    if ( newState == button.curState )
+        return false;
+
+    button.curState = newState;
+
+    Refresh();
+    Update();
+
+    return true;
+}
+
+void wxAuiTabCtrl::OnButton(int tabIdx, int button)
+{
     if (button == wxAUI_BUTTON_LEFT || button == wxAUI_BUTTON_RIGHT)
     {
         if (button == wxAUI_BUTTON_LEFT)
@@ -1361,16 +1726,12 @@ void wxAuiTabCtrl::OnButton(wxAuiNotebookEvent& event)
 
         if (idx != -1)
         {
-            wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_PAGE_CHANGING, m_windowId);
-            e.SetSelection(idx);
-            e.SetOldSelection(GetActivePage());
-            e.SetEventObject(this);
-            ProcessWindowEvent(e);
+            wxAuiTabEventSource::TabClicked(this, idx);
         }
     }
     else
     {
-        event.Skip();
+        wxAuiTabEventSource::TabButton(this, tabIdx, button);
     }
 }
 
@@ -1504,50 +1865,61 @@ void wxAuiTabCtrl::OnChar(wxKeyEvent& event)
 
     if (newPage != -1)
     {
-        wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_PAGE_CHANGING, m_windowId);
-        e.SetSelection(newPage);
-        e.SetOldSelection(newPage);
-        e.SetEventObject(this);
-        this->ProcessWindowEvent(e);
+        wxAuiTabEventSource::TabClicked(this, newPage);
     }
     else
         event.Skip();
 }
 
-void wxAuiTabCtrl::OnDpiChanged(wxDPIChangedEvent& event)
+void wxAuiTabCtrl::OnDPIChanged(wxDPIChangedEvent& event)
 {
     m_art->UpdateDpi();
     event.Skip();
 }
 
-// wxTabFrame is an interesting case.  It's important that all child pages
+// wxAuiTabFrame is an interesting case.  It's important that all child pages
 // of the multi-notebook control are all actually children of that control
-// (and not grandchildren).  wxTabFrame facilitates this.  There is one
-// instance of wxTabFrame for each tab control inside the multi-notebook.
-// It's important to know that wxTabFrame is not a real window, but it merely
+// (and not grandchildren).  wxAuiTabFrame facilitates this.  There is one
+// instance of wxAuiTabFrame for each tab control inside the multi-notebook.
+// It's important to know that wxAuiTabFrame is not a real window, but it merely
 // used to capture the dimensions/positioning of the internal tab control and
 // it's managed page windows
 
-class wxTabFrame : public wxWindow
+class wxAuiTabFrame : public wxWindow
 {
 public:
 
-    wxTabFrame()
+    wxAuiTabFrame(wxAuiTabCtrl* tabs, const wxSize& size, int tabCtrlHeight) :
+        m_rect(size),
+        m_tabs(tabs),
+        m_tabCtrlHeight(tabCtrlHeight)
     {
-        m_tabs = nullptr;
-
-        // Both m_rect and m_tabCtrlHeight will be really initialized later.
-        m_tabCtrlHeight = 0;
     }
 
-    ~wxTabFrame()
+    ~wxAuiTabFrame()
     {
-        wxDELETE(m_tabs);
+        // use pending delete because sometimes during
+        // window closing, refreshes are pending
+        if (!wxPendingDelete.Member(m_tabs))
+            wxPendingDelete.Append(m_tabs);
     }
 
     void SetTabCtrlHeight(int h)
     {
         m_tabCtrlHeight = h;
+    }
+
+    // As we don't have a valid HWND, base class implementations of these
+    // functions don't work for this window, so override them to forward to the
+    // real window.
+    wxSize GetDPI() const override
+    {
+        return m_tabs->GetDPI();
+    }
+
+    wxLayoutDirection GetLayoutDirection() const override
+    {
+        return m_tabs->GetLayoutDirection();
     }
 
 protected:
@@ -1570,40 +1942,19 @@ public:
 
     void DoSizing()
     {
-        if (!m_tabs)
-            return;
-
         if (m_tabs->IsFrozen() || m_tabs->GetParent()->IsFrozen())
             return;
 
-        m_tab_rect = wxRect(m_rect.x, m_rect.y, m_rect.width, m_tabCtrlHeight);
-        if (m_tabs->GetFlags() & wxAUI_NB_BOTTOM)
-        {
-            m_tab_rect = wxRect (m_rect.x, m_rect.y + m_rect.height - m_tabCtrlHeight, m_rect.width, m_tabCtrlHeight);
-            m_tabs->SetSize     (m_rect.x, m_rect.y + m_rect.height - m_tabCtrlHeight, m_rect.width, m_tabCtrlHeight);
-            m_tabs->SetRect     (wxRect(0, 0, m_rect.width, m_tabCtrlHeight));
-        }
-        else //TODO: if (GetFlags() & wxAUI_NB_TOP)
-        {
-            m_tab_rect = wxRect (m_rect.x, m_rect.y, m_rect.width, m_tabCtrlHeight);
-            m_tabs->SetSize     (m_rect.x, m_rect.y, m_rect.width, m_tabCtrlHeight);
-            m_tabs->SetRect     (wxRect(0, 0,        m_rect.width, m_tabCtrlHeight));
-        }
-        // TODO: else if (GetFlags() & wxAUI_NB_LEFT){}
-        // TODO: else if (GetFlags() & wxAUI_NB_RIGHT){}
+        m_tabs->DoApplyRect(m_rect, m_tabCtrlHeight);
+        m_tab_rect = m_tabs->GetRect();
 
-        m_tabs->Refresh();
-        m_tabs->Update();
+        const wxAuiNotebookPageArray& pages = m_tabs->GetPages();
 
-        wxAuiNotebookPageArray& pages = m_tabs->GetPages();
-        size_t i, page_count = pages.GetCount();
-
-        for (i = 0; i < page_count; ++i)
+        for ( auto& page : pages )
         {
-            wxAuiNotebookPage& page = pages.Item(i);
             int border_space = m_tabs->GetArtProvider()->GetAdditionalBorderSpace(page.window);
 
-            int height = m_rect.height - m_tabCtrlHeight - border_space;
+            int height = m_rect.height - m_tab_rect.height - border_space;
             if ( height < 0 )
             {
                 // avoid passing negative height to wxWindow::SetSize(), this
@@ -1614,22 +1965,22 @@ public:
             if (width < 0)
                 width = 0;
 
-            if (m_tabs->GetFlags() & wxAUI_NB_BOTTOM)
+            if (m_tabs->IsFlagSet(wxAUI_NB_BOTTOM))
             {
                 page.window->SetSize(m_rect.x + border_space,
                                      m_rect.y + border_space,
                                      width,
                                      height);
             }
-            else //TODO: if (GetFlags() & wxAUI_NB_TOP)
+            else //TODO: if (IsFlagSet(wxAUI_NB_TOP))
             {
                 page.window->SetSize(m_rect.x + border_space,
-                                     m_rect.y + m_tabCtrlHeight,
+                                     m_rect.y + m_tab_rect.height,
                                      width,
                                      height);
             }
-            // TODO: else if (GetFlags() & wxAUI_NB_LEFT){}
-            // TODO: else if (GetFlags() & wxAUI_NB_RIGHT){}
+            // TODO: else if (IsFlagSet(wxAUI_NB_LEFT)){}
+            // TODO: else if (IsFlagSet(wxAUI_NB_RIGHT)){}
         }
     }
 
@@ -1650,8 +2001,8 @@ public:
 
     wxRect m_rect;
     wxRect m_tab_rect;
-    wxAuiTabCtrl* m_tabs;
-    int m_tabCtrlHeight;
+    wxAuiTabCtrl* const m_tabs;
+    int m_tabCtrlHeight = 0;
 };
 
 
@@ -1660,49 +2011,44 @@ const int wxAuiBaseTabCtrlId = 5380;
 
 // -- wxAuiNotebook class implementation --
 
-#define EVT_AUI_RANGE(id1, id2, event, func) \
-    wx__DECLARE_EVT2(event, id1, id2, wxAuiNotebookEventHandler(func))
+// More convenient version of FindTab(): returns all the results instead of
+// requiring output parameters for returning some of them.
+//
+// Note that TabInfo returned by FindTab() is normally always valid.
+struct wxAuiNotebook::TabInfo : wxAuiNotebookPosition
+{
+    TabInfo() = default;
+
+    TabInfo(wxAuiTabCtrl* tabCtrl_, int tabIdx_, wxAuiNotebookPage* info)
+        : wxAuiNotebookPosition{tabCtrl_, tabIdx_}, pageInfo(info)
+    {
+    }
+
+    // Information about the page or nullptr if not found.
+    wxAuiNotebookPage* pageInfo = nullptr;
+};
 
 wxBEGIN_EVENT_TABLE(wxAuiNotebook, wxBookCtrlBase)
     EVT_SIZE(wxAuiNotebook::OnSize)
     EVT_CHILD_FOCUS(wxAuiNotebook::OnChildFocusNotebook)
-    EVT_AUI_RANGE(wxAuiBaseTabCtrlId, wxAuiBaseTabCtrlId+500,
-                      wxEVT_AUINOTEBOOK_PAGE_CHANGING,
-                      wxAuiNotebook::OnTabClicked)
-    EVT_AUI_RANGE(wxAuiBaseTabCtrlId, wxAuiBaseTabCtrlId+500,
-                      wxEVT_AUINOTEBOOK_BEGIN_DRAG,
-                      wxAuiNotebook::OnTabBeginDrag)
-    EVT_AUI_RANGE(wxAuiBaseTabCtrlId, wxAuiBaseTabCtrlId+500,
-                      wxEVT_AUINOTEBOOK_END_DRAG,
-                      wxAuiNotebook::OnTabEndDrag)
-    EVT_AUI_RANGE(wxAuiBaseTabCtrlId, wxAuiBaseTabCtrlId+500,
-                      wxEVT_AUINOTEBOOK_CANCEL_DRAG,
-                      wxAuiNotebook::OnTabCancelDrag)
-    EVT_AUI_RANGE(wxAuiBaseTabCtrlId, wxAuiBaseTabCtrlId+500,
-                      wxEVT_AUINOTEBOOK_DRAG_MOTION,
-                      wxAuiNotebook::OnTabDragMotion)
-    EVT_AUI_RANGE(wxAuiBaseTabCtrlId, wxAuiBaseTabCtrlId+500,
-                      wxEVT_AUINOTEBOOK_BUTTON,
-                      wxAuiNotebook::OnTabButton)
-    EVT_AUI_RANGE(wxAuiBaseTabCtrlId, wxAuiBaseTabCtrlId+500,
-                      wxEVT_AUINOTEBOOK_TAB_MIDDLE_DOWN,
-                      wxAuiNotebook::OnTabMiddleDown)
-    EVT_AUI_RANGE(wxAuiBaseTabCtrlId, wxAuiBaseTabCtrlId+500,
-                      wxEVT_AUINOTEBOOK_TAB_MIDDLE_UP,
-                      wxAuiNotebook::OnTabMiddleUp)
-    EVT_AUI_RANGE(wxAuiBaseTabCtrlId, wxAuiBaseTabCtrlId+500,
-                      wxEVT_AUINOTEBOOK_TAB_RIGHT_DOWN,
-                      wxAuiNotebook::OnTabRightDown)
-    EVT_AUI_RANGE(wxAuiBaseTabCtrlId, wxAuiBaseTabCtrlId+500,
-                      wxEVT_AUINOTEBOOK_TAB_RIGHT_UP,
-                      wxAuiNotebook::OnTabRightUp)
-    EVT_AUI_RANGE(wxAuiBaseTabCtrlId, wxAuiBaseTabCtrlId+500,
-                      wxEVT_AUINOTEBOOK_BG_DCLICK,
-                      wxAuiNotebook::OnTabBgDClick)
     EVT_NAVIGATION_KEY(wxAuiNotebook::OnNavigationKeyNotebook)
     EVT_SYS_COLOUR_CHANGED(wxAuiNotebook::OnSysColourChanged)
-    EVT_DPI_CHANGED(wxAuiNotebook::OnDpiChanged)
+    EVT_DPI_CHANGED(wxAuiNotebook::OnDPIChanged)
 wxEND_EVENT_TABLE()
+
+namespace
+{
+
+// wxAuiNotebook always adds a special dummy pane with this name.
+constexpr const char* const DUMMY_PANE_NAME = "dummy";
+
+// Check if this is a dummy pane.
+bool IsDummyPane(const wxAuiPaneInfo& pane)
+{
+    return pane.name == DUMMY_PANE_NAME;
+}
+
+} // anonymous namespace
 
 void wxAuiNotebook::OnSysColourChanged(wxSysColourChangedEvent &event)
 {
@@ -1710,14 +2056,11 @@ void wxAuiNotebook::OnSysColourChanged(wxSysColourChangedEvent &event)
     wxAuiTabArt* art = m_tabs.GetArtProvider();
     art->UpdateColoursFromSystem();
 
-    wxAuiPaneInfoArray& all_panes = m_mgr.GetAllPanes();
-    size_t i, pane_count = all_panes.GetCount();
-    for (i = 0; i < pane_count; ++i)
+    for ( const auto& pane : m_mgr.GetAllPanes() )
     {
-        wxAuiPaneInfo& pane = all_panes.Item(i);
-        if (pane.name == wxT("dummy"))
+        if ( IsDummyPane(pane) )
             continue;
-        wxTabFrame* tab_frame = (wxTabFrame*)pane.window;
+        wxAuiTabFrame* tab_frame = (wxAuiTabFrame*)pane.window;
         wxAuiTabCtrl* tabctrl = tab_frame->m_tabs;
         tabctrl->GetArtProvider()->UpdateColoursFromSystem();
         tabctrl->Refresh();
@@ -1725,7 +2068,7 @@ void wxAuiNotebook::OnSysColourChanged(wxSysColourChangedEvent &event)
     Refresh();
 }
 
-void wxAuiNotebook::OnDpiChanged(wxDPIChangedEvent& event)
+void wxAuiNotebook::OnDPIChanged(wxDPIChangedEvent& event)
 {
     UpdateTabCtrlHeight();
     event.Skip();
@@ -1733,7 +2076,7 @@ void wxAuiNotebook::OnDpiChanged(wxDPIChangedEvent& event)
 
 void wxAuiNotebook::Init()
 {
-    m_curPage = -1;
+    m_curPage = wxNOT_FOUND;
     m_tabIdCounter = wxAuiBaseTabCtrlId;
     m_dummyWnd = nullptr;
     m_requestedBmpSize = wxDefaultSize;
@@ -1759,7 +2102,7 @@ bool wxAuiNotebook::Create(wxWindow* parent,
 void wxAuiNotebook::InitNotebook(long style)
 {
     SetName(wxT("wxAuiNotebook"));
-    m_curPage = -1;
+    m_curPage = wxNOT_FOUND;
     m_tabIdCounter = wxAuiBaseTabCtrlId;
     m_dummyWnd = nullptr;
     m_flags = (unsigned int)style;
@@ -1780,9 +2123,18 @@ void wxAuiNotebook::InitNotebook(long style)
     m_mgr.SetDockSizeConstraint(1.0, 1.0); // no dock size constraint
 
     m_mgr.AddPane(m_dummyWnd,
-              wxAuiPaneInfo().Name(wxT("dummy")).Bottom().CaptionVisible(false).Show(false));
+              wxAuiPaneInfo().Name(DUMMY_PANE_NAME).Bottom().CaptionVisible(false).Show(false));
 
     m_mgr.Update();
+}
+
+wxAuiTabFrame* wxAuiNotebook::CreateTabFrame(wxSize size)
+{
+    auto* const tabs = new wxAuiTabCtrl(this, m_tabIdCounter++);
+    tabs->SetFlags(m_flags);
+    tabs->SetArtProvider(m_tabs.GetArtProvider()->Clone());
+
+    return new wxAuiTabFrame(tabs, size, m_tabCtrlHeight);
 }
 
 wxAuiNotebook::~wxAuiNotebook()
@@ -1815,14 +2167,11 @@ void wxAuiNotebook::SetArtProvider(wxAuiTabArt* art)
     // need to manually set the art provider for all tabs ourselves.
     if ( !UpdateTabCtrlHeight() )
     {
-        wxAuiPaneInfoArray& all_panes = m_mgr.GetAllPanes();
-        const size_t pane_count = all_panes.GetCount();
-        for (size_t i = 0; i < pane_count; ++i)
+        for ( const auto& pane : m_mgr.GetAllPanes() )
         {
-            wxAuiPaneInfo& pane = all_panes.Item(i);
-            if (pane.name == wxT("dummy"))
+            if ( IsDummyPane(pane) )
                 continue;
-            wxTabFrame* tab_frame = (wxTabFrame*)pane.window;
+            wxAuiTabFrame* tab_frame = (wxAuiTabFrame*)pane.window;
             wxAuiTabCtrl* tabctrl = tab_frame->m_tabs;
             tabctrl->SetArtProvider(art->Clone());
         }
@@ -1882,14 +2231,11 @@ bool wxAuiNotebook::UpdateTabCtrlHeight()
 
     m_tabCtrlHeight = height;
 
-    wxAuiPaneInfoArray& all_panes = m_mgr.GetAllPanes();
-    size_t i, pane_count = all_panes.GetCount();
-    for (i = 0; i < pane_count; ++i)
+    for ( const auto& pane : m_mgr.GetAllPanes() )
     {
-        wxAuiPaneInfo& pane = all_panes.Item(i);
-        if (pane.name == wxT("dummy"))
+        if ( IsDummyPane(pane) )
             continue;
-        wxTabFrame* tab_frame = (wxTabFrame*)pane.window;
+        wxAuiTabFrame* tab_frame = (wxAuiTabFrame*)pane.window;
         wxAuiTabCtrl* tabctrl = tab_frame->m_tabs;
         tab_frame->SetTabCtrlHeight(m_tabCtrlHeight);
         tabctrl->SetArtProvider(art->Clone());
@@ -1904,7 +2250,7 @@ void wxAuiNotebook::UpdateHintWindowSize()
     wxSize size = CalculateNewSplitSize();
 
     // the placeholder hint window should be set to this size
-    wxAuiPaneInfo& info = m_mgr.GetPane(wxT("dummy"));
+    wxAuiPaneInfo& info = m_mgr.GetPane(DUMMY_PANE_NAME);
     if (info.IsOk())
     {
         info.MinSize(size);
@@ -1917,36 +2263,7 @@ void wxAuiNotebook::UpdateHintWindowSize()
 // calculates the size of the new split
 wxSize wxAuiNotebook::CalculateNewSplitSize()
 {
-    // count number of tab controls
-    int tab_ctrl_count = 0;
-    wxAuiPaneInfoArray& all_panes = m_mgr.GetAllPanes();
-    size_t i, pane_count = all_panes.GetCount();
-    for (i = 0; i < pane_count; ++i)
-    {
-        wxAuiPaneInfo& pane = all_panes.Item(i);
-        if (pane.name == wxT("dummy"))
-            continue;
-        tab_ctrl_count++;
-    }
-
-    wxSize new_split_size;
-
-    // if there is only one tab control, the first split
-    // should happen around the middle
-    if (tab_ctrl_count < 2)
-    {
-        new_split_size = GetClientSize();
-        new_split_size.x /= 2;
-        new_split_size.y /= 2;
-    }
-    else
-    {
-        // this is in place of a more complicated calculation
-        // that needs to be implemented
-        new_split_size = FromDIP(wxSize(180,180));
-    }
-
-    return new_split_size;
+    return m_mgr.CalculateNewSplitSize();
 }
 
 int wxAuiNotebook::CalculateTabCtrlHeight()
@@ -1981,15 +2298,11 @@ void wxAuiNotebook::SetWindowStyleFlag(long style)
     if (m_mgr.GetManagedWindow() == (wxWindow*)this)
     {
         // let all of the tab children know about the new style
-
-        wxAuiPaneInfoArray& all_panes = m_mgr.GetAllPanes();
-        size_t i, pane_count = all_panes.GetCount();
-        for (i = 0; i < pane_count; ++i)
+        for ( const auto& pane : m_mgr.GetAllPanes() )
         {
-            wxAuiPaneInfo& pane = all_panes.Item(i);
-            if (pane.name == wxT("dummy"))
+            if ( IsDummyPane(pane) )
                 continue;
-            wxTabFrame* tabframe = (wxTabFrame*)pane.window;
+            wxAuiTabFrame* tabframe = (wxAuiTabFrame*)pane.window;
             wxAuiTabCtrl* tabctrl = tabframe->m_tabs;
             tabctrl->SetFlags(m_flags);
             tabframe->DoSizing();
@@ -2014,11 +2327,13 @@ bool wxAuiNotebook::InsertPage(size_t page_idx,
                                bool select,
                                const wxBitmapBundle& bitmap)
 {
-    wxASSERT_MSG(page, wxT("page pointer must be non-null"));
-    if (!page)
-        return false;
+    // Note that index may be equal to GetPageCount() here to append the page.
+    wxCHECK_MSG(page_idx <= GetPageCount(), false, wxT("invalid page index"));
 
-    page->Reparent(this);
+    wxCHECK_MSG(page, false, wxT("page pointer must be non-null"));
+
+    wxCHECK_MSG(page->GetParent() == this, false,
+                wxT("page must be a child of the notebook"));
 
     wxAuiNotebookPage info;
     info.window = page;
@@ -2026,32 +2341,58 @@ bool wxAuiNotebook::InsertPage(size_t page_idx,
     info.bitmap = bitmap;
     info.active = false;
 
-    // if there are currently no tabs, the first added
-    // tab must be active
-    if (m_tabs.GetPageCount() == 0)
-        info.active = true;
-
-    m_tabs.InsertPage(page, info, page_idx);
-
-    // if that was the first page added, even if
-    // select is false, it must become the "current page"
-    // (though no select events will be fired)
-    if (!select && m_tabs.GetPageCount() == 1)
-        select = true;
-        //m_curPage = GetPageIndex(page);
-
     wxAuiTabCtrl* active_tabctrl = GetActiveTabCtrl();
-    if (page_idx >= active_tabctrl->GetPageCount())
-        active_tabctrl->AddPage(page, info);
-    else
-        active_tabctrl->InsertPage(page, info, page_idx);
+
+    // The usual case is appending a new page, when we can just add it page at
+    // the end of the currently active tab control.
+    int tab_page_idx = -1;
+
+    // But when inserting, we may need to do it at a different place.
+    if ( page_idx != m_tabs.GetPageCount() )
+    {
+        const auto tabInfo = FindTab(m_tabs.GetWindowFromIdx(page_idx));
+        if ( tabInfo.tabCtrl == active_tabctrl )
+        {
+            // Use this index for insertion, as it's in the correct control.
+            tab_page_idx = tabInfo.tabIdx;
+        }
+        //else: Do nothing, we'll append it to the active tab control.
+    }
+
+    InsertPageAt(info, page_idx, active_tabctrl, tab_page_idx, select);
+
+    return true;
+}
+
+void wxAuiNotebook::InsertPageAt(wxAuiNotebookPage& info,
+                                 size_t page_idx,
+                                 wxAuiTabCtrl* tabctrl,
+                                 int tab_page_idx,
+                                 bool select)
+{
+    wxWindow* const page = info.window;
+
+    page->Reparent(this);
+
+    // if there are currently no tabs, the first added
+    // tab must be selected, even if "select" is false
+    if (m_tabs.GetPageCount() == 0)
+    {
+        select = true;
+    }
+
+    m_tabs.InsertPage(info, page_idx);
+
+    if ( tab_page_idx == -1 )
+        tab_page_idx = tabctrl->GetPageCount();
+    tabctrl->InsertPage(info, tab_page_idx);
 
     // Note that we don't need to call DoSizing() if the height has changed, as
     // it's already called from UpdateTabCtrlHeight() itself in this case.
     if ( !UpdateTabCtrlHeight() )
         DoSizing();
 
-    active_tabctrl->DoShowHide();
+    tabctrl->DoShowHide();
 
     // adjust selected index
     if(m_curPage >= (int) page_idx)
@@ -2061,53 +2402,34 @@ bool wxAuiNotebook::InsertPage(size_t page_idx,
     {
         SetSelectionToWindow(page);
     }
-
-    return true;
 }
 
-
-// DeletePage() removes a tab from the multi-notebook,
-// and destroys the window as well
-bool wxAuiNotebook::DeletePage(size_t page_idx)
+int wxAuiNotebook::GetNextPage(bool forward) const
 {
-    if (page_idx >= m_tabs.GetPageCount())
-        return false;
+    if ( m_curPage == wxNOT_FOUND )
+        return wxNOT_FOUND;
 
-    wxWindow* wnd = m_tabs.GetWindowFromIdx(page_idx);
+    const auto tabInfo = FindTab(m_tabs.GetWindowFromIdx(m_curPage));
+    if ( !tabInfo )
+        return wxNOT_FOUND;
 
-    // hide the window in advance, as this will
-    // prevent flicker
-    ShowWnd(wnd, false);
+    // Find the next or previous position in the active tab control, with
+    // wraparound.
+    const int lastPos = tabInfo.tabCtrl->GetPageCount() - 1;
+    const int nextPos = forward
+        ? tabInfo.tabIdx < lastPos ? tabInfo.tabIdx + 1 : 0
+        : tabInfo.tabIdx > 0 ? tabInfo.tabIdx - 1 : lastPos;
 
-    if (!RemovePage(page_idx))
-        return false;
-
-#if wxUSE_MDI
-    // actually destroy the window now
-    if (wxDynamicCast(wnd, wxAuiMDIChildFrame))
-    {
-        // delete the child frame with pending delete, as is
-        // customary with frame windows
-        if (!wxPendingDelete.Member(wnd))
-            wxPendingDelete.Append(wnd);
-    }
-    else
-#endif
-    {
-        wnd->Destroy();
-    }
-
-    return true;
+    // Now find the corresponding page index.
+    return m_tabs.GetIdxFromWindow(tabInfo.tabCtrl->GetWindowFromIdx(nextPos));
 }
 
-
-
-// RemovePage() removes a tab from the multi-notebook,
-// but does not destroy the window
-bool wxAuiNotebook::RemovePage(size_t page_idx)
+wxWindow* wxAuiNotebook::DoRemovePage(size_t page_idx)
 {
+    wxCHECK_MSG(page_idx < GetPageCount(), nullptr, "invalid page index");
+
     // Lock the window for changes to avoid flicker when
-    // removing the active page (there is a noticeable 
+    // removing the active page (there is a noticeable
     // flicker from the active tab is closed and until a
     // new one is selected) - this is noticeable on MSW
     wxWindowUpdateLocker locker { this };
@@ -2121,28 +2443,25 @@ bool wxAuiNotebook::RemovePage(size_t page_idx)
     wxWindow* wnd = m_tabs.GetWindowFromIdx(page_idx);
     wxWindow* new_active = nullptr;
 
-    // make sure we found the page
-    if (!wnd)
-        return false;
-
     ShowWnd(wnd, false);
 
     // find out which onscreen tab ctrl owns this tab
-    wxAuiTabCtrl* ctrl;
-    int ctrl_idx;
-    if (!FindTab(wnd, &ctrl, &ctrl_idx))
-        return false;
+    const auto tabInfo = FindTab(wnd);
+    if ( !tabInfo )
+        return nullptr;
+
+    wxAuiTabCtrl* const ctrl = tabInfo.tabCtrl;
+    int ctrl_idx = tabInfo.tabIdx;
 
     bool is_curpage = (m_curPage == (int)page_idx);
     bool is_active_in_split = ctrl->GetPage(ctrl_idx).active;
 
 
     // remove the tab from main catalog
-    if (!m_tabs.RemovePage(wnd))
-        return false;
+    m_tabs.RemovePageAt(page_idx);
 
     // remove the tab from the onscreen tab ctrl
-    ctrl->RemovePage(wnd);
+    ctrl->RemovePageAt(ctrl_idx);
 
     if (is_active_in_split)
     {
@@ -2207,7 +2526,7 @@ bool wxAuiNotebook::RemovePage(size_t page_idx)
     if (new_active && !m_isBeingDeleted)
         SetSelectionToWindow(new_active);
 
-    return true;
+    return wnd;
 }
 
 int wxAuiNotebook::FindPage(const wxWindow* page) const
@@ -2219,22 +2538,18 @@ int wxAuiNotebook::FindPage(const wxWindow* page) const
 // SetPageText() changes the tab caption of the specified page
 bool wxAuiNotebook::SetPageText(size_t page_idx, const wxString& text)
 {
-    if (page_idx >= m_tabs.GetPageCount())
-        return false;
+    wxCHECK_MSG(page_idx < GetPageCount(), false, "invalid page index");
 
     // update our own tab catalog
     wxAuiNotebookPage& page_info = m_tabs.GetPage(page_idx);
     page_info.caption = text;
 
     // update what's on screen
-    wxAuiTabCtrl* ctrl;
-    int ctrl_idx;
-    if (FindTab(page_info.window, &ctrl, &ctrl_idx))
+    if ( const auto tabInfo = FindTab(page_info.window) )
     {
-        wxAuiNotebookPage& info = ctrl->GetPage(ctrl_idx);
-        info.caption = text;
-        ctrl->Refresh();
-        ctrl->Update();
+        tabInfo.pageInfo->caption = text;
+        tabInfo.tabCtrl->Refresh();
+        tabInfo.tabCtrl->Update();
     }
 
     return true;
@@ -2243,8 +2558,7 @@ bool wxAuiNotebook::SetPageText(size_t page_idx, const wxString& text)
 // returns the page caption
 wxString wxAuiNotebook::GetPageText(size_t page_idx) const
 {
-    if (page_idx >= m_tabs.GetPageCount())
-        return wxEmptyString;
+    wxCHECK_MSG(page_idx < GetPageCount(), wxString(), "invalid page index");
 
     // update our own tab catalog
     const wxAuiNotebookPage& page_info = m_tabs.GetPage(page_idx);
@@ -2253,20 +2567,17 @@ wxString wxAuiNotebook::GetPageText(size_t page_idx) const
 
 bool wxAuiNotebook::SetPageToolTip(size_t page_idx, const wxString& text)
 {
-    if (page_idx >= m_tabs.GetPageCount())
-        return false;
+    wxCHECK_MSG(page_idx < GetPageCount(), false, "invalid page index");
 
     // update our own tab catalog
     wxAuiNotebookPage& page_info = m_tabs.GetPage(page_idx);
     page_info.tooltip = text;
 
-    wxAuiTabCtrl* ctrl;
-    int ctrl_idx;
-    if (!FindTab(page_info.window, &ctrl, &ctrl_idx))
+    const auto tabInfo = FindTab(page_info.window);
+    if ( !tabInfo )
         return false;
 
-    wxAuiNotebookPage& info = ctrl->GetPage(ctrl_idx);
-    info.tooltip = text;
+    tabInfo.pageInfo->tooltip = text;
 
     // NB: we don't update the tooltip if it is already being displayed, it
     //     typically never happens, no need to code that
@@ -2275,8 +2586,7 @@ bool wxAuiNotebook::SetPageToolTip(size_t page_idx, const wxString& text)
 
 wxString wxAuiNotebook::GetPageToolTip(size_t page_idx) const
 {
-    if (page_idx >= m_tabs.GetPageCount())
-        return wxString();
+    wxCHECK_MSG(page_idx < GetPageCount(), wxString(), "invalid page index");
 
     const wxAuiNotebookPage& page_info = m_tabs.GetPage(page_idx);
     return page_info.tooltip;
@@ -2284,8 +2594,7 @@ wxString wxAuiNotebook::GetPageToolTip(size_t page_idx) const
 
 bool wxAuiNotebook::SetPageBitmap(size_t page_idx, const wxBitmapBundle& bitmap)
 {
-    if (page_idx >= m_tabs.GetPageCount())
-        return false;
+    wxCHECK_MSG(page_idx < GetPageCount(), false, "invalid page index");
 
     // update our own tab catalog
     wxAuiNotebookPage& page_info = m_tabs.GetPage(page_idx);
@@ -2295,15 +2604,13 @@ bool wxAuiNotebook::SetPageBitmap(size_t page_idx, const wxBitmapBundle& bitmap)
     UpdateTabCtrlHeight();
 
     // update what's on screen
-    wxAuiTabCtrl* ctrl;
-    int ctrl_idx;
-    if (FindTab(page_info.window, &ctrl, &ctrl_idx))
-    {
-        wxAuiNotebookPage& info = ctrl->GetPage(ctrl_idx);
-        info.bitmap = bitmap;
-        ctrl->Refresh();
-        ctrl->Update();
-    }
+    const auto tabInfo = FindTab(page_info.window);
+    if ( !tabInfo )
+        return false;
+
+    tabInfo.pageInfo->bitmap = bitmap;
+    tabInfo.tabCtrl->Refresh();
+    tabInfo.tabCtrl->Update();
 
     return true;
 }
@@ -2311,12 +2618,96 @@ bool wxAuiNotebook::SetPageBitmap(size_t page_idx, const wxBitmapBundle& bitmap)
 // returns the page bitmap
 wxBitmap wxAuiNotebook::GetPageBitmap(size_t page_idx) const
 {
-    if (page_idx >= m_tabs.GetPageCount())
-        return wxBitmap();
+    wxCHECK_MSG(page_idx < GetPageCount(), wxBitmap(), "invalid page index");
 
     // update our own tab catalog
     const wxAuiNotebookPage& page_info = m_tabs.GetPage(page_idx);
     return page_info.bitmap.GetBitmap(page_info.bitmap.GetDefaultSize());
+}
+
+wxAuiTabKind wxAuiNotebook::GetPageKind(size_t page_idx) const
+{
+    wxCHECK_MSG(page_idx < GetPageCount(), wxAuiTabKind::Normal, "invalid page index");
+
+    return m_tabs.GetPage(page_idx).kind;
+}
+
+bool wxAuiNotebook::SetPageKind(size_t page_idx, wxAuiTabKind kind)
+{
+    wxCHECK_MSG(page_idx < GetPageCount(), false, "invalid page index");
+
+    wxAuiNotebookPage& page_info = m_tabs.GetPage(page_idx);
+    if ( page_info.kind == kind )
+        return false;
+
+    const auto tabInfo = FindTab(page_info.window);
+    if ( !tabInfo )
+        return false;
+
+    auto& tabCtrl = *tabInfo.tabCtrl;
+
+    // Update the tab position as changing its kind moves it: if it becomes
+    // locked/pinned, it needs to be moved to the end of the group of the tabs
+    // of this kind and if it becomes normal, it needs to be moved to the
+    // beginning of the normal tabs (and not the end, to minimize the distance
+    // by which it moves).
+    size_t newIdx = 0;
+    switch ( kind )
+    {
+        case wxAuiTabKind::Normal:
+            newIdx = tabCtrl.GetFirstTabOfKind(wxAuiTabKind::Normal);
+
+            // There must be at least the locked/pinned tab which is changing
+            // its kind now before the first normal one.
+            wxASSERT( newIdx > 0 );
+
+            // Move it before the first normal tab or before the end.
+            newIdx--;
+            break;
+
+        case wxAuiTabKind::Pinned:
+            // When a normal tab becomes pinned, it should be moved to the end
+            // of the pinned tabs, but when a locked tab becomes pinned, it
+            // makes more sense to put it at the beginning of this group, for
+            // symmetry with what happens when a pinned tab becomes normal.
+            switch ( tabInfo.pageInfo->kind )
+            {
+                case wxAuiTabKind::Normal:
+                    newIdx = tabCtrl.GetFirstTabOfKind(wxAuiTabKind::Normal);
+                    break;
+
+                case wxAuiTabKind::Pinned:
+                    // This tab is switching to pinned state, so it couldn't
+                    // have already been pinned before.
+                    wxFAIL_MSG("unreachable");
+                    break;
+
+                case wxAuiTabKind::Locked:
+                    newIdx = tabCtrl.GetFirstTabNotOfKind(wxAuiTabKind::Locked);
+
+                    // There must be at least one locked tab, which is
+                    // switching to pinned state right now.
+                    wxASSERT( newIdx > 0 );
+
+                    newIdx--;
+                    break;
+            }
+            break;
+
+        case wxAuiTabKind::Locked:
+            newIdx = tabCtrl.GetFirstTabNotOfKind(wxAuiTabKind::Locked);
+            break;
+    }
+
+    page_info.kind = kind;
+
+    // And also update kind in this copy of the page info before moving it.
+    tabInfo.pageInfo->kind = kind;
+
+    tabCtrl.MovePage(tabInfo.tabIdx, newIdx);
+    tabCtrl.Refresh();
+
+    return true;
 }
 
 // GetSelection() returns the index of the currently active page
@@ -2373,14 +2764,12 @@ wxWindow* wxAuiNotebook::GetPage(size_t page_idx) const
 // DoSizing() performs all sizing operations in each tab control
 void wxAuiNotebook::DoSizing()
 {
-    wxAuiPaneInfoArray& all_panes = m_mgr.GetAllPanes();
-    size_t i, pane_count = all_panes.GetCount();
-    for (i = 0; i < pane_count; ++i)
+    for ( const auto& pane : m_mgr.GetAllPanes() )
     {
-        if (all_panes.Item(i).name == wxT("dummy"))
+        if ( IsDummyPane(pane) )
             continue;
 
-        wxTabFrame* tabframe = (wxTabFrame*)all_panes.Item(i).window;
+        wxAuiTabFrame* tabframe = (wxAuiTabFrame*)pane.window;
         tabframe->DoSizing();
     }
 }
@@ -2391,77 +2780,158 @@ wxAuiTabCtrl* wxAuiNotebook::GetActiveTabCtrl()
 {
     if (m_curPage >= 0 && m_curPage < (int)m_tabs.GetPageCount())
     {
-        wxAuiTabCtrl* ctrl;
-        int idx;
-
         // find the tab ctrl with the current page
-        if (FindTab(m_tabs.GetPage(m_curPage).window,
-                    &ctrl, &idx))
-        {
-            return ctrl;
-        }
+        return FindTab(m_tabs.GetPage(m_curPage).window).tabCtrl;
     }
 
-    // no current page, just find the first tab ctrl
-    wxAuiPaneInfoArray& all_panes = m_mgr.GetAllPanes();
-    size_t i, pane_count = all_panes.GetCount();
-    for (i = 0; i < pane_count; ++i)
-    {
-        if (all_panes.Item(i).name == wxT("dummy"))
-            continue;
-
-        wxTabFrame* tabframe = (wxTabFrame*)all_panes.Item(i).window;
-        return tabframe->m_tabs;
-    }
-
-    // If there is no tabframe at all, create one
-    wxTabFrame* tabframe = new wxTabFrame;
-    tabframe->SetTabCtrlHeight(m_tabCtrlHeight);
-    tabframe->m_tabs = new wxAuiTabCtrl(this,
-                                        m_tabIdCounter++,
-                                        wxDefaultPosition,
-                                        wxDefaultSize,
-                                        wxNO_BORDER|wxWANTS_CHARS);
-    tabframe->m_tabs->SetFlags(m_flags);
-    tabframe->m_tabs->SetArtProvider(m_tabs.GetArtProvider()->Clone());
-    m_mgr.AddPane(tabframe,
-                  wxAuiPaneInfo().Center().CaptionVisible(false));
-
-    m_mgr.Update();
-
-    return tabframe->m_tabs;
+    // no current page, just return the main tab control
+    return GetMainTabCtrl();
 }
 
-// FindTab() finds the tab control that currently contains the window as well
-// as the index of the window in the tab control.  It returns true if the
-// window was found, otherwise false.
-bool wxAuiNotebook::FindTab(wxWindow* page, wxAuiTabCtrl** ctrl, int* idx)
+wxAuiTabCtrl* wxAuiNotebook::GetMainTabCtrl()
 {
-    wxAuiPaneInfoArray& all_panes = m_mgr.GetAllPanes();
-    size_t i, pane_count = all_panes.GetCount();
-    for (i = 0; i < pane_count; ++i)
+    wxAuiTabCtrl* tabMain = nullptr;
+    for ( const auto& pane : m_mgr.GetAllPanes() )
     {
-        if (all_panes.Item(i).name == wxT("dummy"))
+        if ( IsDummyPane(pane) )
             continue;
 
-        wxTabFrame* tabframe = (wxTabFrame*)all_panes.Item(i).window;
-
-        int page_idx = tabframe->m_tabs->GetIdxFromWindow(page);
-        if (page_idx != -1)
+        if ( pane.dock_direction == wxAUI_DOCK_CENTER )
         {
-            *ctrl = tabframe->m_tabs;
-            *idx = page_idx;
-            return true;
+            wxASSERT_MSG( !tabMain, "Multiple main tab controls?" );
+
+            tabMain = static_cast<wxAuiTabFrame*>(pane.window)->m_tabs;
         }
     }
 
-    return false;
+    if ( !tabMain )
+    {
+        wxAuiTabFrame* tabframe = CreateTabFrame();
+        m_mgr.AddPane(tabframe,
+                      wxAuiPaneInfo().Center().CaptionVisible(false));
+        m_mgr.Update();
+
+        tabMain = tabframe->m_tabs;
+    }
+
+    return tabMain;
+}
+
+std::vector<wxAuiTabCtrl*> wxAuiNotebook::GetAllTabCtrls()
+{
+    std::vector<wxAuiTabCtrl*> tabCtrls;
+    for ( const auto& pane : m_mgr.GetAllPanes() )
+    {
+        if ( IsDummyPane(pane) )
+            continue;
+
+        wxAuiTabFrame* tabframe = (wxAuiTabFrame*)pane.window;
+        tabCtrls.push_back(tabframe->m_tabs);
+    }
+
+    if ( tabCtrls.empty() )
+    {
+        tabCtrls.push_back(GetMainTabCtrl());
+    }
+
+    return tabCtrls;
+}
+
+wxAuiNotebook::TabInfo wxAuiNotebook::FindTab(wxWindow* wnd) const
+{
+    for ( const auto& pane : m_mgr.GetAllPanes() )
+    {
+        if ( IsDummyPane(pane) )
+            continue;
+
+        wxAuiTabFrame* tabframe = (wxAuiTabFrame*)pane.window;
+        wxAuiTabCtrl* const tabCtrl = tabframe->m_tabs;
+
+        const size_t page_count = tabCtrl->GetPageCount();
+        for ( size_t i = 0; i < page_count; ++i )
+        {
+            wxAuiNotebookPage& page = tabCtrl->GetPage(i);
+            if ( page.window == wnd )
+                return { tabCtrl, static_cast<int>(i), &page };
+        }
+    }
+
+    wxFAIL_MSG( "Window unexpectedly not found in any tab control" );
+
+    return {};
+}
+
+// This overload is deprecated and kept only for compatibility.
+bool wxAuiNotebook::FindTab(wxWindow* page, wxAuiTabCtrl** ctrl, int* idx) const
+{
+    const auto tabInfo = FindTab(page);
+    if ( !tabInfo )
+        return false;
+
+    *ctrl = tabInfo.tabCtrl;
+    *idx = tabInfo.tabIdx;
+
+    return true;
+}
+
+int
+wxAuiNotebook::GetDropIndex(const wxAuiNotebookPage& page_info,
+                            wxAuiTabCtrl* dest_tabs,
+                            const wxPoint& mouse_screen_pt) const
+{
+    int insert_idx = -1;
+
+    wxPoint pt = dest_tabs->ScreenToClient(mouse_screen_pt);
+    if (auto const targetInfo = dest_tabs->TabHitTest(pt))
+    {
+        insert_idx = targetInfo.pos;
+
+        // Check that we don't try to insert a tab between tabs of
+        // inappropriate kind, kinds must always remain in a (non-strict)
+        // decreasing order.
+        if ( insert_idx > 0 )
+        {
+            if ( dest_tabs->GetPage(insert_idx - 1).kind < page_info.kind )
+                return wxNOT_FOUND;
+        }
+
+        if ( page_info.kind < dest_tabs->GetPage(insert_idx).kind )
+            return wxNOT_FOUND;
+    }
+    else // Append the tab if there is no existing tab under it.
+    {
+        insert_idx = dest_tabs->GetPageCount();
+
+        // When appending we need just a single test.
+        if ( dest_tabs->GetPage(insert_idx - 1).kind < page_info.kind )
+            return wxNOT_FOUND;
+    }
+
+    return insert_idx;
+}
+
+wxAuiNotebookPosition wxAuiNotebook::GetPagePosition(size_t page) const
+{
+    return FindTab(GetPage(page));
+}
+
+std::vector<size_t>
+wxAuiNotebook::GetPagesInDisplayOrder(wxAuiTabCtrl* tabCtrl) const
+{
+    wxCHECK_MSG( tabCtrl, std::vector<size_t>(), "invalid tab control" );
+
+    const size_t count = tabCtrl->GetPageCount();
+    std::vector<size_t> pages(count);
+    for ( size_t i = 0; i < count; ++i )
+    {
+        pages[i] = m_tabs.GetIdxFromWindow(tabCtrl->GetWindowFromIdx(i));
+    }
+
+    return pages;
 }
 
 void wxAuiNotebook::Split(size_t page, int direction)
 {
-    wxSize cli_size = GetClientSize();
-
     // get the page's window pointer
     wxWindow* wnd = GetPage(page);
     if (!wnd)
@@ -2472,86 +2942,31 @@ void wxAuiNotebook::Split(size_t page, int direction)
         return;
 
     // find out which tab control the page currently belongs to
-    wxAuiTabCtrl *src_tabs, *dest_tabs;
-    int src_idx = -1;
-    src_tabs = nullptr;
-    if (!FindTab(wnd, &src_tabs, &src_idx))
-        return;
-    if (!src_tabs || src_idx == -1)
+    const auto srcTabInfo = FindTab(wnd);
+    if ( !srcTabInfo )
         return;
 
-    // choose a split size
-    wxSize split_size;
-    if (GetPageCount() > 2)
-    {
-        split_size = CalculateNewSplitSize();
-    }
-    else
-    {
-        // because there are two panes, always split them
-        // equally
-        split_size = GetClientSize();
-        split_size.x /= 2;
-        split_size.y /= 2;
-    }
-
+    wxAuiTabCtrl* const src_tabs = srcTabInfo.tabCtrl;
 
     // create a new tab frame
-    wxTabFrame* new_tabs = new wxTabFrame;
-    new_tabs->m_rect = wxRect(wxPoint(0,0), split_size);
-    new_tabs->SetTabCtrlHeight(m_tabCtrlHeight);
-    new_tabs->m_tabs = new wxAuiTabCtrl(this,
-                                        m_tabIdCounter++,
-                                        wxDefaultPosition,
-                                        wxDefaultSize,
-                                        wxNO_BORDER|wxWANTS_CHARS);
-    new_tabs->m_tabs->SetArtProvider(m_tabs.GetArtProvider()->Clone());
-    new_tabs->m_tabs->SetFlags(m_flags);
-    dest_tabs = new_tabs->m_tabs;
+    wxAuiTabFrame* new_tabs = CreateTabFrame(CalculateNewSplitSize());
+    wxAuiTabCtrl* const dest_tabs = new_tabs->m_tabs;
 
-    // create a pane info structure with the information
-    // about where the pane should be added
-    wxAuiPaneInfo paneInfo = wxAuiPaneInfo().Bottom().CaptionVisible(false);
-    wxPoint mouse_pt;
-
-    if (direction == wxLEFT)
-    {
-        paneInfo.Left();
-        mouse_pt = wxPoint(0, cli_size.y/2);
-    }
-    else if (direction == wxRIGHT)
-    {
-        paneInfo.Right();
-        mouse_pt = wxPoint(cli_size.x, cli_size.y/2);
-    }
-    else if (direction == wxTOP)
-    {
-        paneInfo.Top();
-        mouse_pt = wxPoint(cli_size.x/2, 0);
-    }
-    else if (direction == wxBOTTOM)
-    {
-        paneInfo.Bottom();
-        mouse_pt = wxPoint(cli_size.x/2, cli_size.y);
-    }
-
-    m_mgr.AddPane(new_tabs, paneInfo, mouse_pt);
-    m_mgr.Update();
+    m_mgr.SplitPane(GetTabFrameFromTabCtrl(src_tabs), new_tabs, direction);
 
     // remove the page from the source tabs
-    wxAuiNotebookPage page_info = src_tabs->GetPage(src_idx);
+    wxAuiNotebookPage page_info = *srcTabInfo.pageInfo;
     page_info.active = false;
-    src_tabs->RemovePage(page_info.window);
+    src_tabs->RemovePageAt(srcTabInfo.tabIdx);
     if (src_tabs->GetPageCount() > 0)
     {
         src_tabs->SetActivePage((size_t)0);
-        src_tabs->DoShowHide();
-        src_tabs->Refresh();
+        src_tabs->DoUpdateActive();
     }
 
 
     // add the page to the destination tabs
-    dest_tabs->InsertPage(page_info.window, page_info, 0);
+    dest_tabs->InsertPage(page_info, 0);
 
     if (src_tabs->GetPageCount() == 0)
     {
@@ -2559,11 +2974,10 @@ void wxAuiNotebook::Split(size_t page, int direction)
     }
 
     DoSizing();
-    dest_tabs->DoShowHide();
-    dest_tabs->Refresh();
+    dest_tabs->DoUpdateActive();
 
     // force the set selection function reset the selection
-    m_curPage = -1;
+    m_curPage = wxNOT_FOUND;
 
     // set the active page to the one we just split off
     SetSelectionToPage(page_info);
@@ -2571,6 +2985,60 @@ void wxAuiNotebook::Split(size_t page, int direction)
     UpdateHintWindowSize();
 }
 
+void wxAuiNotebook::UnsplitAll()
+{
+    auto* const tabMain = GetMainTabCtrl();
+
+    bool changed = false;
+    for ( const auto& pane : m_mgr.GetAllPanes() )
+    {
+        if ( IsDummyPane(pane) )
+            continue;
+
+        auto* const tab = static_cast<wxAuiTabFrame*>(pane.window)->m_tabs;
+
+        // Don't move tabs from the main tab control to itself.
+        if ( tab == tabMain )
+            continue;
+
+        while ( tab->GetPageCount() )
+        {
+            wxAuiNotebookPage info = tab->GetPage(0);
+            info.active = false;
+
+            tab->RemovePageAt(0);
+
+            tabMain->AddPage(info);
+
+            changed = true;
+        }
+    }
+
+    if ( changed )
+    {
+        // We need to update the selection if the current page was in another
+        // tab control before, so force a selection change to ensure that the
+        // right page is shown.
+        m_curPage = wxNOT_FOUND;
+        int sel = tabMain->GetActivePage();
+        if ( sel == wxNOT_FOUND )
+        {
+            // Not sure if this can actually happen, but fall back to the first
+            // page if it does (note that we know that the main tab control is
+            // not empty as we must have added a page to it above for "changed"
+            // to be true).
+            sel = 0;
+        }
+
+        ChangeSelection(sel);
+
+        RemoveEmptyTabFrames();
+
+        DoSizing();
+
+        UpdateHintWindowSize();
+    }
+}
 
 void wxAuiNotebook::OnSize(wxSizeEvent& evt)
 {
@@ -2579,28 +3047,23 @@ void wxAuiNotebook::OnSize(wxSizeEvent& evt)
     evt.Skip();
 }
 
-void wxAuiNotebook::OnTabClicked(wxAuiNotebookEvent& evt)
+void wxAuiNotebook::OnTabClicked(wxAuiTabCtrl* ctrl, int tabIdx)
 {
-    wxAuiTabCtrl* ctrl = (wxAuiTabCtrl*)evt.GetEventObject();
-    wxASSERT(ctrl != nullptr);
-
-    wxWindow* wnd = ctrl->GetWindowFromIdx(evt.GetSelection());
+    wxWindow* const wnd = ctrl->GetWindowFromIdx(tabIdx);
     wxASSERT(wnd != nullptr);
 
+    // Note that this will generate wxEVT_AUINOTEBOOK_PAGE_CHANG{ING,ED} events.
     SetSelectionToWindow(wnd);
 }
 
-void wxAuiNotebook::OnTabBgDClick(wxAuiNotebookEvent& evt)
+void wxAuiNotebook::OnTabBgDClick(wxAuiTabCtrl* ctrl)
 {
     // select the tab ctrl which received the db click
-    int selection;
-    wxWindow* wnd;
-    wxAuiTabCtrl* ctrl = (wxAuiTabCtrl*)evt.GetEventObject();
-    if (   (ctrl != nullptr)
-        && ((selection = ctrl->GetActivePage()) != wxNOT_FOUND)
-        && ((wnd = ctrl->GetWindowFromIdx(selection)) != nullptr))
+    const int selection = ctrl->GetActivePage();
+    if ( selection != wxNOT_FOUND )
     {
-        SetSelectionToWindow(wnd);
+        if ( wxWindow* const wnd = ctrl->GetWindowFromIdx(selection) )
+            SetSelectionToWindow(wnd);
     }
 
     // notify owner that the tabbar background has been double-clicked
@@ -2609,26 +3072,37 @@ void wxAuiNotebook::OnTabBgDClick(wxAuiNotebookEvent& evt)
     ProcessWindowEvent(e);
 }
 
-void wxAuiNotebook::OnTabBeginDrag(wxAuiNotebookEvent&)
+void wxAuiNotebook::OnTabBeginDrag(wxAuiTabCtrl* ctrl, int tabIdx)
 {
-    m_lastDragX = 0;
+    m_lastDropMovePos = -1;
+
+    wxWindow* const wnd = ctrl->GetWindowFromIdx(tabIdx);
+
+    wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_BEGIN_DRAG, m_windowId);
+    e.SetSelection(m_tabs.GetIdxFromWindow(wnd));
+    e.SetOldSelection(e.GetSelection());
+    e.SetEventObject(this);
+    ProcessWindowEvent(e);
 }
 
-void wxAuiNotebook::OnTabDragMotion(wxAuiNotebookEvent& evt)
+void wxAuiNotebook::OnTabDragMotion(wxAuiTabCtrl* src_tabs, int src_idx)
 {
+    wxWindow* const wnd = src_tabs->GetWindowFromIdx(src_idx);
+
+    wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_DRAG_MOTION, m_windowId);
+    e.SetSelection(m_tabs.GetIdxFromWindow(wnd));
+    e.SetOldSelection(e.GetSelection());
+    e.SetEventObject(this);
+    ProcessWindowEvent(e);
+
     wxPoint screen_pt = ::wxGetMousePosition();
     wxPoint client_pt = ScreenToClient(screen_pt);
-    wxPoint zero(0,0);
 
-    wxAuiTabCtrl* src_tabs = (wxAuiTabCtrl*)evt.GetEventObject();
-    wxAuiTabCtrl* dest_tabs = GetTabCtrlFromPoint(client_pt);
+    wxAuiTabCtrl* const dest_tabs = GetTabCtrlFromPoint(client_pt);
 
     if (dest_tabs == src_tabs)
     {
-        if (src_tabs)
-        {
-            src_tabs->SetCursor(wxCursor(wxCURSOR_ARROW));
-        }
+        src_tabs->SetCursor(wxCursor(wxCURSOR_ARROW));
 
         // always hide the hint for inner-tabctrl drag
         m_mgr.HideHint();
@@ -2640,34 +3114,59 @@ void wxAuiNotebook::OnTabDragMotion(wxAuiNotebookEvent& evt)
         }
 
         wxPoint pt = dest_tabs->ScreenToClient(screen_pt);
-        wxWindow* dest_location_tab;
+
+        // When using multiple rows, allow dragging the tab to the space after
+        // the last tab of the row too.
+        int flags = wxAuiTabContainer::HitTest_Default;
+        if (dest_tabs->IsFlagSet(wxAUI_NB_MULTILINE))
+            flags |= wxAuiTabContainer::HitTest_AllowAfterTab;
 
         // this is an inner-tab drag/reposition
-        if (dest_tabs->TabHitTest(pt.x, pt.y, &dest_location_tab))
+        if (auto const destTabInfo = dest_tabs->TabHitTest(pt, flags))
         {
-            int src_idx = evt.GetSelection();
             wxCHECK_RET( src_idx != -1, "Invalid source tab?" );
 
-            int dest_idx = dest_tabs->GetIdxFromWindow(dest_location_tab);
+            int dest_idx = destTabInfo.pos;
 
-            // prevent jumpy drag
-            if ((src_idx == dest_idx) || dest_idx == -1 ||
-                (src_idx > dest_idx && m_lastDragX <= pt.x) ||
-                (src_idx < dest_idx && m_lastDragX >= pt.x))
+            if ( src_idx == dest_idx )
             {
-                m_lastDragX = pt.x;
+                // Reset the last drop position, the mouse has moved away from
+                // the other tab, so now the user should be able to drag this
+                // one there again.
+                m_lastDropMovePos = -1;
                 return;
             }
 
+            const auto& src_page = src_tabs->GetPage(src_idx);
 
-            wxWindow* src_tab = dest_tabs->GetWindowFromIdx(src_idx);
-            dest_tabs->MovePage(src_tab, dest_idx);
-            m_tabs.MovePage(m_tabs.GetPage(src_idx).window, dest_idx);
-            dest_tabs->SetActivePage((size_t)dest_idx);
-            dest_tabs->DoShowHide();
-            dest_tabs->Refresh();
-            m_lastDragX = pt.x;
+            // A tab can only be moved inside the group of tabs of the same
+            // kind, as otherwise the tabs of the same kind wouldn't be grouped
+            // together any longer.
+            if ( dest_tabs->GetPage(dest_idx).kind != src_page.kind )
+                return;
 
+            // When dragging a smaller tab over the larger one, after moving
+            // the tab into the new position, the same point can be now over a
+            // different tab, which would result in another move of this tab as
+            // soon as the mouse moves even by a single pixel. And then, of
+            // course, it would move again, and so on. To avoid this, we need
+            // to check if the mouse has moved from the tab over which it was
+            // when the last drop occurred.
+            if ( dest_idx == m_lastDropMovePos )
+                return;
+
+            if (dest_tabs->MovePage(src_page.window, dest_idx))
+            {
+                // Update the layout when using multiline tabs as it can change
+                // depending on the tab order.
+                if (dest_tabs->IsFlagSet(wxAUI_NB_MULTILINE))
+                    dest_tabs->LayoutMultiLineTabs(dest_tabs);
+
+                dest_tabs->SetActivePage((size_t)dest_idx);
+                dest_tabs->DoUpdateActive();
+            }
+
+            m_lastDropMovePos = dest_tabs->TabHitTest(pt).pos;
         }
 
         return;
@@ -2687,22 +3186,22 @@ void wxAuiNotebook::OnTabDragMotion(wxAuiNotebookEvent& evt)
         // make sure we are not over the hint window
         if (!wxDynamicCast(tab_ctrl, wxFrame))
         {
+            wxAuiTabCtrl* other_tabs = nullptr;
             while (tab_ctrl)
             {
-                if (wxDynamicCast(tab_ctrl, wxAuiTabCtrl))
+                other_tabs = wxDynamicCast(tab_ctrl, wxAuiTabCtrl);
+                if (other_tabs)
                     break;
                 tab_ctrl = tab_ctrl->GetParent();
             }
 
-            if (tab_ctrl)
+            if (other_tabs)
             {
                 wxAuiNotebook* nb = (wxAuiNotebook*)tab_ctrl->GetParent();
 
                 if (nb != this)
                 {
-                    wxRect hint_rect = tab_ctrl->GetClientRect();
-                    tab_ctrl->ClientToScreen(&hint_rect.x, &hint_rect.y);
-                    m_mgr.ShowHint(hint_rect);
+                    m_mgr.UpdateHint(other_tabs->GetHintScreenRect());
                     return;
                 }
             }
@@ -2734,27 +3233,36 @@ void wxAuiNotebook::OnTabDragMotion(wxAuiNotebookEvent& evt)
     }
 
 
+    wxRect hintRect;
     if (dest_tabs)
     {
-        wxRect hint_rect = dest_tabs->GetRect();
-        ClientToScreen(&hint_rect.x, &hint_rect.y);
-        m_mgr.ShowHint(hint_rect);
+        if (src_tabs)
+        {
+            const auto& src_page = src_tabs->GetPage(src_idx);
+            if (GetDropIndex(src_page, dest_tabs, screen_pt) == wxNOT_FOUND)
+            {
+                m_mgr.HideHint();
+                return;
+            }
+        }
+
+        hintRect = dest_tabs->GetHintScreenRect();
     }
     else
     {
-        m_mgr.DrawHintRect(m_dummyWnd, client_pt, zero);
+        hintRect = m_mgr.CalculateHintRect(m_dummyWnd, client_pt);
     }
+
+    m_mgr.UpdateHint(hintRect);
 }
 
 
 
-void wxAuiNotebook::OnTabEndDrag(wxAuiNotebookEvent& evt)
+void wxAuiNotebook::OnTabEndDrag(wxAuiTabCtrl* src_tabs, int src_idx)
 {
+    wxWindow* src_page = src_tabs->GetWindowFromIdx(src_idx);
+
     m_mgr.HideHint();
-
-
-    wxAuiTabCtrl* src_tabs = (wxAuiTabCtrl*)evt.GetEventObject();
-    wxCHECK_RET( src_tabs, wxT("no source object?") );
 
     src_tabs->SetCursor(wxCursor(wxCURSOR_ARROW));
 
@@ -2785,8 +3293,8 @@ void wxAuiNotebook::OnTabEndDrag(wxAuiNotebookEvent& evt)
                 // find out from the destination control
                 // if it's ok to drop this tab here
                 wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_ALLOW_DND, m_windowId);
-                e.SetSelection(evt.GetSelection());
-                e.SetOldSelection(evt.GetSelection());
+                e.SetSelection(src_idx);
+                e.SetOldSelection(e.GetSelection());
                 e.SetEventObject(this);
                 e.SetDragSource(this);
                 e.Veto(); // dropping must be explicitly approved by control owner
@@ -2801,8 +3309,6 @@ void wxAuiNotebook::OnTabEndDrag(wxAuiNotebookEvent& evt)
                 }
 
                 // drop was allowed
-                int src_idx = evt.GetSelection();
-                wxWindow* src_page = src_tabs->GetWindowFromIdx(src_idx);
 
                 // Check that it's not an impossible parent relationship
                 wxWindow* p = nb;
@@ -2822,45 +3328,36 @@ void wxAuiNotebook::OnTabEndDrag(wxAuiNotebookEvent& evt)
 
                 // make a copy of the page info
                 wxAuiNotebookPage page_info = m_tabs.GetPage(main_idx);
+                page_info.hover = false;
 
                 // remove the page from the source notebook
                 RemovePage(main_idx);
-
-                // reparent the page
-                src_page->Reparent(nb);
 
 
                 // found out the insert idx
                 wxAuiTabCtrl* dest_tabs = (wxAuiTabCtrl*)tab_ctrl;
                 wxPoint pt = dest_tabs->ScreenToClient(mouse_screen_pt);
 
-                wxWindow* target = nullptr;
                 int insert_idx = -1;
-                dest_tabs->TabHitTest(pt.x, pt.y, &target);
-                if (target)
+                if (auto const targetInfo = dest_tabs->TabHitTest(pt))
                 {
-                    insert_idx = dest_tabs->GetIdxFromWindow(target);
+                    insert_idx = targetInfo.pos;
                 }
 
 
-                // add the page to the new notebook
-                if (insert_idx == -1)
-                    insert_idx = dest_tabs->GetPageCount();
-                dest_tabs->InsertPage(page_info.window, page_info, insert_idx);
-                nb->m_tabs.InsertPage(page_info.window, page_info, insert_idx);
-
-                nb->DoSizing();
-                dest_tabs->SetActivePage(insert_idx);
-                dest_tabs->DoShowHide();
-                dest_tabs->Refresh();
-
-                // set the selection in the destination tab control
-                nb->DoModifySelection(insert_idx, false);
+                // add the page to the new notebook: note that we always append
+                // it to the end in logical order, as it's not clear what
+                // should its position be (the alternative would be to insert
+                // it before the target page, but it's not really clear if this
+                // is really what we want)
+                nb->InsertPageAt(page_info, nb->GetPageCount(),
+                                 dest_tabs, insert_idx,
+                                 true /* select */);
 
                 // notify owner that the tab has been dragged
                 wxAuiNotebookEvent e2(wxEVT_AUINOTEBOOK_DRAG_DONE, m_windowId);
-                e2.SetSelection(evt.GetSelection());
-                e2.SetOldSelection(evt.GetSelection());
+                e2.SetSelection(src_idx);
+                e2.SetOldSelection(src_idx);
                 e2.SetEventObject(this);
                 ProcessWindowEvent(e2);
 
@@ -2877,34 +3374,27 @@ void wxAuiNotebook::OnTabEndDrag(wxAuiNotebookEvent& evt)
 
     if ((m_flags & wxAUI_NB_TAB_SPLIT) && m_tabs.GetPageCount() >= 2)
     {
+        wxAuiNotebookPage page_info = src_tabs->GetPage(src_idx);
+
         // If the pointer is in an existing tab frame, do a tab insert
         wxWindow* hit_wnd = ::wxFindWindowAtPoint(mouse_screen_pt);
-        wxTabFrame* tab_frame = (wxTabFrame*)GetTabFrameFromTabCtrl(hit_wnd);
+        wxAuiTabFrame* tab_frame = (wxAuiTabFrame*)GetTabFrameFromTabCtrl(hit_wnd);
         int insert_idx = -1;
         if (tab_frame)
         {
             dest_tabs = tab_frame->m_tabs;
 
             if (dest_tabs == src_tabs)
-            {
-                m_curPage = evt.GetSelection();
                 return;
-            }
 
-            wxPoint pt = dest_tabs->ScreenToClient(mouse_screen_pt);
-            wxWindow* target = nullptr;
-            dest_tabs->TabHitTest(pt.x, pt.y, &target);
-            if (target)
-            {
-                insert_idx = dest_tabs->GetIdxFromWindow(target);
-            }
+            insert_idx = GetDropIndex(page_info, dest_tabs, mouse_screen_pt);
+            if ( insert_idx == wxNOT_FOUND )
+                return;
         }
         else
         {
-            wxPoint zero(0,0);
             wxRect rect = m_mgr.CalculateHintRect(m_dummyWnd,
-                                                  mouse_client_pt,
-                                                  zero);
+                                                  mouse_client_pt);
             if (rect.IsEmpty())
             {
                 // there is no suitable drop location here, exit out
@@ -2912,43 +3402,31 @@ void wxAuiNotebook::OnTabEndDrag(wxAuiNotebookEvent& evt)
             }
 
             // If there is no tabframe at all, create one
-            wxTabFrame* new_tabs = new wxTabFrame;
-            new_tabs->m_rect = wxRect(wxPoint(0,0), CalculateNewSplitSize());
-            new_tabs->SetTabCtrlHeight(m_tabCtrlHeight);
-            new_tabs->m_tabs = new wxAuiTabCtrl(this,
-                                                m_tabIdCounter++,
-                                                wxDefaultPosition,
-                                                wxDefaultSize,
-                                                wxNO_BORDER|wxWANTS_CHARS);
-            new_tabs->m_tabs->SetArtProvider(m_tabs.GetArtProvider()->Clone());
-            new_tabs->m_tabs->SetFlags(m_flags);
+            wxAuiTabFrame* new_tabs = CreateTabFrame(CalculateNewSplitSize());
+            m_mgr.SplitPane(GetTabFrameFromTabCtrl(src_tabs),
+                            new_tabs,
+                            wxBOTTOM,
+                            mouse_client_pt);
 
-            m_mgr.AddPane(new_tabs,
-                          wxAuiPaneInfo().Bottom().CaptionVisible(false),
-                          mouse_client_pt);
-            m_mgr.Update();
             dest_tabs = new_tabs->m_tabs;
+            insert_idx = 0;
         }
 
 
 
         // remove the page from the source tabs
-        wxAuiNotebookPage page_info = src_tabs->GetPage(evt.GetSelection());
         page_info.active = false;
         src_tabs->RemovePage(page_info.window);
         if (src_tabs->GetPageCount() > 0)
         {
             src_tabs->SetActivePage((size_t)0);
-            src_tabs->DoShowHide();
-            src_tabs->Refresh();
+            src_tabs->DoUpdateActive();
         }
 
 
 
         // add the page to the destination tabs
-        if (insert_idx == -1)
-            insert_idx = dest_tabs->GetPageCount();
-        dest_tabs->InsertPage(page_info.window, page_info, insert_idx);
+        dest_tabs->InsertPage(page_info, insert_idx);
 
         if (src_tabs->GetPageCount() == 0)
         {
@@ -2956,11 +3434,10 @@ void wxAuiNotebook::OnTabEndDrag(wxAuiNotebookEvent& evt)
         }
 
         DoSizing();
-        dest_tabs->DoShowHide();
-        dest_tabs->Refresh();
+        dest_tabs->DoUpdateActive();
 
         // force the set selection function reset the selection
-        m_curPage = -1;
+        m_curPage = wxNOT_FOUND;
 
         // set the active page to the one we just split off
         SetSelectionToPage(page_info);
@@ -2970,38 +3447,38 @@ void wxAuiNotebook::OnTabEndDrag(wxAuiNotebookEvent& evt)
 
     // notify owner that the tab has been dragged
     wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_DRAG_DONE, m_windowId);
-    e.SetSelection(evt.GetSelection());
-    e.SetOldSelection(evt.GetSelection());
+    e.SetSelection(m_tabs.GetIdxFromWindow(src_page));
+    e.SetOldSelection(e.GetSelection());
     e.SetEventObject(this);
     ProcessWindowEvent(e);
 }
 
 
 
-void wxAuiNotebook::OnTabCancelDrag(wxAuiNotebookEvent& command_evt)
+void wxAuiNotebook::OnTabCancelDrag(wxAuiTabCtrl* ctrl, int tabIdx)
 {
-    wxAuiNotebookEvent& evt = (wxAuiNotebookEvent&)command_evt;
-
     m_mgr.HideHint();
 
-    wxAuiTabCtrl* src_tabs = (wxAuiTabCtrl*)evt.GetEventObject();
-    wxCHECK_RET( src_tabs, wxT("no source object?") );
+    ctrl->SetCursor(wxCursor(wxCURSOR_ARROW));
 
-    src_tabs->SetCursor(wxCursor(wxCURSOR_ARROW));
+    wxWindow* const wnd = ctrl->GetWindowFromIdx(tabIdx);
+
+    wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_CANCEL_DRAG, m_windowId);
+    e.SetSelection(m_tabs.GetIdxFromWindow(wnd));
+    e.SetEventObject(this);
+    ProcessWindowEvent(e);
 }
 
 wxAuiTabCtrl* wxAuiNotebook::GetTabCtrlFromPoint(const wxPoint& pt)
 {
     // if we've just removed the last tab from the source
     // tab set, the remove the tab control completely
-    wxAuiPaneInfoArray& all_panes = m_mgr.GetAllPanes();
-    size_t i, pane_count = all_panes.GetCount();
-    for (i = 0; i < pane_count; ++i)
+    for ( const auto& pane : m_mgr.GetAllPanes() )
     {
-        if (all_panes.Item(i).name == wxT("dummy"))
+        if ( IsDummyPane(pane) )
             continue;
 
-        wxTabFrame* tabframe = (wxTabFrame*)all_panes.Item(i).window;
+        wxAuiTabFrame* tabframe = (wxAuiTabFrame*)pane.window;
         if (tabframe->m_tab_rect.Contains(pt))
             return tabframe->m_tabs;
     }
@@ -3013,14 +3490,12 @@ wxWindow* wxAuiNotebook::GetTabFrameFromTabCtrl(wxWindow* tab_ctrl)
 {
     // if we've just removed the last tab from the source
     // tab set, the remove the tab control completely
-    wxAuiPaneInfoArray& all_panes = m_mgr.GetAllPanes();
-    size_t i, pane_count = all_panes.GetCount();
-    for (i = 0; i < pane_count; ++i)
+    for ( const auto& pane : m_mgr.GetAllPanes() )
     {
-        if (all_panes.Item(i).name == wxT("dummy"))
+        if ( IsDummyPane(pane) )
             continue;
 
-        wxTabFrame* tabframe = (wxTabFrame*)all_panes.Item(i).window;
+        wxAuiTabFrame* tabframe = (wxAuiTabFrame*)pane.window;
         if (tabframe->m_tabs == tab_ctrl)
         {
             return tabframe;
@@ -3033,25 +3508,20 @@ wxWindow* wxAuiNotebook::GetTabFrameFromTabCtrl(wxWindow* tab_ctrl)
 void wxAuiNotebook::RemoveEmptyTabFrames()
 {
     // if we've just removed the last tab from the source
-    // tab set, the remove the tab control completely
+    // tab set, then remove the tab control completely
+
+    // Make a copy of all panes because the original is modified when detaching
+    // the pane in the loop.
     wxAuiPaneInfoArray all_panes = m_mgr.GetAllPanes();
-    size_t i, pane_count = all_panes.GetCount();
-    for (i = 0; i < pane_count; ++i)
+    for ( const auto& pane : all_panes )
     {
-        if (all_panes.Item(i).name == wxT("dummy"))
+        if ( IsDummyPane(pane) )
             continue;
 
-        wxTabFrame* tab_frame = (wxTabFrame*)all_panes.Item(i).window;
+        wxAuiTabFrame* tab_frame = (wxAuiTabFrame*)pane.window;
         if (tab_frame->m_tabs->GetPageCount() == 0)
         {
             m_mgr.DetachPane(tab_frame);
-
-            // use pending delete because sometimes during
-            // window closing, refreshs are pending
-            if (!wxPendingDelete.Member(tab_frame->m_tabs))
-                wxPendingDelete.Append(tab_frame->m_tabs);
-
-            tab_frame->m_tabs = nullptr;
 
             delete tab_frame;
         }
@@ -3060,18 +3530,16 @@ void wxAuiNotebook::RemoveEmptyTabFrames()
 
     // check to see if there is still a center pane;
     // if there isn't, make a frame the center pane
-    wxAuiPaneInfoArray panes = m_mgr.GetAllPanes();
-    pane_count = panes.GetCount();
     wxWindow* first_good = nullptr;
     bool center_found = false;
-    for (i = 0; i < pane_count; ++i)
+    for ( const auto& pane : m_mgr.GetAllPanes() )
     {
-        if (panes.Item(i).name == wxT("dummy"))
+        if ( IsDummyPane(pane) )
             continue;
-        if (panes.Item(i).dock_direction == wxAUI_DOCK_CENTRE)
+        if (pane.dock_direction == wxAUI_DOCK_CENTRE)
             center_found = true;
         if (!first_good)
-            first_good = panes.Item(i).window;
+            first_good = pane.window;
     }
 
     if (!center_found && first_good)
@@ -3093,14 +3561,11 @@ void wxAuiNotebook::OnChildFocusNotebook(wxChildFocusEvent& evt)
     // child, which would then enter this handler and call
     // SetSelection, which is not desired turn tab dragging.
 
-    wxAuiPaneInfoArray& all_panes = m_mgr.GetAllPanes();
-    size_t i, pane_count = all_panes.GetCount();
-    for (i = 0; i < pane_count; ++i)
+    for ( const auto& pane : m_mgr.GetAllPanes() )
     {
-        wxAuiPaneInfo& pane = all_panes.Item(i);
-        if (pane.name == wxT("dummy"))
+        if ( IsDummyPane(pane) )
             continue;
-        wxTabFrame* tabframe = (wxTabFrame*)pane.window;
+        wxAuiTabFrame* tabframe = (wxAuiTabFrame*)pane.window;
         if (tabframe->m_tabs->IsDragging())
             return;
     }
@@ -3202,16 +3667,11 @@ void wxAuiNotebook::OnNavigationKeyNotebook(wxNavigationKeyEvent& event)
     }
 }
 
-void wxAuiNotebook::OnTabButton(wxAuiNotebookEvent& evt)
+void wxAuiNotebook::OnTabButton(wxAuiTabCtrl* tabs, int tabIdx, int button_id)
 {
-    wxAuiTabCtrl* tabs = (wxAuiTabCtrl*)evt.GetEventObject();
-
-    int button_id = evt.GetInt();
-
     if (button_id == wxAUI_BUTTON_CLOSE)
     {
-        int selection = evt.GetSelection();
-
+        int selection = tabIdx;
         if (selection == -1)
         {
             // if the close button is to the right, use the active
@@ -3228,7 +3688,7 @@ void wxAuiNotebook::OnTabButton(wxAuiNotebookEvent& evt)
             e.SetSelection(m_tabs.GetIdxFromWindow(close_wnd));
             const int idx = m_tabs.GetIdxFromWindow(close_wnd);
             e.SetSelection(idx);
-            e.SetOldSelection(evt.GetSelection());
+            e.SetOldSelection(selection);
             e.SetEventObject(this);
             ProcessWindowEvent(e);
             if (!e.IsAllowed())
@@ -3256,14 +3716,41 @@ void wxAuiNotebook::OnTabButton(wxAuiNotebookEvent& evt)
             ProcessWindowEvent(e2);
         }
     }
+    else if (button_id == wxAUI_BUTTON_PIN)
+    {
+        // For now we don't send any event, this can be always added later if
+        // necessary.
+        wxWindow* const wnd = tabs->GetWindowFromIdx(tabIdx);
+
+        const auto idx = m_tabs.GetIdxFromWindow(wnd);
+
+        wxAuiTabKind newKind = wxAuiTabKind::Locked;
+        switch ( GetPageKind(idx) )
+        {
+            case wxAuiTabKind::Normal:
+                newKind = wxAuiTabKind::Pinned;
+                break;
+
+            case wxAuiTabKind::Pinned:
+                newKind = wxAuiTabKind::Normal;
+                break;
+
+            case wxAuiTabKind::Locked:
+                // Locked tabs can't be pinned or unpinned.
+                break;
+        }
+
+        wxCHECK_RET(newKind != wxAuiTabKind::Locked,
+                    "locked pages shouldn't have pin button");
+
+        SetPageKind(idx, newKind);
+    }
 }
 
 
-void wxAuiNotebook::OnTabMiddleDown(wxAuiNotebookEvent& evt)
+void wxAuiNotebook::OnTabMiddleDown(wxAuiTabCtrl* ctrl, int tabIdx)
 {
-    // patch event through to owner
-    wxAuiTabCtrl* tabs = (wxAuiTabCtrl*)evt.GetEventObject();
-    wxWindow* wnd = tabs->GetWindowFromIdx(evt.GetSelection());
+    wxWindow* const wnd = ctrl->GetWindowFromIdx(tabIdx);
 
     wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_TAB_MIDDLE_DOWN, m_windowId);
     e.SetSelection(m_tabs.GetIdxFromWindow(wnd));
@@ -3271,15 +3758,14 @@ void wxAuiNotebook::OnTabMiddleDown(wxAuiNotebookEvent& evt)
     ProcessWindowEvent(e);
 }
 
-void wxAuiNotebook::OnTabMiddleUp(wxAuiNotebookEvent& evt)
+void wxAuiNotebook::OnTabMiddleUp(wxAuiTabCtrl* ctrl, int tabIdx)
 {
     // if the wxAUI_NB_MIDDLE_CLICK_CLOSE is specified, middle
     // click should act like a tab close action.  However, first
     // give the owner an opportunity to handle the middle up event
     // for custom action
 
-    wxAuiTabCtrl* tabs = (wxAuiTabCtrl*)evt.GetEventObject();
-    wxWindow* wnd = tabs->GetWindowFromIdx(evt.GetSelection());
+    wxWindow* const wnd = ctrl->GetWindowFromIdx(tabIdx);
 
     wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_TAB_MIDDLE_UP, m_windowId);
     e.SetSelection(m_tabs.GetIdxFromWindow(wnd));
@@ -3294,15 +3780,13 @@ void wxAuiNotebook::OnTabMiddleUp(wxAuiNotebookEvent& evt)
         return;
 
     // simulate the user pressing the close button on the tab
-    evt.SetInt(wxAUI_BUTTON_CLOSE);
-    OnTabButton(evt);
+    OnTabButton(ctrl, tabIdx, wxAUI_BUTTON_CLOSE);
 }
 
-void wxAuiNotebook::OnTabRightDown(wxAuiNotebookEvent& evt)
+void wxAuiNotebook::OnTabRightDown(wxAuiTabCtrl* ctrl, int tabIdx)
 {
-    // patch event through to owner
-    wxAuiTabCtrl* tabs = (wxAuiTabCtrl*)evt.GetEventObject();
-    wxWindow* wnd = tabs->GetWindowFromIdx(evt.GetSelection());
+    // Generate corresponding wxEVT_AUI event.
+    wxWindow* wnd = ctrl->GetWindowFromIdx(tabIdx);
 
     wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_TAB_RIGHT_DOWN, m_windowId);
     e.SetSelection(m_tabs.GetIdxFromWindow(wnd));
@@ -3310,11 +3794,10 @@ void wxAuiNotebook::OnTabRightDown(wxAuiNotebookEvent& evt)
     ProcessWindowEvent(e);
 }
 
-void wxAuiNotebook::OnTabRightUp(wxAuiNotebookEvent& evt)
+void wxAuiNotebook::OnTabRightUp(wxAuiTabCtrl* ctrl, int tabIdx)
 {
-    // patch event through to owner
-    wxAuiTabCtrl* tabs = (wxAuiTabCtrl*)evt.GetEventObject();
-    wxWindow* wnd = tabs->GetWindowFromIdx(evt.GetSelection());
+    // Generate corresponding wxEVT_AUI event.
+    wxWindow* wnd = ctrl->GetWindowFromIdx(tabIdx);
 
     wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_TAB_RIGHT_UP, m_windowId);
     e.SetSelection(m_tabs.GetIdxFromWindow(wnd));
@@ -3383,11 +3866,7 @@ bool wxAuiNotebook::ShowWindowMenu()
 
     if (idx != -1)
     {
-        wxAuiNotebookEvent e(wxEVT_AUINOTEBOOK_PAGE_CHANGING, tabCtrl->GetId());
-        e.SetSelection(idx);
-        e.SetOldSelection(tabCtrl->GetActivePage());
-        e.SetEventObject(tabCtrl);
-        ProcessWindowEvent(e);
+        OnTabClicked(tabCtrl, idx);
 
         return true;
     }
@@ -3411,18 +3890,17 @@ int wxAuiNotebook::HitTest (const wxPoint &pt, long *flags) const
 {
     wxWindow *w = nullptr;
     long position = wxBK_HITTEST_NOWHERE;
-    const wxAuiPaneInfoArray& all_panes = const_cast<wxAuiManager&>(m_mgr).GetAllPanes();
-    const size_t pane_count = all_panes.GetCount();
-    for (size_t i = 0; i < pane_count; ++i)
+    for ( const auto& pane : m_mgr.GetAllPanes() )
     {
-        if (all_panes.Item(i).name == wxT("dummy"))
+        if ( IsDummyPane(pane) )
             continue;
 
-        wxTabFrame* tabframe = (wxTabFrame*) all_panes.Item(i).window;
+        wxAuiTabFrame* tabframe = (wxAuiTabFrame*) pane.window;
         if (tabframe->m_tab_rect.Contains(pt))
         {
             wxPoint tabpos = tabframe->m_tabs->ScreenToClient(ClientToScreen(pt));
-            if (tabframe->m_tabs->TabHitTest(tabpos.x, tabpos.y, &w))
+            w = tabframe->m_tabs->TabHitTest(tabpos).window;
+            if (w)
                 position = wxBK_HITTEST_ONITEM;
             break;
         }
@@ -3486,7 +3964,7 @@ namespace
 class wxAuiLayoutObject
 {
 public:
-    enum
+    enum DockDir
     {
         DockDir_Center,
         DockDir_Left,
@@ -3549,10 +4027,10 @@ public:
 
     wxSize m_size;
     const wxAuiPaneInfo *m_pInfo;
-    unsigned char m_dir;
+    DockDir m_dir;
 
     /*
-        As the caulculation is done from the inner to the outermost pane, the
+        As the calculation is done from the inner to the outermost pane, the
         panes are sorted in the following order: layer, direction, row,
         position.
      */
@@ -3583,17 +4061,13 @@ wxSize wxAuiNotebook::DoGetBestSize() const
         following variable which is sorted later on.
      */
     wxVector<wxAuiLayoutObject> layouts;
-    const wxAuiPaneInfoArray& all_panes =
-        const_cast<wxAuiManager&>(m_mgr).GetAllPanes();
-    const size_t pane_count = all_panes.GetCount();
     const int tabHeight = GetTabCtrlHeight();
-    for ( size_t n = 0; n < pane_count; ++n )
+    for ( const auto& pane : m_mgr.GetAllPanes() )
     {
-        const wxAuiPaneInfo &pInfo = all_panes[n];
-        if ( pInfo.name == wxT("dummy") || pInfo.IsFloating() )
+        if ( IsDummyPane(pane) || pane.IsFloating() )
             continue;
 
-        const wxTabFrame* tabframe = (wxTabFrame*) all_panes.Item(n).window;
+        const wxAuiTabFrame* tabframe = (wxAuiTabFrame*) pane.window;
         const wxAuiNotebookPageArray &pages = tabframe->m_tabs->GetPages();
 
         wxSize bestPageSize;
@@ -3602,7 +4076,7 @@ wxSize wxAuiNotebook::DoGetBestSize() const
 
         bestPageSize.y += tabHeight;
         // Store the current pane with its largest window dimensions
-        layouts.push_back(wxAuiLayoutObject(bestPageSize, pInfo));
+        layouts.push_back(wxAuiLayoutObject(bestPageSize, pane));
     }
 
     if ( layouts.empty() )
@@ -3646,12 +4120,10 @@ int wxAuiNotebook::DoModifySelection(size_t n, bool events)
     // however, clicking again on a tab should give it the focus.
     if ((int)n == m_curPage)
     {
-        wxAuiTabCtrl* ctrl;
-        int ctrl_idx;
-        if (FindTab(wnd, &ctrl, &ctrl_idx))
+        wxAuiTabCtrl* const ctrl = FindTab(wnd).tabCtrl;
+        if ( ctrl && FindFocus() != ctrl )
         {
-            if (FindFocus() != ctrl)
-                ctrl->SetFocus();
+            ctrl->SetFocus();
         }
         return m_curPage;
     }
@@ -3674,25 +4146,20 @@ int wxAuiNotebook::DoModifySelection(size_t n, bool events)
         int old_curpage = m_curPage;
         m_curPage = n;
 
-        wxAuiTabCtrl* ctrl;
-        int ctrl_idx;
-        if (FindTab(wnd, &ctrl, &ctrl_idx))
+        if ( const auto tabInfo = FindTab(wnd) )
         {
-            m_tabs.SetActivePage(wnd);
+            wxAuiTabCtrl* const ctrl = tabInfo.tabCtrl;
 
-            ctrl->SetActivePage(ctrl_idx);
+            ctrl->SetActivePage(tabInfo.tabIdx);
             DoSizing();
-            ctrl->DoShowTab(ctrl_idx);
+            ctrl->DoShowTab(tabInfo.tabIdx);
 
             // set fonts
-            wxAuiPaneInfoArray& all_panes = m_mgr.GetAllPanes();
-            size_t i, pane_count = all_panes.GetCount();
-            for (i = 0; i < pane_count; ++i)
+            for ( const auto& pane : m_mgr.GetAllPanes() )
             {
-                wxAuiPaneInfo& pane = all_panes.Item(i);
-                if (pane.name == wxT("dummy"))
+                if ( IsDummyPane(pane) )
                     continue;
-                wxAuiTabCtrl* tabctrl = ((wxTabFrame*)pane.window)->m_tabs;
+                wxAuiTabCtrl* tabctrl = ((wxAuiTabFrame*)pane.window)->m_tabs;
                 if (tabctrl != ctrl)
                     tabctrl->SetSelectedFont(m_normalFont);
                 else
@@ -3723,10 +4190,8 @@ void wxAuiTabCtrl::SetHoverTab(wxWindow* wnd)
 {
     bool hoverChanged = false;
 
-    const size_t page_count = m_pages.GetCount();
-    for ( size_t i = 0; i < page_count; ++i )
+    for ( auto& page : m_pages )
     {
-        wxAuiNotebookPage& page = m_pages.Item(i);
         bool oldHover = page.hover;
         page.hover = (page.window == wnd);
         if ( oldHover != page.hover )
@@ -3740,5 +4205,426 @@ void wxAuiTabCtrl::SetHoverTab(wxWindow* wnd)
     }
 }
 
+// ----------------------------------------------------------------------------
+// Layout serialization
+// ----------------------------------------------------------------------------
+
+void
+wxAuiNotebook::SaveLayout(const wxString& name,
+                          wxAuiBookSerializer& serializer) const
+{
+    serializer.BeforeSaveNotebook(name);
+
+    for ( const auto& pane : m_mgr.GetAllPanes() )
+    {
+        if ( IsDummyPane(pane) )
+            continue;
+
+        wxAuiTabLayoutInfo tab;
+        m_mgr.CopyDockLayoutFrom(tab, pane);
+
+        const wxAuiTabCtrl* const
+            tabCtrl = static_cast<wxAuiTabFrame*>(pane.window)->m_tabs;
+
+        auto* const activePage =
+            tabCtrl->GetWindowFromIdx(tabCtrl->GetActivePage());
+        tab.active = m_tabs.GetIdxFromWindow(activePage);
+
+        // As an optimization, don't bother with saving the pages order for the
+        // main control if it hasn't been changed from the default.
+        bool mustSavePages = false;
+        if ( tab.dock_direction != wxAUI_DOCK_CENTER )
+        {
+            // The non-main tab controls can't possibly have all the pages, so
+            // we always have to save the indices of the ones they contain.
+            mustSavePages = true;
+        }
+        else if ( tabCtrl->GetPageCount() != GetPageCount() )
+        {
+            // If the main control doesn't have all the pages, we need to save
+            // them for it as well.
+            mustSavePages = true;
+        }
+
+        std::vector<int> pages;
+        int n = 0;
+        for ( const auto& page : tabCtrl->GetPages() )
+        {
+            // This is inefficient for many pages, we should consider using a
+            // hash map indexed by the window pointer if this proves to be a
+            // problem in practice.
+            const int idx = m_tabs.GetIdxFromWindow(page.window);
+            if ( idx != n++ )
+            {
+                // And if the pages are not in order, we must save them too.
+                mustSavePages = true;
+            }
+
+            pages.push_back(idx);
+
+            // Also remember if this page is pinned.
+            switch ( page.kind )
+            {
+                case wxAuiTabKind::Normal:
+                    // Nothing special to do.
+                    break;
+
+                case wxAuiTabKind::Pinned:
+                    tab.pinned.push_back(idx);
+                    break;
+
+                case wxAuiTabKind::Locked:
+                    // We don't store locked pages because their status can't
+                    // be changed by the user, so it would be pointless to save
+                    // and restore them.
+                    break;
+            }
+        }
+
+        // But if none of the conditions above is true, we can avoid saving
+        // them, which also allows us not to remove and re-add them when
+        // restoring later, see LoadLayout() below.
+        if ( mustSavePages )
+            tab.pages = std::move(pages);
+
+        serializer.SaveNotebookTabControl(tab);
+    }
+
+    serializer.AfterSaveNotebook();
+}
+
+void
+wxAuiNotebook::LoadLayout(const wxString& name,
+                          wxAuiBookDeserializer& deserializer)
+{
+    const auto tabs = deserializer.LoadNotebookTabs(name);
+
+    if ( tabs.empty() )
+        return;
+
+    // Remove any existing tabs before adding new ones.
+    UnsplitAll();
+
+    // Get the only remaining tab control.
+    wxAuiTabCtrl* const tabMain = GetMainTabCtrl();
+
+    // If we don't have anything saved and the pages are in the default order
+    // we may not have to do anything at all.
+    bool useExistingPages = false;
+
+    // Reset the state of all pinned pages to normal, as this state will be
+    // restored from the deserialized data below.
+    //
+    // Note that we do not do this for the locked pages, as their state can't
+    // be changed by the user and so it's not necessarily to save nor restore
+    // it.
+    for ( auto& page : m_tabs.GetPages() )
+    {
+        if ( page.kind == wxAuiTabKind::Pinned )
+            const_cast<wxAuiNotebookPage&>(page).kind = wxAuiTabKind::Normal;
+    }
+
+    // This set will contain all the pages that should be pinned.
+    std::unordered_set<int> pinned;
+
+    // Remember the active page in the main tab control if we change it.
+    const wxWindow* activeInMainTab = nullptr;
+
+    // Keep track of pages we've already added to some tab control: even if the
+    // deserialized data is somehow incorrect and duplicates the page indices,
+    // we don't want to try to have the same page in more than one tab control.
+    std::unordered_set<int> addedPages;
+    const int pageCount = m_tabs.GetPageCount();
+
+    for ( const auto& tab : tabs )
+    {
+        wxAuiTabCtrl* tabCtrl = nullptr;
+
+        // We'll deal with the pinned pages outside of this loop below, after
+        // all pages are in their correct places, for now just remember them.
+        pinned.insert(tab.pinned.begin(), tab.pinned.end());
+
+        // The pages pointer will be set to point to either tab.pages or
+        // pageDefault in which case it will also be filled.
+        std::vector<int> pagesDefault;
+        const std::vector<int>* pages = nullptr;
+
+        // We don't need to create a new pane for the main, central tab control,
+        // but we still need to order its tabs correctly.
+        if ( tab.dock_direction == wxAUI_DOCK_CENTER )
+        {
+            // Special case: if the pages vector is empty check if we're using
+            // the default order, in which case we can avoid doing anything if
+            // the pages are already in the same order (which is a common case).
+            if ( tab.pages.empty() )
+            {
+                useExistingPages = true;
+
+                for ( int i = 0; i < pageCount; ++i )
+                {
+                    if ( tabMain->GetWindowFromIdx(i) != m_tabs.GetWindowFromIdx(i) )
+                    {
+                        useExistingPages = false;
+                        break;
+                    }
+                }
+
+                if ( useExistingPages )
+                {
+                    // All pages are in the main tab in the default order
+                    // already, so we don't have anything to do except
+                    // restoring the active page -- which is in this case the
+                    // same as selection (tab indices == notebook indices).
+                    SetSelection(tab.active);
+                    break;
+                }
+
+                // The pages had been reordered, restore the default order when
+                // re-adding them below.
+                for ( int i = 0; i < pageCount; ++i )
+                    pagesDefault.push_back(i);
+
+                pages = &pagesDefault;
+            }
+            else
+            {
+                // Just use the specified pages.
+                pages = &tab.pages;
+            }
+
+            // In any case, we must remove all pages currently in this tab as
+            // they will be re-added.
+            tabMain->RemoveAll();
+
+            tabCtrl = tabMain;
+        }
+        else // Non-central tab control.
+        {
+            // In this case, we must have some pages, but if we somehow don't,
+            // just skip adding the tab control entirely.
+            if ( tab.pages.empty() )
+                continue;
+
+            // Re-add using the saved layout.
+            wxAuiPaneInfo pane;
+            m_mgr.CopyDockLayoutTo(tab, pane);
+
+            // Our panes never show caption.
+            pane.CaptionVisible(false);
+
+            wxAuiTabFrame* tabframe = CreateTabFrame();
+            m_mgr.AddPane(tabframe, pane);
+
+            tabCtrl = tabframe->m_tabs;
+            pages = &tab.pages;
+        }
+
+        // In any case, add the pages that this tab control had before to it.
+        //
+        // There is one extra complication: we must ensure that any locked
+        // pages still come first, even if the deserializer positioned them
+        // wrongly, because this is an invariant of wxAuiNotebook and has to be
+        // respected. So instead of adding the pages directly, collect them in
+        // this vector first.
+        std::vector<int> pagesToAdd;
+        pagesToAdd.reserve(pages->size());
+
+        int lockedCount = 0;
+        for ( auto page : *pages )
+        {
+            // We just silently ignore invalid or duplicate page indices
+            // here, because it doesn't seem right for them to result in a
+            // fatal error and any warnings would be just annoying.
+            if ( page >= pageCount )
+                continue;
+
+            if ( !addedPages.insert(page).second )
+                continue;
+
+            if ( m_tabs.GetPage(page).kind == wxAuiTabKind::Locked )
+            {
+                // Locked pages must always come first, so insert them at the
+                // beginning (but keep their original order).
+                pagesToAdd.insert(pagesToAdd.begin() + lockedCount++, page);
+            }
+            else
+            {
+                pagesToAdd.push_back(page);
+            }
+        }
+
+        // In the degenerate case when all pages are invalid, pagesToAdd may be
+        // empty here, but we can still execute the rest of the code below, it
+        // just won't do anything.
+
+        const wxWindow* activeWindow = nullptr;
+        for ( auto page : pagesToAdd )
+        {
+            const auto& info = m_tabs.GetPage(page);
+
+            if ( page == tab.active )
+                activeWindow = info.window;
+
+            tabCtrl->AddPage(info);
+        }
+
+        if ( !activeWindow )
+        {
+            // We must have some active page, so make the first one active if
+            // the deserialized data didn't define a valid active page.
+            activeWindow = tabCtrl->GetWindowFromIdx(0);
+        }
+
+        tabCtrl->SetActivePage(activeWindow);
+
+        if ( tabCtrl == tabMain )
+        {
+            // Remember it to set the selection to it below.
+            activeInMainTab = activeWindow;
+        }
+    }
+
+    // Check if there were any existing pages not added to any tab control.
+    if ( !useExistingPages && wxSsize(addedPages) < pageCount )
+    {
+        // Use a stack here to remove the pages from the end below.
+        std::stack<int> toRemove;
+
+        for ( int i = 0; i < pageCount; ++i )
+        {
+            if ( addedPages.count(i) == 0 )
+            {
+                wxAuiTabCtrl* tabCtrl = tabMain;
+                int tabIndex = wxNOT_FOUND;
+                if ( deserializer.HandleOrphanedPage(*this, i,
+                                                     &tabCtrl, &tabIndex) )
+                {
+                    // Try not to crash even if the deserializer implements
+                    // HandleOrphanedPage() incorrectly.
+                    if ( !tabCtrl )
+                    {
+                        wxFAIL_MSG
+                        (
+                            "HandleOrphanedPage() can't return null tab control"
+                        );
+
+                        tabCtrl = tabMain;
+                    }
+
+                    const int tabCount = tabCtrl->GetPageCount();
+                    if ( tabIndex != wxNOT_FOUND && tabIndex >= tabCount )
+                    {
+                        wxFAIL_MSG
+                        (
+                            "HandleOrphanedPage() must return valid tab index"
+                        );
+
+                        tabIndex = wxNOT_FOUND;
+                    }
+
+                    if ( tabIndex == wxNOT_FOUND )
+                        tabIndex = tabCount;
+
+                    tabCtrl->InsertPage(m_tabs.GetPage(i), tabIndex);
+                }
+                else // Remove this page.
+                {
+                    toRemove.push(i);
+                }
+            }
+        }
+
+        while ( !toRemove.empty() )
+        {
+            // Note that we shouldn't call DoRemovePage() because it supposes
+            // that the page is in some tab control and does nothing if this is
+            // not the case.
+            m_tabs.RemovePageAt(toRemove.top());
+
+            toRemove.pop();
+        }
+
+        RemoveEmptyTabFrames();
+    }
+
+    // Now deal with the pinned pages: we must ensure that their positions are
+    // consistent, i.e. there are no non-pinned pages before a pinned one in
+    // any tab control.
+    if ( !pinned.empty() )
+    {
+        for ( auto tabCtrl : GetAllTabCtrls() )
+        {
+            bool stop = false;
+            for ( auto n : GetPagesInDisplayOrder(tabCtrl) )
+            {
+                auto& page = m_tabs.GetPage(n);
+                switch ( page.kind )
+                {
+                    case wxAuiTabKind::Normal:
+                        if ( pinned.count(n) )
+                        {
+                            // Make this page pinned. We don't need to call
+                            // SetPageKind() for this, as it's already in the
+                            // right place, just update its kind directly.
+                            page.kind = wxAuiTabKind::Pinned;
+
+                            int idx = tabCtrl->GetIdxFromWindow(page.window);
+                            if ( idx == wxNOT_FOUND )
+                            {
+                                // This would be a logic error in this code.
+                                wxFAIL_MSG("page not found in tab control");
+                                break;
+                            }
+
+                            tabCtrl->GetPage(idx).kind = wxAuiTabKind::Pinned;
+                        }
+                        else
+                        {
+                            // There can be no pinned pages after the first
+                            // normal one, so there is no point in continuing:
+                            // even if any other pages were marked as pinned in
+                            // the deserialized data, we would just ignore them
+                            // anyhow.
+                            stop = true;
+                        }
+                        break;
+
+                    case wxAuiTabKind::Pinned:
+                        // This would indicate a logic error in this function,
+                        // as we unpinned all the pages at the start of it.
+                        wxFAIL_MSG("all pages should be unpinned");
+                        break;
+
+                    case wxAuiTabKind::Locked:
+                        // We can't change the kind of a locked page, so either
+                        // it is before the pinned pages or data is invalid,
+                        // leave it as is in any case.
+                        break;
+                }
+
+                if ( stop )
+                    break;
+            }
+        }
+    }
+
+    // Update the active pages visibility in all tab controls after adding and
+    // removing all the pages.
+    for ( auto tabCtrl : GetAllTabCtrls() )
+    {
+        tabCtrl->DoUpdateActive();
+    }
+
+    // We don't save information about the currently focused tab control, so
+    // always make the main one active after loading the layout by setting the
+    // selected page to the page active in it (if there is no such page, it
+    // means we're reusing the existing pages and so don't need to do anything).
+    if ( activeInMainTab )
+        m_curPage = m_tabs.GetIdxFromWindow(activeInMainTab);
+
+    UpdateHintWindowSize();
+
+    m_mgr.Update();
+}
 
 #endif // wxUSE_AUI

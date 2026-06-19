@@ -109,12 +109,36 @@ enum wxSystemColour
     wxSYS_COLOUR_LISTBOXTEXT,
 
     /**
-        Text colour for the unfocused selection of list-like controls.
+        Text colour for the selected items in list-like controls.
+
+        This colour is supposed to have good contrast with the background drawn
+        by wxRendererNative::DrawItemSelectionRect().
 
         @since 2.9.1
      */
     wxSYS_COLOUR_LISTBOXHIGHLIGHTTEXT,
 
+    /**
+        Colour of separator lines in grid-like controls.
+
+        On macOS, this maps to `[NSColor gridLines]`, on other platforms
+        it is currently the same as ::wxSYS_COLOUR_BTNFACE.
+
+        @since 3.3.2
+     */
+    wxSYS_COLOUR_GRIDLINES,
+
+    /**
+        Background colour of a selected item in a wxListBox or similar control.
+
+        This colour is usually either identical or close to the main accent or
+        theme colour of the operating system.
+
+        On macOS, this maps to `[NSColor selectedContentBackgroundColor]`.
+
+        @since 3.3.2
+     */
+    wxSYS_COLOUR_LISTBOXHIGHLIGHT,
 
     // synonyms:
 
@@ -152,8 +176,17 @@ enum wxSystemMetric
     wxSYS_MOUSE_BUTTONS,      //!< Number of buttons on mouse, or zero if no mouse was installed.
     wxSYS_BORDER_X,           //!< Width of single border.
     wxSYS_BORDER_Y,           //!< Height of single border.
-    wxSYS_CURSOR_X,           //!< Width of cursor.
-    wxSYS_CURSOR_Y,           //!< Height of cursor.
+    wxSYS_CURSOR_X,           //!< Width of cursor in logical pixels.
+    wxSYS_CURSOR_Y,           //!< Height of cursor in logical pixels.
+    /**
+        Width or height of cursor in logical pixels.
+
+        This is the same as wxSYS_CURSOR_X and wxSYS_CURSOR_Y as cursors are
+        always square.
+
+        @since 3.3.0
+     */
+    wxSYS_CURSOR_SIZE,
     wxSYS_DCLICK_X,           //!< Width in pixels of rectangle within which two successive mouse clicks must fall to generate a double-click.
     wxSYS_DCLICK_Y,           //!< Height in pixels of rectangle within which two successive mouse clicks must fall to generate a double-click.
     wxSYS_DRAG_X,             //!< Width in pixels of a rectangle centered on a drag point to allow for limited movement of the mouse pointer before a drag operation begins.

@@ -306,6 +306,7 @@ WXLRESULT wxTopLevelWindowMSW::MSWWindowProc(WXUINT message, WXWPARAM wParam, WX
                 }
 
 #ifndef __WXUNIVERSAL__
+#if wxUSE_MENUS
                 // We need to generate events for the custom items added to the
                 // system menu if it had been created (and presumably modified).
                 // As SC_SIZE is the first of the system-defined commands, we
@@ -316,6 +317,7 @@ WXLRESULT wxTopLevelWindowMSW::MSWWindowProc(WXUINT message, WXWPARAM wParam, WX
                     if ( m_menuSystem->MSWCommand(0 /* unused anyhow */, id) )
                         processed = true;
                 }
+#endif // wxUSE_MENUS
 #endif // #ifndef __WXUNIVERSAL__
             }
             break;
@@ -510,14 +512,17 @@ bool wxTopLevelWindowMSW::Create(wxWindow *parent,
     // focus rectangles) work under Win2k+
     MSWUpdateUIState(UIS_INITIALIZE);
 
-    wxMSWDarkMode::EnableForTLW(GetHwnd());
+    if ( wxMSWDarkMode::IsActive() )
+        MSWSetDarkOrLightMode(SetMode::Initial);
 
     return true;
 }
 
 wxTopLevelWindowMSW::~wxTopLevelWindowMSW()
 {
+#if wxUSE_MENUS
     delete m_menuSystem;
+#endif // wxUSE_MENUS
 
     SendDestroyEvent();
 }
@@ -649,6 +654,8 @@ bool wxTopLevelWindowMSW::Show(bool show)
 
 void wxTopLevelWindowMSW::Raise()
 {
+    // Note that this doesn't show the window if it's currently hidden, which
+    // is exactly what this function is documented to do.
     ::SetForegroundWindow(GetHwnd());
 }
 
@@ -1016,12 +1023,16 @@ bool wxTopLevelWindowMSW::ShowFullScreen(bool show, long style)
 
 void wxTopLevelWindowMSW::SetTitle( const wxString& title)
 {
-    SetLabel(title);
+    // The base class version works for TLWs too in wxMSW but take care to
+    // select it explicitly as our overridden SetLabel() just redirects to
+    // SetTitle() itself.
+    wxWindow::SetLabel(title);
 }
 
 wxString wxTopLevelWindowMSW::GetTitle() const
 {
-    return GetLabel();
+    // See comment in SetTitle() above.
+    return wxWindow::GetLabel();
 }
 
 bool wxTopLevelWindowMSW::DoSelectAndSetIcon(const wxIconBundle& icons,
@@ -1215,6 +1226,7 @@ void wxTopLevelWindowMSW::RequestUserAttention(int flags)
 wxMenu *wxTopLevelWindowMSW::MSWGetSystemMenu() const
 {
 #ifndef __WXUNIVERSAL__
+#if wxUSE_MENUS
     if ( !m_menuSystem )
     {
         HMENU hmenu = ::GetSystemMenu(GetHwnd(), FALSE);
@@ -1240,6 +1252,7 @@ wxMenu *wxTopLevelWindowMSW::MSWGetSystemMenu() const
         // correct but doesn't seem to have any serious drawbacks.
         m_menuSystem->SetInvokingWindow(self);
     }
+#endif // wxUSE_MENUS
 #endif // #ifndef __WXUNIVERSAL__
 
     return m_menuSystem;

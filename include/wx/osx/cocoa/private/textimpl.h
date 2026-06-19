@@ -58,6 +58,12 @@ public :
     virtual bool CanForceUpper() override { return true; }
     virtual void ForceUpper() override;
 
+    virtual wxTextSearchResult SearchText(const wxTextSearch& WXUNUSED(search)) const override
+    {
+        wxFAIL_MSG("SearchText() should only be used with multiline controls.");
+        return wxTextSearchResult{};
+    }
+
     virtual wxString GetStringValue() const override ;
     virtual void SetStringValue( const wxString &str) override ;
     virtual wxString GetRTFValue() const override
@@ -116,6 +122,8 @@ public:
     virtual ~wxNSTextViewControl();
 
     virtual void insertText(NSString* text, WXWidget slf, void *_cmd) override;
+
+    virtual wxTextSearchResult SearchText(const wxTextSearch &search) const override;
 
     virtual wxString GetStringValue() const override ;
     virtual void SetStringValue( const wxString &str) override ;
@@ -177,25 +185,25 @@ public :
     wxNSComboBoxControl( wxComboBox *wxPeer, WXWidget w );
     virtual ~wxNSComboBoxControl();
 
-    virtual int GetSelectedItem() const;
-    virtual void SetSelectedItem(int item);
+    virtual int GetSelectedItem() const override;
+    virtual void SetSelectedItem(int item) override;
 
-    virtual int GetNumberOfItems() const;
+    virtual int GetNumberOfItems() const override;
 
-    virtual void InsertItem(int pos, const wxString& item);
-    virtual void RemoveItem(int pos);
+    virtual void InsertItem(int pos, const wxString& item) override;
+    virtual void RemoveItem(int pos) override;
 
-    virtual void Clear();
+    virtual void Clear() override;
 
-    virtual wxString GetStringAtIndex(int pos) const;
+    virtual wxString GetStringAtIndex(int pos) const override;
 
-    virtual int FindString(const wxString& text) const;
-    virtual void Popup();
-    virtual void Dismiss();
+    virtual int FindString(const wxString& text) const override;
+    virtual void Popup() override;
+    virtual void Dismiss() override;
 
-    virtual void SetEditable(bool editable);
+    virtual void SetEditable(bool editable) override;
 
-    virtual void mouseEvent(WX_NSEvent event, WXWidget slf, void *_cmd);
+    virtual void mouseEvent(WX_NSEvent event, WXWidget slf, void *_cmd) override;
 
 private:
     NSComboBox* m_comboBox;

@@ -11,12 +11,15 @@
 
 #include "wx/gtk/filectrl.h"    // for wxGtkFileChooser
 
+typedef struct _GtkFileChooser GtkFileChooser;
+
 //-------------------------------------------------------------------------
 // wxFileDialog
 //-------------------------------------------------------------------------
 
 class WXDLLIMPEXP_CORE wxFileDialog: public wxFileDialogBase
 {
+    typedef wxFileDialogBase BaseType;
 public:
     wxFileDialog() = default;
 
@@ -45,6 +48,7 @@ public:
     virtual wxString GetFilename() const override;
     virtual void GetFilenames(wxArrayString& files) const override;
     virtual int GetFilterIndex() const override;
+    virtual wxString GetDirectory() const override;
 
     virtual void SetMessage(const wxString& message) override;
     virtual void SetPath(const wxString& path) override;
@@ -54,12 +58,14 @@ public:
     virtual void SetFilterIndex(int filterIndex) override;
 
     virtual int ShowModal() override;
+    virtual void EndModal(int retCode) override;
 
     virtual bool AddShortcut(const wxString& directory, int flags = 0) override;
     virtual bool SupportsExtraControl() const override { return true; }
 
     // Implementation only.
     void GTKSelectionChanged(const wxString& filename);
+    void GTKDropNative();
 
 
 protected:
@@ -75,7 +81,14 @@ private:
     void OnSize(wxSizeEvent&);
     virtual void AddChildGTK(wxWindowGTK* child) override;
 
+    const wxGtkFileChooser& GetFileChooser() const
+    {
+        return m_fcNative ? *m_fcNative : m_fc;
+    }
+
     wxGtkFileChooser    m_fc;
+    wxGtkFileChooser* m_fcNative = nullptr;
+    GtkFileChooser* m_fileChooserNative = nullptr;
 
     wxDECLARE_DYNAMIC_CLASS(wxFileDialog);
     wxDECLARE_EVENT_TABLE();

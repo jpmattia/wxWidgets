@@ -48,7 +48,7 @@
 // --------------------------------
 
 // get HTREEITEM from wxTreeItemId
-#define HITEM(item)     ((HTREEITEM)(((item).m_pItem)))
+#define HITEM(item)     ((HTREEITEM)(((item).GetID())))
 
 
 // older SDKs are missing these
@@ -760,6 +760,35 @@ void wxTreeCtrl::Init()
     gs_expandEvents[IDX_EXPAND][IDX_DOING] = wxEVT_TREE_ITEM_EXPANDING;
 }
 
+WXDWORD wxTreeCtrl::MSWGetStyle(long style, WXDWORD *exstyle) const
+{
+    DWORD wstyle = wxTreeCtrlBase::MSWGetStyle(style, exstyle);
+    wstyle |= WS_TABSTOP | TVS_SHOWSELALWAYS;
+
+    if ( !(style & wxTR_NO_LINES) )
+        wstyle |= TVS_HASLINES;
+    if ( style & wxTR_HAS_BUTTONS )
+        wstyle |= TVS_HASBUTTONS;
+
+    if ( style & wxTR_EDIT_LABELS )
+        wstyle |= TVS_EDITLABELS;
+
+    if ( style & wxTR_LINES_AT_ROOT )
+        wstyle |= TVS_LINESATROOT;
+
+    if ( style & wxTR_FULL_ROW_HIGHLIGHT )
+    {
+        wstyle |= TVS_FULLROWSELECT;
+    }
+
+#if defined(TVS_INFOTIP)
+    // Need so that TVN_GETINFOTIP messages will be sent
+    wstyle |= TVS_INFOTIP;
+#endif
+
+    return wstyle;
+}
+
 bool wxTreeCtrl::Create(wxWindow *parent,
                         wxWindowID id,
                         const wxPoint& pos,
@@ -774,37 +803,11 @@ bool wxTreeCtrl::Create(wxWindow *parent,
     if ( !CreateControl(parent, id, pos, size, style, validator, name) )
         return false;
 
-    WXDWORD exStyle = 0;
-    DWORD wstyle = MSWGetStyle(m_windowStyle, & exStyle);
-    wstyle |= WS_TABSTOP | TVS_SHOWSELALWAYS;
-
-    if ( !(m_windowStyle & wxTR_NO_LINES) )
-        wstyle |= TVS_HASLINES;
-    if ( m_windowStyle & wxTR_HAS_BUTTONS )
-        wstyle |= TVS_HASBUTTONS;
-
-    if ( m_windowStyle & wxTR_EDIT_LABELS )
-        wstyle |= TVS_EDITLABELS;
-
-    if ( m_windowStyle & wxTR_LINES_AT_ROOT )
-        wstyle |= TVS_LINESATROOT;
-
-    if ( m_windowStyle & wxTR_FULL_ROW_HIGHLIGHT )
-    {
-        wstyle |= TVS_FULLROWSELECT;
-    }
-
-#if defined(TVS_INFOTIP)
-    // Need so that TVN_GETINFOTIP messages will be sent
-    wstyle |= TVS_INFOTIP;
-#endif
-
     // Create the tree control.
-    if ( !MSWCreateControl(WC_TREEVIEW, wstyle, pos, size) )
+    if ( !MSWCreateControl(WC_TREEVIEW, wxString{}, pos, size) )
         return false;
 
-    SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
-    SetForegroundColour(wxWindow::GetParent()->GetForegroundColour());
+    UpdateNativeColours();
 
     wxSetCCUnicodeFormat(GetHwnd());
 
@@ -814,6 +817,14 @@ bool wxTreeCtrl::Create(wxWindow *parent,
         // this style to it.
         EnableSystemThemeByDefault();
     }
+
+    m_indent = DoGetIndent();
+    DoSetIndent();
+
+    // And ensure we adjust it again if the DPI changes in the future.
+    Bind(wxEVT_DPI_CHANGED, &wxTreeCtrl::OnDPIChanged, this);
+
+    Bind(wxEVT_SYS_COLOUR_CHANGED, &wxTreeCtrl::OnSysColourChanged, this);
 
     return true;
 }
@@ -924,11 +935,39 @@ unsigned int wxTreeCtrl::GetCount() const
 
 unsigned int wxTreeCtrl::GetIndent() const
 {
+    return m_indent;
+}
+
+unsigned int wxTreeCtrl::DoGetIndent() const
+{
     return TreeView_GetIndent(GetHwnd());
 }
 
 void wxTreeCtrl::SetIndent(unsigned int indent)
 {
+    m_indent = indent;
+    DoSetIndent();
+}
+
+void wxTreeCtrl::DoSetIndent()
+{
+    // When using non-standard DPI, we need to scale the default indent with
+    // the DPI scaling factor as Windows doesn't do it and the "+" buttons
+    // would be displayed too small if the tree is used without images.
+    int indent = FromDIP(m_indent);
+
+    // When the images in the imageList are smaller than FromDIP(16),
+    // the scaled indent has to be reduced to the width of the images.
+    // Otherwise the hitbox of the collapse/expand button will be shifted
+    // too much to the right.
+    wxImageList* imgList = GetImageList();
+    if (imgList != nullptr)
+    {
+        int diff = imgList->GetSize().GetWidth() - FromDIP(16);
+        if (diff < 0)
+            indent += diff;
+    }
+
     (void)TreeView_SetIndent(GetHwnd(), indent);
 }
 
@@ -938,6 +977,7 @@ void wxTreeCtrl::SetAnyImageList(wxImageList *imageList, int which)
     (void) TreeView_SetImageList(GetHwnd(),
                                  imageList ? imageList->GetHIMAGELIST() : 0,
                                  which);
+    DoSetIndent();
 }
 
 void wxTreeCtrl::SetImageList(wxImageList *imageList)
@@ -994,6 +1034,12 @@ bool wxTreeCtrl::SetForegroundColour(const wxColour &colour)
     ::SendMessage(GetHwnd(), TVM_SETTEXTCOLOR, 0, colour.GetPixel());
 
     return true;
+}
+
+void wxTreeCtrl::UpdateNativeColours()
+{
+    ::SendMessage(m_hWnd, TVM_SETBKCOLOR, 0, GetBackgroundColour().GetPixel());
+    ::SendMessage(m_hWnd, TVM_SETTEXTCOLOR, 0, GetForegroundColour().GetPixel());
 }
 
 // ----------------------------------------------------------------------------
@@ -1192,7 +1238,7 @@ wxColour wxTreeCtrl::GetItemTextColour(const wxTreeItemId& item) const
 {
     wxCHECK_MSG( item.IsOk(), wxNullColour, wxT("invalid tree item") );
 
-    const auto it = m_attrs.find(item.m_pItem);
+    const auto it = m_attrs.find(item.GetID());
     return it == m_attrs.end() ? wxNullColour : it->second->GetTextColour();
 }
 
@@ -1200,7 +1246,7 @@ wxColour wxTreeCtrl::GetItemBackgroundColour(const wxTreeItemId& item) const
 {
     wxCHECK_MSG( item.IsOk(), wxNullColour, wxT("invalid tree item") );
 
-    const auto it = m_attrs.find(item.m_pItem);
+    const auto it = m_attrs.find(item.GetID());
     return it == m_attrs.end() ? wxNullColour : it->second->GetBackgroundColour();
 }
 
@@ -1208,18 +1254,18 @@ wxFont wxTreeCtrl::GetItemFont(const wxTreeItemId& item) const
 {
     wxCHECK_MSG( item.IsOk(), wxNullFont, wxT("invalid tree item") );
 
-    const auto it = m_attrs.find(item.m_pItem);
+    const auto it = m_attrs.find(item.GetID());
     return it == m_attrs.end() ? wxNullFont : it->second->GetFont();
 }
 
 wxItemAttr* wxTreeCtrl::DoGetAttrPtr(const wxTreeItemId& item)
 {
     wxItemAttr *attr;
-    const auto it = m_attrs.find(item.m_pItem);
+    const auto it = m_attrs.find(item.GetID());
     if ( it == m_attrs.end() )
     {
         attr = new wxItemAttr;
-        m_attrs[item.m_pItem] = std::unique_ptr<wxItemAttr>(attr);
+        m_attrs[item.GetID()] = std::unique_ptr<wxItemAttr>(attr);
     }
     else
     {
@@ -1413,7 +1459,7 @@ wxTreeItemId wxTreeCtrl::GetNextChild(const wxTreeItemId& WXUNUSED(item),
 
     wxTreeItemId item(hitem);
 
-    cookie = item.m_pItem;
+    cookie = item.GetID();
 
     return item;
 }
@@ -1721,7 +1767,6 @@ void wxTreeCtrl::DeleteAllItems()
     TreeItemUnlocker unlock_all;
 
     // invalidate all the items we store as they're going to become invalid
-    m_htEnsureVisibleOnThaw =
     m_htSelStart =
     m_htClickedItem = wxTreeItemId();
 
@@ -2000,7 +2045,7 @@ void wxTreeCtrl::EnsureVisible(const wxTreeItemId& item)
         // while we're frozen, as we disable scrolling in this case. So just
         // remember that item we were supposed to make visible and actually do
         // it when the control is thawed.
-        m_htEnsureVisibleOnThaw = item;
+        m_htEnsureVisibleOnThaw.push_back(item);
         return;
     }
 
@@ -2298,6 +2343,20 @@ void wxTreeCtrl::MSWUpdateFontOnDPIChange(const wxSize& newDPI)
         if ( kv.second->HasFont() )
             SetItemFont(kv.first, kv.second->GetFont());
     }
+}
+
+void wxTreeCtrl::OnDPIChanged(wxDPIChangedEvent& event)
+{
+    // Adjust the indent to the new DPI scaling factor as Windows doesn't do it.
+    DoSetIndent();
+
+    event.Skip();
+}
+
+void wxTreeCtrl::OnSysColourChanged(wxSysColourChangedEvent& event)
+{
+    UpdateNativeColours();
+    event.Skip();
 }
 
 bool wxTreeCtrl::MSWIsOnItem(unsigned flags) const
@@ -3989,11 +4048,22 @@ void wxTreeCtrl::DoThaw()
 
     wxTreeCtrlBase::DoThaw();
 
-    if ( !IsFrozen() && m_htEnsureVisibleOnThaw.IsOk() )
+    if ( !IsFrozen() && !m_htEnsureVisibleOnThaw.empty() )
     {
         // Really do the job of EnsureVisible() now that we can.
-        EnsureVisible(m_htEnsureVisibleOnThaw);
-        m_htEnsureVisibleOnThaw.Unset();
+        for ( auto item : m_htEnsureVisibleOnThaw )
+        {
+            if ( !item.IsOk() )
+            {
+                // If the item has become invalid between calls to
+                // EnsureVisible() and Thaw(), it's probably not a problem.
+                continue;
+            }
+
+            EnsureVisible(item);
+        }
+
+        m_htEnsureVisibleOnThaw.clear();
     }
 }
 

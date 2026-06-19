@@ -186,6 +186,11 @@ public:
     // minimum pane size is zero.
     virtual void OnDoubleClickSash(int x, int y);
 
+    // Do not allow wxSplitterWindow to get the focus as there is
+    // no keyboard handling anyways and the child windows should
+    // keep the focus
+    bool AcceptsFocus() const override { return false; }
+
 ////////////////////////////////////////////////////////////////////////////
 // Implementation
 
@@ -406,7 +411,7 @@ public:
         return m_data.pt.y;
     }
 
-    virtual wxEvent *Clone() const override { return new wxSplitterEvent(*this); }
+    wxNODISCARD virtual wxEvent *Clone() const override { return new wxSplitterEvent(*this); }
 
 private:
     friend class WXDLLIMPEXP_FWD_CORE wxSplitterWindow;

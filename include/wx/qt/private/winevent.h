@@ -24,6 +24,13 @@
 // redeclare wxEVT_TEXT_ENTER here instead of including "wx/textctrl.h"
 wxDECLARE_EXPORTED_EVENT(WXDLLIMPEXP_CORE, wxEVT_TEXT_ENTER, wxCommandEvent);
 
+// The parameter of QWidget::enterEvent() is changed to QEnterEvent in Qt6
+#if QT_VERSION_MAJOR >= 6
+using wxQtEnterEvent = QEnterEvent;
+#else
+using wxQtEnterEvent = QEvent;
+#endif
+
 class QPaintEvent;
 
 
@@ -83,15 +90,7 @@ public:
         // Set immediately as it is used to check if wxWindow is alive
         wxWindow::QtStoreWindowPointer( this, handler );
 
-        // Handle QWidget destruction signal AFTER it gets deleted
-        QObject::connect( this, &QObject::destroyed, this,
-                          &wxQtEventSignalHandler::HandleDestroyedSignal );
-
         Widget::setMouseTracking(true);
-    }
-
-    void HandleDestroyedSignal()
-    {
     }
 
     virtual Handler *GetHandler() const override
@@ -159,18 +158,6 @@ protected:
     //wxDropFilesEvent
     //virtual void dropEvent ( QDropEvent * event ) { }
 
-    //wxMouseEvent
-    virtual void enterEvent ( QEvent * event ) override
-    {
-        if ( !this->GetHandler() )
-            return;
-
-        if ( !this->GetHandler()->QtHandleEnterEvent(this, event) )
-            Widget::enterEvent(event);
-        else
-            event->accept();
-    }
-
     //wxFocusEvent.
     virtual void focusInEvent ( QFocusEvent * event ) override
     {
@@ -227,6 +214,18 @@ protected:
 
         if ( !this->GetHandler()->QtHandleKeyEvent(this, event) )
             Widget::keyReleaseEvent(event);
+        else
+            event->accept();
+    }
+
+    //wxMouseEvent
+    virtual void enterEvent ( wxQtEnterEvent * event ) override
+    {
+        if ( !this->GetHandler() )
+            return;
+
+        if ( !this->GetHandler()->QtHandleEnterEvent(this, event) )
+            Widget::enterEvent(event);
         else
             event->accept();
     }
@@ -365,12 +364,74 @@ protected:
 
     virtual bool event(QEvent *event) override
     {
-        if (event->type() == QEvent::Gesture)
+        switch (event->type())
         {
-            return gestureEvent(static_cast<QGestureEvent*>(event), event);
+            case QEvent::Gesture:
+                return gestureEvent(static_cast<QGestureEvent*>(event), event);
+
+            case QEvent::TouchBegin:
+            case QEvent::TouchUpdate:
+            case QEvent::TouchCancel:
+            case QEvent::TouchEnd:
+                return touchEvent(static_cast<QTouchEvent*>(event));
+            default:;
         }
 
         return Widget::event(event);
+    }
+
+    bool touchEvent(QTouchEvent *touch)
+    {
+        bool handled = false;
+
+        if ( wxWindow *win = wxWindow::QtRetrieveWindowPointer(this) )
+        {
+#if QT_VERSION_MAJOR >= 6
+            for (const auto& tp : touch->points())
+#else
+            for (const auto& tp : touch->touchPoints())
+#endif
+            {
+                wxEventType evtype = wxEVT_NULL;
+
+                switch (tp.state())
+                {
+                    case Qt::TouchPointPressed:
+                        evtype = wxEVT_TOUCH_BEGIN;
+                        break;
+
+                    case Qt::TouchPointMoved:
+                        evtype = wxEVT_TOUCH_MOVE;
+                        break;
+                    case Qt::TouchPointReleased:
+                        evtype = wxEVT_TOUCH_END;
+                        break;
+
+                    default:
+                        continue;
+                }
+
+                wxMultiTouchEvent evt(win->GetId(), evtype);
+
+                // Use screen position as the event might originate from a different
+                // Qt window than this one.
+#if QT_VERSION_MAJOR >= 6
+                const auto screenPos = tp.globalPosition();
+#else
+                const auto screenPos = tp.screenPos();
+#endif
+                wxPoint2DDouble pt = wxQtConvertPointF(screenPos.toPoint());
+                wxPoint ref = pt.GetFloor();
+
+                evt.SetPosition(win->ScreenToClient(ref) + (pt - ref));
+                evt.SetSequenceId(wxTouchSequenceId(wxUIntToPtr((unsigned)tp.id())));
+                // Qt doesn't provide the primary point flag
+
+                handled |= win->ProcessWindowEvent(evt);
+            }
+        }
+
+        return handled;
     }
 
     bool gestureEvent(QGestureEvent *gesture, QEvent *event)
@@ -397,27 +458,16 @@ protected:
 
     void tapandholdTriggered(QTapAndHoldGesture *gesture, QEvent *event)
     {
-        wxWindow *win = wxWindow::QtRetrieveWindowPointer( this );
-
-        if (gesture->state() == Qt::GestureFinished)
+        if ( wxWindow *win = wxWindow::QtRetrieveWindowPointer( this ) )
         {
-            if ( win )
+            if (gesture->state() == Qt::GestureFinished)
             {
                 wxLongPressEvent ev(win->GetId());
                 ev.SetPosition( wxQtConvertPoint( gesture->position().toPoint() ) );
 
                 ev.SetGestureEnd();
                 win->ProcessWindowEvent( ev );
-                event->accept();
             }
-
-        }
-        else if (gesture->state() == Qt::GestureStarted)
-        {
-            event->accept();
-        }
-        else
-        {
             event->accept();
         }
     }

@@ -34,7 +34,7 @@ static const wxString strWX("hello, world");
 
 TEST_CASE("CRT::SetGetEnv", "[crt][getenv][setenv]")
 {
-#define TESTVAR_NAME wxT("WXTESTVAR")
+#define TESTVAR_NAME "WXTESTVAR"
 
     wxString val;
     wxSetEnv(TESTVAR_NAME, wxT("value"));
@@ -42,10 +42,20 @@ TEST_CASE("CRT::SetGetEnv", "[crt][getenv][setenv]")
     CHECK( val == "value" );
     CHECK( wxString(wxGetenv(TESTVAR_NAME)) == "value" );
 
-    wxSetEnv(TESTVAR_NAME, wxT("something else"));
+    const wxString nonASCII = wxString::FromUTF8("☺");
+    wxSetEnv(TESTVAR_NAME, nonASCII);
     CHECK( wxGetEnv(TESTVAR_NAME, &val) );
-    CHECK( val == "something else" );
-    CHECK( wxString(wxGetenv(TESTVAR_NAME)) == "something else" );
+    CHECK( val == nonASCII );
+
+    // Under MSW the current locale encoding is used for storing the value in
+    // the ASCII environment block, so we can't expect to get it back unless
+    // this encoding is UTF-8, which is not the case by default.
+#ifndef __WINDOWS__
+    CHECK( wxString::FromUTF8(wxGetenv(TESTVAR_NAME)) == nonASCII );
+#endif
+
+    // Wide char wxGetenv() overload does work, under both MSW and Unix.
+    CHECK( wxGetenv(L"WXTESTVAR") == nonASCII );
 
     CHECK( wxUnsetEnv(TESTVAR_NAME) );
     CHECK( !wxGetEnv(TESTVAR_NAME, nullptr) );
@@ -58,12 +68,12 @@ TEST_CASE("CRT::Strchr", "[crt][strchr]")
 {
     // test that searching for a wide character in a narrow string simply
     // doesn't find it but doesn't fail with an assert (#11487)
-    const wxUniChar smiley = *wxString::FromUTF8("\xe2\x98\xba").begin();
+    const wxUniChar smiley = *wxString::FromUTF8("☺").begin();
 
     CHECK( !wxStrchr("hello", smiley) );
 
     // but searching for an explicitly wide character does find it
-    CHECK( wxStrchr(wxString::FromUTF8(":-) == \xe2\x98\xba"),
+    CHECK( wxStrchr(wxString::FromUTF8(":-) == ☺"),
                     static_cast<wchar_t>(smiley)) );
 }
 
@@ -266,5 +276,27 @@ TEST_CASE("CRT::Strtox", "[crt][strtod][strtol]")
         CHECK( wxStrtod(s, nullptr) == d );
         CHECK( wxStrtol(s, nullptr, 10) == l );
 #endif
+    }
+}
+
+TEST_CASE("CRT::SnprintfZeroSize", "[crt][snprintf]")
+{
+    // wxVsnprintf() used to unconditionally execute str[size - 1] = 0 on
+    // return; with size == 0 this wraps to str[SIZE_MAX] and corrupts memory
+    // (or crashes). The same off-by-one was present in the underlying
+    // ConvertStringToBuf() helper which performed memcpy of (outsize-1) bytes
+    // when outsize was 0. Check that both narrow and wide overloads of
+    // wxSnprintf() leave the supplied buffer untouched when size is 0.
+    char    bufa[8] = { 'a','b','c','d','e','f','g','h' };
+    wchar_t bufw[8] = { L'a',L'b',L'c',L'd',L'e',L'f',L'g',L'h' };
+
+    (void)wxSnprintf(bufa, 0, "test");
+    (void)wxSnprintf(bufw, 0, L"test");
+
+    for ( size_t i = 0; i < 8; i++ )
+    {
+        INFO("i=" << i);
+        CHECK( bufa[i] == "abcdefgh"[i] );
+        CHECK( bufw[i] == L"abcdefgh"[i] );
     }
 }

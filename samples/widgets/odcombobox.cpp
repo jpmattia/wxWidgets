@@ -85,7 +85,7 @@ enum
 class ODComboboxWidgetsPage : public ItemContainerWidgetsPage
 {
 public:
-    ODComboboxWidgetsPage(WidgetsBookCtrl *book, wxImageList *imaglist);
+    ODComboboxWidgetsPage(WidgetsBookCtrl *book, wxVector<wxBitmapBundle>& imaglist);
 
     virtual wxWindow *GetWidget() const override { return m_combobox; }
     virtual wxTextEntryBase *GetTextEntry() const override
@@ -301,7 +301,7 @@ IMPLEMENT_WIDGETS_PAGE(ODComboboxWidgetsPage, "OwnerDrawnCombobox",
                        );
 
 ODComboboxWidgetsPage::ODComboboxWidgetsPage(WidgetsBookCtrl *book,
-                                             wxImageList *imaglist)
+                                             wxVector<wxBitmapBundle>& imaglist)
                   : ItemContainerWidgetsPage(book, imaglist, odcombobox_xpm)
 {
     // init everything
@@ -366,7 +366,7 @@ void ODComboboxWidgetsPage::CreateContent()
 
     m_chkAlignpopupright = CreateCheckBoxAndAddToSizer(sizerPopupPos, "Align Right", wxID_ANY, sizerPopupPosBox);
 
-    sizerLeft->Add(sizerPopupPos, wxSizerFlags().Expand().Border(wxTOP, 2));
+    sizerLeft->Add(sizerPopupPos, wxSizerFlags().Expand().Border(wxTOP, FromDIP(2)));
 
     // left pane - button adjustment box
     wxStaticBoxSizer *sizerButtonPos = new wxStaticBoxSizer(wxVERTICAL, this, "Adjust &button");
@@ -395,7 +395,7 @@ void ODComboboxWidgetsPage::CreateContent()
 
     m_chkAlignbutleft = CreateCheckBoxAndAddToSizer(sizerButtonPos, "Align Left", wxID_ANY, sizerButtonPosBox);
 
-    sizerLeft->Add(sizerButtonPos, wxSizerFlags().Expand().Border(wxTOP, 2));
+    sizerLeft->Add(sizerButtonPos, wxSizerFlags().Expand().Border(wxTOP, FromDIP(2)));
 
     // middle pane
     wxStaticBoxSizer *sizerMiddle = new wxStaticBoxSizer(wxVERTICAL, this, "&Change combobox contents");

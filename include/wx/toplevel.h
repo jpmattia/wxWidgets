@@ -118,6 +118,20 @@ enum wxContentProtection
     wxCONTENT_PROTECTION_ENABLED
 };
 
+enum class wxWindowMode
+{
+    // Normal, not modal, window.
+    Normal,
+
+    // Modal in parent window scope, i.e. the user must close this window
+    // before being able to interact with the parent window again.
+    WindowModal,
+
+    // Modal in application scope, i.e. the user must close this window
+    // before being able to interact with any other window in the application.
+    AppModal
+};
+
 // ----------------------------------------------------------------------------
 // wxTopLevelWindow: a top level (as opposed to child) window
 // ----------------------------------------------------------------------------
@@ -191,6 +205,10 @@ public:
     virtual void SetTitle(const wxString& title) = 0;
     virtual wxString GetTitle() const = 0;
 
+    // label is the same as title for top-level windows
+    virtual void SetLabel(const wxString& label) override { SetTitle( label ); }
+    virtual wxString GetLabel() const override            { return GetTitle(); }
+
     // enable/disable close button [x]
     virtual bool EnableCloseButton(bool WXUNUSED(enable) = true) { return false; }
     virtual bool EnableMaximizeButton(bool WXUNUSED(enable) = true) { return false; }
@@ -232,16 +250,14 @@ public:
         { return m_winTmpDefault ? m_winTmpDefault : m_winDefault; }
 
     // set the permanent default item, return the old default
-    wxWindow *SetDefaultItem(wxWindow *win)
-        { wxWindow *old = GetDefaultItem(); m_winDefault = win; return old; }
+    wxWindow *SetDefaultItem(wxWindow *win);
 
     // return the temporary default item, can be null
     wxWindow *GetTmpDefaultItem() const { return m_winTmpDefault; }
 
     // set a temporary default item, SetTmpDefaultItem(nullptr) should be called
     // soon after a call to SetTmpDefaultItem(window), return the old default
-    wxWindow *SetTmpDefaultItem(wxWindow *win)
-        { wxWindow *old = GetDefaultItem(); m_winTmpDefault = win; return old; }
+    wxWindow *SetTmpDefaultItem(wxWindow *win);
 
 
     // Class for saving/restoring fields describing the window geometry.
@@ -284,6 +300,7 @@ public:
     // override to do TLW-specific layout: we resize our unique child to fill
     // the entire client area
     virtual bool Layout() override;
+    virtual void Fit() override;
 
     // event handlers
     void OnCloseWindow(wxCloseEvent& event);

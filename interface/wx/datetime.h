@@ -925,7 +925,9 @@ public:
 
         Notice that POSIX @c "%g", @c "%G", @c "%V" and @c "%z" format
         specifiers are supported even if the standard library doesn't support
-        them (e.g. MSVC).
+        them (as is the case when using MinGW, for example), but wxWidgets own
+        implementation is used if any of them are used instead of calling
+        `strftime()`.
 
         It also accepts a few wxWidgets-specific extensions: you can optionally
         specify the width of the field to follow using @c printf(3)-like syntax
@@ -976,7 +978,7 @@ public:
         This function is like ParseDateTime(), but it only allows the date to
         be specified.
 
-        It is thus less flexible then ParseDateTime(), but also has less
+        It is thus less flexible than ParseDateTime(), but also has less
         chances to misinterpret the user input.
 
         See ParseFormat() for the description of function parameters and return

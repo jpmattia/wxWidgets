@@ -15,8 +15,11 @@
         <if cond="FORMAT=='autoconf'">
             <res-include>$(RCDEFDIR)</res-include>
             <res-include>$(TOP_SRCDIR)include</res-include>
+            <cxxflags>$(CATCH2_CFLAGS)</cxxflags>
         </if>
-        <include>$(TOP_SRCDIR)3rdparty/catch/single_include</include>
+        <if cond="FORMAT!='autoconf'">
+            <include>$(TOP_SRCDIR)3rdparty/catch/single_include</include>
+        </if>
 
         <if cond="WX_DISABLE_PRECOMP_HEADERS=='0'">
             <if cond="FORMAT!='autoconf' and PLATFORM_WIN32=='1'">
@@ -140,7 +143,6 @@
         <sources>
             test.cpp
             drawing/drawing.cpp
-            drawing/plugindriver.cpp
             drawing/basictest.cpp
             drawing/fonttest.cpp
         </sources>
@@ -148,25 +150,6 @@
         <wx-lib>net</wx-lib>
         <wx-lib>base</wx-lib>
     </exe>
-
-    <!--
-      This is a sample plugin, it simply uses a wxImage based
-      wxGraphicsContext. It should render the same as the built-in test. Use
-      the WX_TEST_SUITE_GC_DRAWING_PLUGINS variable to specify the location of
-      the produced DLL/so to get it loaded and tested. To make your own plugin,
-      you can copy this sample and link toward your own implementation of
-      wxGraphicsContext interface, building the appropriate DrawingTestGCFactory
-      -->
-    <module id="test_drawingplugin" template="wx"
-                                    template_append="wx_append"
-            cond="USE_GUI=='1' and SHARED=='1'">
-        <define>$(DLLFLAG)</define>
-        <sources>
-            drawing/pluginsample.cpp
-        </sources>
-        <wx-lib>core</wx-lib>
-        <wx-lib>base</wx-lib>
-    </module>
 
     <template id="stc_append">
         <if cond="OUT_OF_TREE_MAKEFILES=='0'">
@@ -201,6 +184,7 @@
             graphics/boundingbox.cpp
             graphics/clipper.cpp
             graphics/clippingbox.cpp
+            graphics/svgattributes.cpp
             graphics/coords.cpp
             graphics/graphbitmap.cpp
             graphics/graphmatrix.cpp
@@ -229,6 +213,7 @@
             controls/htmllboxtest.cpp
             controls/hyperlinkctrltest.cpp
             controls/itemcontainertest.cpp
+            controls/infobar.cpp
             controls/label.cpp
             controls/listbasetest.cpp
             controls/listbooktest.cpp
@@ -250,6 +235,7 @@
             controls/slidertest.cpp
             controls/spinctrldbltest.cpp
             controls/spinctrltest.cpp
+            controls/statbmptest.cpp
             controls/styledtextctrltest.cpp
             controls/textctrltest.cpp
             controls/textentrytest.cpp
@@ -263,6 +249,7 @@
             controls/windowtest.cpp
             controls/dialogtest.cpp
             events/clone.cpp
+            events/enterleave.cpp
             <!--
                 Duplicate this file here to test GUI event loops too.
              -->
@@ -276,7 +263,9 @@
             exec/exec.cpp
             font/fonttest.cpp
             image/image.cpp
+            image/imagwebp.cpp
             image/rawbmp.cpp
+            html/helpdata.cpp
             html/htmlparser.cpp
             html/htmlwindow.cpp
             html/htmprint.cpp
@@ -287,6 +276,7 @@
             misc/garbage.cpp
             misc/safearrayconverttest.cpp
             misc/settings.cpp
+            misc/textwrap.cpp
             <!--
                 This one is intentionally duplicated here (it is also part of
                 non-GUI test) as sockets behave differently in console and GUI
@@ -364,7 +354,8 @@
     <wx-data id="data-image-sample">
         <!-- test data for image/image.cpp test unit: -->
         <files>horse.ani  horse.bmp  horse.cur  horse.gif  horse.ico  horse.jpg
-               horse.pcx  horse.png  horse.pnm  horse.tga  horse.tif  horse.xpm</files>
+               horse.pcx  horse.png  horse.pnm  horse.tga  horse.tif  horse.xpm
+               horse.webp</files>
     </wx-data>
 
     <wx-data id="data-images">
@@ -379,6 +370,14 @@
             bitfields-alpha.bmp
             8bpp-colorsused-large.bmp
             8bpp-colorsused-negative.bmp
+            32bpp_rgb.bmp
+            32bpp_rgb.ico
+            32bpp_rgb_a0.ico
+            badrle4.bmp
+            rgb16-3103.bmp
+            rgb32-7187.bmp
+            rgb32bf.bmp
+            rgba32.bmp
             rle4-delta-320x240.bmp
             rle8-delta-320x240.bmp
             rle8-delta-320x240-expected.bmp
@@ -449,7 +448,7 @@
 
 
     <fragment format="autoconf">
-failtest: failtest_combobox failtest_evthandler failtest_weakref failtest_allheaders
+failtest: failtest_combobox failtest_evthandler failtest_msgid failtest_weakref failtest_allheaders
 
 failtest_combobox:
 	@$(RM) test_gui_comboboxtest.o
@@ -469,6 +468,13 @@ failtest_evthandler:
 	done; \
 	exit 0
 
+failtest_msgid:
+	@$(RM) test_intltest.o
+	if $(MAKE) CPPFLAGS=-DTEST_INVALID_MSGID test_intltest.o 2>/dev/null; then \
+	    echo "*** Compilation with TEST_INVALID_MSGID unexpectedly succeeded.">&amp;2; \
+	    exit 1; \
+	fi;
+
 failtest_weakref:
 	@$(RM) test_weakref.o
 	if $(MAKE) CPPFLAGS=-DTEST_INVALID_INCOMPLETE_WEAKREF test_weakref.o 2>/dev/null; then \
@@ -485,7 +491,20 @@ failtest_allheaders:
 	fi; \
 	exit 0
 
-.PHONY: failtest failtest_combobox failtest_evthandler failtest_weakref failtest_allheaders
+.PHONY: failtest failtest_combobox failtest_evthandler failtest_msgid failtest_weakref failtest_allheaders
     </fragment>
 
+    <!-- Test that each header can be included independently, i.e. is self-contained. -->
+    <fragment format="autoconf">
+allheaders_selfcontained:
+	@if [ -z "$$check_headers" ]; then \
+	    check_headers=`sed -ne '/BEGIN STANDALONE CHECK/,/END STANDALONE CHECK/s/#include &lt;\(.\+\)&gt;$$/\1/p' $(top_srcdir)/tests/allheaders.h`; \
+	fi; \
+	for h in $$check_headers; do \
+	    if ! $(CXX) -fsyntax-only -Wall -Werror -x c++ $(TEST_ALLHEADERS_CXXFLAGS) $(top_srcdir)/include/$$h; then \
+		echo "*** Checking $$h failed.">&amp;2; \
+		exit 1; \
+	    fi; \
+	done
+    </fragment>
 </makefile>

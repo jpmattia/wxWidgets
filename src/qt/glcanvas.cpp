@@ -12,6 +12,7 @@
 #include "wx/qt/private/winevent.h"
 #include "wx/glcanvas.h"
 
+#include <QOpenGLContext>
 #include <QOpenGLWidget>
 #include <QSurfaceFormat>
 #include <QtWidgets/QGestureRecognizer>
@@ -68,7 +69,7 @@ wxGLContextAttrs& wxGLContextAttrs::CoreProfile()
 {
 //    AddAttribBits(GLX_CONTEXT_PROFILE_MASK_ARB,
 //                  GLX_CONTEXT_CORE_PROFILE_BIT_ARB);
-    AddAttribute(wx_GL_COMPAT_PROFILE);
+    AddAttribute(WX_GL_COMPAT_PROFILE);
     SetNeedsARB();
     return *this;
 }
@@ -98,7 +99,7 @@ wxGLContextAttrs& wxGLContextAttrs::MinorVersion(int val)
 
 wxGLContextAttrs& wxGLContextAttrs::CompatibilityProfile()
 {
-    AddAttribute(wx_GL_COMPAT_PROFILE);
+    AddAttribute(WX_GL_COMPAT_PROFILE);
     SetNeedsARB();
     return *this;
 }
@@ -153,7 +154,6 @@ wxGLContextAttrs& wxGLContextAttrs::ReleaseFlush(int val)
 
 wxGLContextAttrs& wxGLContextAttrs::PlatformDefaults()
 {
-    renderTypeRGBA = true;
     return *this;
 }
 
@@ -365,6 +365,13 @@ bool wxGLContext::SetCurrent(const wxGLCanvas& win) const
     return true;
 }
 
+/* static */
+void wxGLContextBase::ClearCurrent()
+{
+    if (auto* const current = QOpenGLContext::currentContext())
+        current->doneCurrent();
+}
+
 //---------------------------------------------------------------------------
 // PanGestureRecognizer - helper class for wxGLCanvas
 //---------------------------------------------------------------------------
@@ -376,13 +383,13 @@ private:
 
     typedef QGestureRecognizer parent;
 
-    bool IsValidMove(int dx, int dy);
+    bool IsValidMove(double dx, double dy);
 
-    virtual QGesture* create(QObject* pTarget);
+    virtual QGesture* create(QObject* pTarget) override;
 
-    virtual QGestureRecognizer::Result recognize(QGesture* pGesture, QObject *pWatched, QEvent *pEvent);
+    virtual QGestureRecognizer::Result recognize(QGesture* pGesture, QObject* pWatched, QEvent* pEvent) override;
 
-    void reset (QGesture *pGesture);
+    virtual void reset(QGesture* pGesture) override;
 
     QPointF m_startPoint;
     QPointF m_lastPoint;
@@ -623,7 +630,7 @@ bool wxGLCanvas::ConvertWXAttrsToQtGL(const wxGLAttributes &wxGLAttrs, const wxG
                 format.setProfile(QSurfaceFormat::CoreProfile);
                 break;
 
-            case wx_GL_COMPAT_PROFILE:
+            case WX_GL_COMPAT_PROFILE:
                 format.setProfile(QSurfaceFormat::CompatibilityProfile);
                 break;
 
@@ -686,7 +693,7 @@ bool wxGLApp::InitGLVisual(const int *attribList)
 // -----------------------------------------------------------------------------------------
 
 bool
-PanGestureRecognizer::IsValidMove(int dx, int dy)
+PanGestureRecognizer::IsValidMove(double dx, double dy)
 {
    // The moved distance is to small to count as not just a glitch.
    if ((qAbs(dx) < MINIMUM_DISTANCE) && (qAbs(dy) < MINIMUM_DISTANCE))
@@ -741,8 +748,8 @@ PanGestureRecognizer::recognize(QGesture* pGesture, QObject *pWatched, QEvent *p
                 pPan->setHotSpot(p1.startScreenPos());
 
                 // process distance and direction
-                int dx = endPoint.x() - m_startPoint.x();
-                int dy = endPoint.y() - m_startPoint.y();
+                const double dx = endPoint.x() - m_startPoint.x();
+                const double dy = endPoint.y() - m_startPoint.y();
 
                 if (!IsValidMove(dx, dy))
                 {
@@ -768,8 +775,8 @@ PanGestureRecognizer::recognize(QGesture* pGesture, QObject *pWatched, QEvent *p
 
                 pPan->setHotSpot(p1.startScreenPos());
 
-                int dx = upPoint.x() - m_lastPoint.x();
-                int dy = upPoint.y() - m_lastPoint.y();
+                const double dx = upPoint.x() - m_lastPoint.x();
+                const double dy = upPoint.y() - m_lastPoint.y();
 
                 if( (dx > 2) || (dx < -2) || (dy > 2) || (dy < -2))
                 {

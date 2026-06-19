@@ -35,16 +35,15 @@ and often it is even more useful to experiment by making a small change to a
 sample and checking how it works when running the sample.
 
 Before being able to run them, you need to be able build the sample you're
-interested in. The right way to do it depends on the way you built wxWidgets
-itself (see @ref overview_install for more details):
+interested in. The way to do it depends on the way you built wxWidgets itself
+(see @ref overview_install for more details):
 
 - Under Microsoft Windows (MSW):
-    - If you're using Microsoft Visual C++ compiler (MSVC), you need to
-    use @c makefile.vc from the directory of the sample to build it. Open
-    "Developer Command Prompt", navigate to the sample directory and run
-    <code>nmake -f makefile.vc</code> command with the additional arguments
-    corresponding to your library build, e.g. @c BUILD=debug. See @ref
-    msw_build_msvs "MSVS instructions" for more information.
+    - If you're using Microsoft Visual C++ compiler (MSVC), open the provided
+    `samples/samples_vc17.sln` project (which uses MSVS 2022, solution files
+    for MSVS 2019, 2017 and 2015 are also available in the same directory) and
+    build the sample you are interested in using the context menu in the
+    Solution Explorer.
     - If you're using MinGW, use @c makefile.gcc in the sample directory in a
     similar way. Note that if you use MSYS2 or another Unix-like environment
     for building, you should use the Unix instructions below instead.
@@ -127,7 +126,10 @@ get stock bitmaps for use in your application.
 
 @section page_samples_aui Advanced User Interface Sample
 
-@sampleabout{@ref overview_aui "AUI classes"}
+This sample shows how to use wxAuiManager and other
+@ref overview_aui "AUI classes", such as wxAuiToolBar and wxAuiNotebook. It
+allows to change wxAuiNotebook styles and save and reload the layout of either
+the entire wxAuiManager or just the notebook part.
 
 @sampledir{aui}
 
@@ -214,7 +216,7 @@ startup, before the main window is shown.
 This sample shows the wxDialUpManager
 class. In the status bar, it displays the information gathered through its
 interface: in particular, the current connection status (online or offline) and
-whether the connection is permanent (in which case a string `LAN' appears in
+whether the connection is permanent (in which case a string 'LAN' appears in
 the third status bar field - but note that you may be on a LAN not
 connected to the Internet, in which case you will not see this) or not.
 
@@ -772,7 +774,9 @@ controls into it.
 
 @section page_samples_stc wxStyledTextCtrl Sample
 
-@sampleabout{wxStyledTextCtrl}
+This samples demonstrates various uses of wxStyledTextCtrl.
+
+It also shows wxStyledTextCtrlMiniMap, see its "Window" menu.
 
 @sampledir{stc}
 

@@ -50,7 +50,12 @@ wxBitmapBundle WXDLLIMPEXP_CORE wxOSXCreateSystemBitmapBundle(const wxString& id
 WXWindow WXDLLIMPEXP_CORE wxOSXGetMainWindow();
 WXWindow WXDLLIMPEXP_CORE wxOSXGetKeyWindow();
 WXImage WXDLLIMPEXP_CORE wxOSXGetNSImageFromNSCursor(const WXHCURSOR cursor);
-
+void wxOSXSetBezelStyleFromBorderFlags(WX_NSButton v,
+                             long style,
+                             wxWindowID winid,
+                             const wxString& label = wxString(),
+                             const wxBitmapBundle& bitmap = wxBitmapBundle(),
+                             wxWindow *peer = nullptr);
 class WXDLLIMPEXP_FWD_CORE wxDialog;
 
 class WXDLLIMPEXP_FWD_CORE wxWidgetCocoaImpl;
@@ -61,10 +66,10 @@ class wxWidgetCocoaNativeKeyDownSuspender
 public:
     // stops sending keydown events for text inserted into this widget
     explicit wxWidgetCocoaNativeKeyDownSuspender(wxWidgetCocoaImpl *target);
-    
+
     // resumes sending keydown events
     ~wxWidgetCocoaNativeKeyDownSuspender();
-    
+
 private:
     wxWidgetCocoaImpl *m_target;
     NSEvent* m_nsevent;
@@ -113,7 +118,10 @@ public :
     virtual void        GetPosition( int &x, int &y ) const override;
     virtual void        GetSize( int &width, int &height ) const override;
     virtual void        SetControlSize( wxWindowVariant variant ) override;
+
     virtual void        GetLayoutInset(int &left , int &top , int &right, int &bottom) const override;
+    virtual void        InvalidateLayoutInset() const override;
+
     virtual void        SetNeedsDisplay( const wxRect* where = nullptr ) override;
     virtual bool        GetNeedsDisplay() const override;
 
@@ -188,6 +196,7 @@ public :
     virtual void        TouchesBegan(NSEvent *event);
     virtual void        TouchesMoved(NSEvent *event);
     virtual void        TouchesEnded(NSEvent *event);
+    virtual void        TouchesCancel(NSEvent *event);
 
 #if !wxOSX_USE_NATIVE_FLIPPED
     void                SetFlipped(bool flipped);
@@ -225,9 +234,13 @@ public :
     // from the same pimpl class.
     virtual void                controlTextDidChange();
 
+    virtual void                ClipsToBounds(bool clip) override;
+
     virtual void                AdjustClippingView(wxScrollBar* horizontal, wxScrollBar* vertical) override;
     virtual void                UseClippingView() override;
     virtual WXWidget            GetContainer() const override { return m_osxClipView ? m_osxClipView : m_osxView; }
+
+    virtual void                ApplyScrollViewBorderType() override;
 
 protected:
     WXWidget m_osxView;
@@ -254,6 +267,8 @@ protected:
 
     NSEvent* m_lastKeyDownEvent;
     bool m_lastKeyDownWXSent;
+    bool m_lastLeftDownWasDClick;
+    bool m_lastRightDownWasDClick;
 #if !wxOSX_USE_NATIVE_FLIPPED
     bool m_isFlipped;
 #endif
@@ -261,8 +276,13 @@ protected:
     // events, don't resend them
     bool m_hasEditor;
 
+    mutable int m_insetLeft;
+    mutable int m_insetRight;
+    mutable int m_insetTop;
+    mutable int m_insetBottom;
+
     friend class wxWidgetCocoaNativeKeyDownSuspender;
-    
+
     wxDECLARE_DYNAMIC_CLASS_NO_COPY(wxWidgetCocoaImpl);
 };
 
@@ -401,6 +421,8 @@ public:
     WXDLLIMPEXP_CORE wxRect wxFromNSRect( NSView* parent, const NSRect& rect );
     WXDLLIMPEXP_CORE NSPoint wxToNSPoint( NSView* parent, const wxPoint& p );
     WXDLLIMPEXP_CORE wxPoint wxFromNSPoint( NSView* parent, const NSPoint& p );
+    WXDLLIMPEXP_CORE NSPoint wxToNSPointF(NSView* parent, const wxPoint2DDouble& p);
+    WXDLLIMPEXP_CORE wxPoint2DDouble wxFromNSPointF(NSView* parent, const NSPoint& p);
 
     NSRect WXDLLIMPEXP_CORE wxOSXGetFrameForControl( wxWindowMac* window , const wxPoint& pos , const wxSize &size ,
         bool adjustForOrigin = true );
@@ -546,6 +568,7 @@ WX_NSCursor  wxMacCocoaCreateCursorFromCGImage( CGImageRef cgImageRef, float hot
 void  wxMacCocoaSetCursor( WX_NSCursor cursor );
 void  wxMacCocoaHideCursor();
 void  wxMacCocoaShowCursor();
+wxPoint  wxMacCocoaGetCursorHotSpot( WX_NSCursor cursor );
 
 typedef struct tagClassicCursor
 {

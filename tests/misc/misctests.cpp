@@ -19,6 +19,9 @@
 #include "wx/math.h"
 #include "wx/mimetype.h"
 #include "wx/versioninfo.h"
+#include "wx/utils.h"
+
+#include "wx/private/wordwrap.h"
 
 // just some classes using wxRTTI for wxStaticCast() test
 #include "wx/tarstrm.h"
@@ -168,6 +171,24 @@ TEST_CASE("RTTI::ClassInfo", "[rtti]")
 #endif // wxUSE_ZIPSTREAM
 }
 
+TEST_CASE("wxObjectDataPtr", "[ptr]")
+{
+    struct Foo : wxObjectRefData
+    {
+        explicit Foo(int value) : m_value{value} {}
+        int m_value;
+    };
+
+    wxObjectDataPtr<Foo> p1, p2;
+    CHECK( p1 == p2 );
+
+    p1 = new Foo(1);
+    CHECK( p1 != p2 );
+
+    p2 = new Foo(2);
+    CHECK( p1 != p2 );
+}
+
 TEST_CASE("wxCTZ", "[math]")
 {
     CHECK( wxCTZ(1) == 0 );
@@ -241,6 +262,17 @@ TEST_CASE("wxFileTypeInfo", "[mime]")
         CHECK( fti.GetExtensions()[1] == "jpeg" );
     }
 }
+
+TEST_CASE("wxFileType::ExpandCommand", "[mime]")
+{
+    const wxFileType::MessageParameters params("file.txt", "text/plain");
+
+    CHECK( wxFileType::ExpandCommand("view %s", params) == "view file.txt" );
+
+    // A command ending with a bare '%' used to read past the end of the
+    // string; check that the trailing '%' is just copied verbatim instead.
+    CHECK( wxFileType::ExpandCommand("show %s %", params) == "show file.txt %" );
+}
 #endif // wxUSE_MIMETYPE
 
 TEST_CASE("wxVersionInfo", "[version]")
@@ -253,4 +285,41 @@ TEST_CASE("wxVersionInfo", "[version]")
     CHECK_FALSE( ver120.AtLeast(1, 2, 1) );
     CHECK_FALSE( ver120.AtLeast(1, 3) );
     CHECK_FALSE( ver120.AtLeast(2, 0) );
+}
+
+TEST_CASE("wxGetLibraryVersionInfo", "[libraryversion]")
+{
+    // We especially want to ensure that wxGetLibraryVersionInfo()
+    // is available in wxBase, and successfully links, too.
+    wxVersionInfo libver = wxGetLibraryVersionInfo();
+    CHECK( libver.GetNumericVersionString().starts_with("3.") );
+}
+
+TEST_CASE("wxWordWrap", "[wordwrap]")
+{
+    // Use artificially small max width to make the tests shorter and simpler.
+    constexpr int N = 8;
+
+    CHECK( wxWordWrap("", N).empty() );
+
+    CHECK_THAT( wxWordWrap("foo", N),
+                Catch::Equals<wxString>({"foo"}) );
+    CHECK_THAT( wxWordWrap("foo bar", N),
+                Catch::Equals<wxString>({"foo bar"}) );
+    CHECK_THAT( wxWordWrap("foo quux", N),
+                Catch::Equals<wxString>({"foo quux"}) );
+    CHECK_THAT( wxWordWrap("foo bar baz", N),
+                Catch::Equals<wxString>({"foo bar", "baz"}) );
+    CHECK_THAT( wxWordWrap("foo barbaz", N),
+                Catch::Equals<wxString>({"foo", "barbaz"}) );
+    CHECK_THAT( wxWordWrap("foobarbaz", N),
+                Catch::Equals<wxString>({"foobarba", "z"}) );
+
+    CHECK_THAT( wxWordWrap("some more realistic text is wrapped correctly", 15),
+                Catch::Equals<wxString>({
+                    "some more",
+                    "realistic text",
+                    "is wrapped",
+                    "correctly"
+                }) );
 }

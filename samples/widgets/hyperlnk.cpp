@@ -73,10 +73,17 @@ enum
 class HyperlinkWidgetsPage : public WidgetsPage
 {
 public:
-    HyperlinkWidgetsPage(WidgetsBookCtrl *book, wxImageList *imaglist);
+    HyperlinkWidgetsPage(WidgetsBookCtrl *book, wxVector<wxBitmapBundle>& imaglist);
     virtual ~HyperlinkWidgetsPage() {}
 
     virtual wxWindow *GetWidget() const override { return m_hyperlink; }
+    virtual Widgets GetWidgets() const override
+    {
+        Widgets widgets(WidgetsPage::GetWidgets());
+        widgets.push_back(m_hyperlinkLong);
+        return widgets;
+    }
+
     virtual void RecreateWidget() override { CreateHyperlink(); }
 
     // lazy creation of the content
@@ -144,7 +151,7 @@ IMPLEMENT_WIDGETS_PAGE(HyperlinkWidgetsPage, "Hyperlink",
                        );
 
 HyperlinkWidgetsPage::HyperlinkWidgetsPage(WidgetsBookCtrl *book,
-                                           wxImageList *imaglist)
+                                           wxVector<wxBitmapBundle>& imaglist)
                      :WidgetsPage(book, imaglist, hyperlnk_xpm)
 {
 }
@@ -347,13 +354,11 @@ void HyperlinkWidgetsPage::OnButtonReset(wxCommandEvent& WXUNUSED(event))
 void HyperlinkWidgetsPage::OnButtonSetLabel(wxCommandEvent& WXUNUSED(event))
 {
     m_hyperlink->SetLabel(m_label->GetValue());
-    CreateHyperlink();
 }
 
 void HyperlinkWidgetsPage::OnButtonSetURL(wxCommandEvent& WXUNUSED(event))
 {
     m_hyperlink->SetURL(m_url->GetValue());
-    CreateHyperlink();
 }
 
 void HyperlinkWidgetsPage::OnAlignment(wxCommandEvent& WXUNUSED(event))

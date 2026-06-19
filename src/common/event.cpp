@@ -43,6 +43,8 @@
 
 #include "wx/thread.h"
 
+#include "wx/private/safecall.h"
+
 #if wxUSE_BASE
     #include <memory>
 #endif // wxUSE_BASE
@@ -88,6 +90,7 @@
     wxIMPLEMENT_DYNAMIC_CLASS(wxInitDialogEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxSetCursorEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxSysColourChangedEvent, wxEvent);
+    wxIMPLEMENT_DYNAMIC_CLASS(wxSysMetricChangedEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxDisplayChangedEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxDPIChangedEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxUpdateUIEvent, wxCommandEvent);
@@ -101,6 +104,8 @@
     wxIMPLEMENT_DYNAMIC_CLASS(wxMouseCaptureChangedEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxMouseCaptureLostEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxClipboardTextEvent, wxCommandEvent);
+    wxIMPLEMENT_DYNAMIC_CLASS(wxMultiTouchEvent, wxEvent);
+    wxIMPLEMENT_DYNAMIC_CLASS(wxStylusEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxGestureEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxPanGestureEvent, wxGestureEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxZoomGestureEvent, wxGestureEvent);
@@ -242,6 +247,17 @@ wxDEFINE_EVENT( wxEVT_SCROLLWIN_PAGEDOWN, wxScrollWinEvent );
 wxDEFINE_EVENT( wxEVT_SCROLLWIN_THUMBTRACK, wxScrollWinEvent );
 wxDEFINE_EVENT( wxEVT_SCROLLWIN_THUMBRELEASE, wxScrollWinEvent );
 
+// MultiTouch Events
+wxDEFINE_EVENT( wxEVT_TOUCH_BEGIN, wxMultiTouchEvent );
+wxDEFINE_EVENT( wxEVT_TOUCH_MOVE, wxMultiTouchEvent );
+wxDEFINE_EVENT( wxEVT_TOUCH_END, wxMultiTouchEvent );
+wxDEFINE_EVENT( wxEVT_TOUCH_CANCEL, wxMultiTouchEvent );
+
+// wxTablet events
+wxDEFINE_EVENT(wxEVT_STYLUS_DOWN, wxStylusEvent);
+wxDEFINE_EVENT(wxEVT_STYLUS_UP, wxStylusEvent);
+wxDEFINE_EVENT(wxEVT_STYLUS_UPDATE, wxStylusEvent);
+
 // Gesture events
 wxDEFINE_EVENT( wxEVT_GESTURE_PAN, wxPanGestureEvent );
 wxDEFINE_EVENT( wxEVT_GESTURE_ZOOM, wxZoomGestureEvent );
@@ -279,6 +295,7 @@ wxDEFINE_EVENT( wxEVT_MENU_CLOSE, wxMenuEvent );
 wxDEFINE_EVENT( wxEVT_MENU_HIGHLIGHT, wxMenuEvent );
 wxDEFINE_EVENT( wxEVT_CONTEXT_MENU, wxContextMenuEvent );
 wxDEFINE_EVENT( wxEVT_SYS_COLOUR_CHANGED, wxSysColourChangedEvent );
+wxDEFINE_EVENT( wxEVT_SYS_METRIC_CHANGED, wxSysMetricChangedEvent );
 wxDEFINE_EVENT( wxEVT_DISPLAY_CHANGED, wxDisplayChangedEvent );
 wxDEFINE_EVENT( wxEVT_DPI_CHANGED, wxDPIChangedEvent );
 wxDEFINE_EVENT( wxEVT_QUERY_NEW_PALETTE, wxQueryNewPaletteEvent );
@@ -456,9 +473,7 @@ wxNcPaintEvent::wxNcPaintEvent(wxWindowBase* window)
 // wxUpdateUIEvent
 // ----------------------------------------------------------------------------
 
-#if wxUSE_LONGLONG
 wxLongLong wxUpdateUIEvent::sm_lastUpdate = 0;
-#endif
 
 long wxUpdateUIEvent::sm_updateInterval = 0;
 
@@ -509,7 +524,6 @@ bool wxUpdateUIEvent::CanUpdate(wxWindowBase *win)
     if (sm_updateInterval == 0)
         return true;
 
-#if wxUSE_STOPWATCH && wxUSE_LONGLONG
     wxLongLong now = wxGetLocalTimeMillis();
     if (now > (sm_lastUpdate + sm_updateInterval))
     {
@@ -517,18 +531,12 @@ bool wxUpdateUIEvent::CanUpdate(wxWindowBase *win)
     }
 
     return false;
-#else
-    // If we don't have wxStopWatch or wxLongLong, we
-    // should err on the safe side and update now anyway.
-    return true;
-#endif
 }
 
 // Reset the update time to provide a delay until the next
 // time we should update
 void wxUpdateUIEvent::ResetUpdateTime()
 {
-#if wxUSE_STOPWATCH && wxUSE_LONGLONG
     if (sm_updateInterval > 0)
     {
         wxLongLong now = wxGetLocalTimeMillis();
@@ -537,7 +545,6 @@ void wxUpdateUIEvent::ResetUpdateTime()
             sm_lastUpdate = now;
         }
     }
-#endif
 }
 
 // ----------------------------------------------------------------------------
@@ -565,6 +572,7 @@ wxScrollWinEvent::wxScrollWinEvent(wxEventType commandType,
     m_eventType = commandType;
     m_extraLong = orient;
     m_commandInt = pos;
+    m_pixelOffset = 0;
 }
 
 // ----------------------------------------------------------------------------
@@ -593,6 +601,7 @@ wxMouseEvent::wxMouseEvent(wxEventType commandType)
     m_linesPerAction = 0;
     m_columnsPerAction = 0;
     m_magnification = 0.0f;
+    m_synthesized = false;
 }
 
 void wxMouseEvent::Assign(const wxMouseEvent& event)
@@ -1226,7 +1235,6 @@ wxEvtHandler::~wxEvtHandler()
             delete entry->m_callbackUserData;
             delete entry;
         }
-        delete m_dynamicEvents;
     }
 
     // Remove us from the list of the pending events if necessary.
@@ -1668,20 +1676,17 @@ bool wxEvtHandler::TryHereOnly(wxEvent& event)
 
 bool wxEvtHandler::SafelyProcessEvent(wxEvent& event)
 {
-#if wxUSE_EXCEPTIONS
-    try
+    return wxSafeCall<bool>([&event, this]
     {
-#endif
         return ProcessEvent(event);
-#if wxUSE_EXCEPTIONS
-    }
-    catch ( ... )
+    }, []()
     {
+#if wxUSE_EXCEPTIONS
         WXConsumeException();
+#endif // wxUSE_EXCEPTIONS
 
         return false;
-    }
-#endif // wxUSE_EXCEPTIONS
+    });
 }
 
 #if wxUSE_EXCEPTIONS
@@ -1742,19 +1747,7 @@ void wxEvtHandler::WXConsumeException()
         // consistently everywhere.
         if ( !stored )
         {
-            try
-            {
-                if ( wxTheApp )
-                    wxTheApp->OnUnhandledException();
-            }
-            catch ( ... )
-            {
-                // And OnUnhandledException() absolutely shouldn't throw,
-                // but we still must account for the possibility that it
-                // did. At least show some information about the exception
-                // in this case.
-                wxTheApp->wxAppConsoleBase::OnUnhandledException();
-            }
+            wxApp::CallOnUnhandledException();
 
             wxAbort();
         }
@@ -1801,7 +1794,7 @@ void wxEvtHandler::DoBind(int id,
     // We prefer to push back the entry here and then iterate over the vector
     // in reverse direction in GetNextDynamicEntry() as it's more efficient
     // than inserting the element at the front.
-    m_dynamicEvents->push_back(entry);
+    m_dynamicEvents->m_entries.push_back(entry);
 
     // Make sure we get to know when a sink is destroyed
     wxEvtHandler *eventSink = func->GetEvtHandler();
@@ -1855,7 +1848,7 @@ wxEvtHandler::DoUnbind(int id,
             // Notice that we rely on "cookie" being just the index into the
             // vector, which is not guaranteed by our API, but here we can use
             // this implementation detail.
-            (*m_dynamicEvents)[cookie] = nullptr;
+            m_dynamicEvents->m_entries[cookie] = nullptr;
 
             delete entry;
             return true;
@@ -1871,7 +1864,7 @@ wxEvtHandler::GetFirstDynamicEntry(size_t& cookie) const
         return nullptr;
 
     // The handlers are in LIFO order, so we must start at the end.
-    cookie = m_dynamicEvents->size();
+    cookie = m_dynamicEvents->m_entries.size();
     return GetNextDynamicEntry(cookie);
 }
 
@@ -1884,7 +1877,7 @@ wxEvtHandler::GetNextDynamicEntry(size_t& cookie) const
     {
         // Otherwise return the element at the previous index, skipping any
         // null elements which indicate removed entries.
-        wxDynamicEventTableEntry* const entry = m_dynamicEvents->at(--cookie);
+        wxDynamicEventTableEntry* const entry = m_dynamicEvents->m_entries.at(--cookie);
         if ( entry )
             return entry;
     }
@@ -1897,24 +1890,39 @@ bool wxEvtHandler::SearchDynamicEventTable( wxEvent& event )
     wxCHECK_MSG( m_dynamicEvents, false,
                  wxT("caller should check that we have dynamic events") );
 
+    // Make sure that m_dynamicEvents remains valid until the end of this function,
+    // even if this object itself gets deleted by one of the event handlers called
+    // from here.
+    //
+    // We need to use m_dynamicEvents as we use its m_flag to record whether we're
+    // iterating over its entries and check it at the end, at which time this object
+    // itself might not exist any more.
+    //
+    // Note that we can't just use a local variable instead, as this function can
+    // also be called recursively, if an event handler dispatches another event while
+    // processing this one.
+    wxSharedPtr<DynamicEvents> localCopy(m_dynamicEvents);
     DynamicEvents& dynamicEvents = *m_dynamicEvents;
 
+    wxRecursionGuard guard(dynamicEvents.m_flag);
     bool needToPruneDeleted = false;
 
     // We can't use Get{First,Next}DynamicEntry() here as they hide the deleted
     // but not yet pruned entries from the caller, but here we do want to know
     // about them, so iterate directly. Remember to do it in the reverse order
     // to honour the order of handlers connection.
-    for ( size_t n = dynamicEvents.size(); n; n-- )
+    for ( size_t n = dynamicEvents.m_entries.size(); n; n-- )
     {
-        wxDynamicEventTableEntry* const entry = dynamicEvents[n - 1];
+        wxDynamicEventTableEntry* const entry = dynamicEvents.m_entries[n - 1];
 
         if ( !entry )
         {
             // This entry must have been unbound at some time in the past, so
             // skip it now and really remove it from the vector below, once we
             // finish iterating.
-            needToPruneDeleted = true;
+            // N.B.:  If we are in a nested call, then we can't be done
+            // iterating during this call
+            needToPruneDeleted = !guard.IsInside();
             continue;
         }
 
@@ -1946,14 +1954,14 @@ bool wxEvtHandler::SearchDynamicEventTable( wxEvent& event )
     if ( needToPruneDeleted )
     {
         size_t nNew = 0;
-        for ( size_t n = 0; n != dynamicEvents.size(); n++ )
+        for ( size_t n = 0; n != dynamicEvents.m_entries.size(); n++ )
         {
-            if ( dynamicEvents[n] )
-                dynamicEvents[nNew++] = dynamicEvents[n];
+            if ( dynamicEvents.m_entries[n] )
+                dynamicEvents.m_entries[nNew++] = dynamicEvents.m_entries[n];
         }
 
-        wxASSERT( nNew != dynamicEvents.size() );
-        dynamicEvents.resize(nNew);
+        wxASSERT( nNew != dynamicEvents.m_entries.size() );
+        dynamicEvents.m_entries.resize(nNew);
     }
 
     return false;
@@ -2034,7 +2042,7 @@ void wxEvtHandler::OnSinkDestroyed( wxEvtHandler *sink )
 
             // Just as in DoUnbind(), we use our knowledge of
             // GetNextDynamicEntry() implementation here.
-            (*m_dynamicEvents)[cookie] = nullptr;
+            m_dynamicEvents->m_entries[cookie] = nullptr;
         }
     }
 }

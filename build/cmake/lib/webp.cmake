@@ -1,0 +1,74 @@
+#############################################################################
+# Name:        build/cmake/lib/webp.cmake
+# Purpose:     Use external or internal libwebp
+# Author:
+# Created:     2025-01-31
+# Copyright:   (c) 2025 wxWidgets development team
+# Licence:     wxWindows licence
+#############################################################################
+
+if(wxUSE_LIBWEBP STREQUAL "sys")
+    find_package(WebP)
+    mark_as_advanced(WebP_DIR)
+    if(NOT WebP_FOUND)
+        # If the sys library can not be found use builtin
+        wx_option_force_value(wxUSE_LIBWEBP builtin)
+    endif()
+endif()
+
+if(wxUSE_LIBWEBP STREQUAL "builtin")
+    set(WEBP_ROOT "${wxSOURCE_DIR}/3rdparty/libwebp")
+    set(WEBP_BUILD_ROOT "${CMAKE_CURRENT_BINARY_DIR}/webp-build")
+
+    # No flags to enable or disable SIMD
+    set(WEBP_CHECK_SIMD       OFF CACHE BOOL "")
+    # static library
+    set(WEBP_LINK_STATIC       ON)
+    # disable tools
+    set(WEBP_BUILD_ANIM_UTILS OFF)
+    set(WEBP_BUILD_CWEBP      OFF)
+    set(WEBP_BUILD_DWEBP      OFF)
+    set(WEBP_BUILD_GIF2WEBP   OFF)
+    set(WEBP_BUILD_IMG2WEBP   OFF)
+    set(WEBP_BUILD_VWEBP      OFF)
+    set(WEBP_BUILD_WEBPINFO   OFF)
+    set(WEBP_BUILD_WEBPMUX    OFF)
+    set(WEBP_BUILD_EXTRAS     OFF)
+    set(WEBP_BUILD_WEBP_JS    OFF)
+    set(WEBP_BUILD_FUZZTEST   OFF)
+
+    # webp sets CMAKE_BUILD_TYPE if it is not defined.
+    # Multi-config generators do not need this, and might even
+    # cause confusion in cmake-gui, so unset it later.
+    if(NOT DEFINED CMAKE_BUILD_TYPE)
+        set(RESET_CMAKE_BUILD_TYPE ON)
+    endif()
+
+    add_subdirectory("${WEBP_ROOT}" "${WEBP_BUILD_ROOT}" EXCLUDE_FROM_ALL)
+
+    if(RESET_CMAKE_BUILD_TYPE)
+        unset(CMAKE_BUILD_TYPE CACHE)
+    endif()
+
+    mark_as_advanced(WEBP_CHECK_SIMD)
+    mark_as_advanced(WEBP_BITTRACE)
+    mark_as_advanced(WEBP_BUILD_LIBWEBPMUX)
+    mark_as_advanced(WEBP_ENABLE_SIMD)
+    mark_as_advanced(WEBP_ENABLE_SWAP_16BIT_CSP)
+    mark_as_advanced(WEBP_ENABLE_WUNUSED_RESULT)
+    mark_as_advanced(WEBP_LINK_STATIC)
+    mark_as_advanced(WEBP_NEAR_LOSSLESS)
+    mark_as_advanced(WEBP_UNICODE)
+    mark_as_advanced(WEBP_USE_THREAD)
+
+    set(WebP_LIBRARIES webp webpdemux sharpyuv)
+
+    get_property(webpTargets DIRECTORY "${WEBP_ROOT}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(target_name IN LISTS webpTargets)
+        set(builtin_props)
+        if (NOT ${target_name} IN_LIST WebP_LIBRARIES)
+            set(builtin_props SKIP_INSTALL)
+        endif()
+        wx_add_builtin_library(${target_name} ${builtin_props} FOLDER "/WebP")
+    endforeach()
+endif()

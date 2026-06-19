@@ -9,9 +9,8 @@
 #ifndef _WX_QT_REGION_H_
 #define _WX_QT_REGION_H_
 
-class QRegion;
 class QRect;
-template<class T> class QVector;
+class QRegion;
 
 class WXDLLIMPEXP_CORE wxRegion : public wxRegionBase
 {
@@ -32,7 +31,7 @@ public:
 
 protected:
     virtual wxGDIRefData *CreateGDIRefData() const override;
-    virtual wxGDIRefData *CloneGDIRefData(const wxGDIRefData *data) const override;
+    wxNODISCARD virtual wxGDIRefData *CloneGDIRefData(const wxGDIRefData *data) const override;
 
     virtual bool DoIsEqual(const wxRegion& region) const override;
     virtual bool DoGetBox(wxCoord& x, wxCoord& y, wxCoord& w, wxCoord& h) const override;
@@ -84,8 +83,8 @@ public:
     wxRect GetRect() const;
 
 private:
-    QVector < QRect > *m_qtRects;
-    int m_pos;
+    std::vector<QRect> m_qtRects;
+    unsigned int m_pos = 0;
 
     wxDECLARE_DYNAMIC_CLASS(wxRegionIterator);
 };

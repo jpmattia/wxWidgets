@@ -92,13 +92,6 @@ bool wxControl::MSWCreateControl(const wxChar *classname,
                                  const wxString& label,
                                  WXDWORD exstyle)
 {
-    // if no extended style given, determine it ourselves
-    if ( exstyle == (WXDWORD)-1 )
-    {
-        exstyle = 0;
-        (void) MSWGetStyle(GetWindowStyle(), &exstyle);
-    }
-
     // all controls should have this style
     style |= WS_CHILD;
 
@@ -137,21 +130,8 @@ bool wxControl::MSWCreateControl(const wxChar *classname,
         return false;
     }
 
-    MSWDarkModeSupport support;
-    if ( wxMSWDarkMode::IsActive() && MSWGetDarkModeSupport(support) )
-    {
-        wxMSWDarkMode::AllowForWindow(m_hWnd, support.themeName, support.themeId);
-
-        if ( support.setForeground )
-            SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOXTEXT));
-
-        if ( const int msgTT = MSWGetToolTipMessage() )
-        {
-            const HWND hwndTT = (HWND)::SendMessage(GetHwnd(), msgTT, 0, 0);
-            if ( ::IsWindow(hwndTT) )
-                wxMSWDarkMode::AllowForWindow(hwndTT);
-        }
-    }
+    if ( wxMSWDarkMode::IsActive() )
+        MSWSetDarkOrLightMode(SetMode::Initial);
 
     // saving the label in m_labelOrig to return it verbatim
     // later in GetLabel()
@@ -199,14 +179,16 @@ bool wxControl::MSWCreateControl(const wxChar *classname,
     return true;
 }
 
-bool wxControl::MSWGetDarkModeSupport(MSWDarkModeSupport& support) const
+void wxControl::MSWSetDarkOrLightMode(SetMode setmode)
 {
-    // This theme works for a few controls (buttons, texts, comboboxes) and
-    // doesn't seem to do any harm for those that don't support it, so use it
-    // by default.
-    support.themeName = L"Explorer";
+    wxControlBase::MSWSetDarkOrLightMode(setmode);
 
-    return true;
+    if ( const int msgTT = MSWGetToolTipMessage() )
+    {
+        const HWND hwndTT = (HWND)::SendMessage(GetHwnd(), msgTT, 0, 0);
+        if ( ::IsWindow(hwndTT) )
+            wxMSWDarkMode::AllowForWindow(hwndTT);
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -231,11 +213,6 @@ wxSize wxControl::DoGetBestSize() const
        return wxControlBase::DoGetBestSize();
 
     return FromDIP(wxSize(DEFAULT_ITEM_WIDTH, DEFAULT_ITEM_HEIGHT));
-}
-
-wxBorder wxControl::GetDefaultBorder() const
-{
-    return wxControlBase::GetDefaultBorder();
 }
 
 /* static */ wxVisualAttributes
@@ -350,19 +327,13 @@ WXHBRUSH wxControl::DoMSWControlColor(WXHDC pDC, wxColour colBg, WXHWND hWnd)
 
         if ( !hbr )
         {
-            if ( wxMSWDarkMode::IsActive() )
-            {
-                colBg = wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOX);
-                if ( !m_hasFgCol )
-                    colFg = wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOXTEXT);
-            }
-            // if the control doesn't have any bg colour, foreground colour will be
-            // ignored as the return value would be 0 -- so forcefully give it a
-            // non default background brush in this case
-            else if ( m_hasFgCol )
-            {
+            // We always need to use custom background in dark mode. And in
+            // light mode, we have to use it if the control uses a non-default
+            // foreground too because if we didn't, this function would return
+            // 0 and everything done by it would be ignored -- so ensure we use
+            // a valid value in both of these cases.
+            if ( wxMSWDarkMode::IsActive() || m_hasFgCol )
                 colBg = GetBackgroundColour();
-            }
         }
     }
 
@@ -591,7 +562,17 @@ bool wxMSWOwnerDrawnButtonBase::MSWDrawButton(WXDRAWITEMSTRUCT *item)
     }
 
     // Erase the background.
-    ::FillRect(hdc, &rect, m_win->MSWGetBgBrush(hdc));
+    HBRUSH hbr = m_win->MSWGetBgBrush(hdc);
+    if ( !hbr && wxMSWDarkMode::IsActive() )
+    {
+        // We always need to use custom background in dark mode, default
+        // behaviour is never correct.
+        auto const colBg = m_win->GetBackgroundColour();
+        wxBrush* brush = wxTheBrushList->FindOrCreateBrush(colBg);
+        hbr = (WXHBRUSH)brush->GetResourceHandle();
+    }
+
+    ::FillRect(hdc, &rect, hbr);
 
     // draw the button itself
     wxDCTemp dc(hdc);

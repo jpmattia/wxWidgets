@@ -60,7 +60,7 @@ enum
 class FontPickerWidgetsPage : public WidgetsPage
 {
 public:
-    FontPickerWidgetsPage(WidgetsBookCtrl *book, wxImageList *imaglist);
+    FontPickerWidgetsPage(WidgetsBookCtrl *book, wxVector<wxBitmapBundle>& imaglist);
 
     virtual wxWindow *GetWidget() const override { return m_fontPicker; }
     virtual void RecreateWidget() override { RecreatePicker(); }
@@ -127,7 +127,7 @@ IMPLEMENT_WIDGETS_PAGE(FontPickerWidgetsPage, "FontPicker",
                        PICKER_CTRLS | FAMILY_CTRLS);
 
 FontPickerWidgetsPage::FontPickerWidgetsPage(WidgetsBookCtrl *book,
-                                     wxImageList *imaglist)
+                                     wxVector<wxBitmapBundle>& imaglist)
                   : WidgetsPage(book, imaglist, fontpicker_xpm)
 {
 }
@@ -219,8 +219,10 @@ void FontPickerWidgetsPage::OnButtonReset(wxCommandEvent& WXUNUSED(event))
 
 void FontPickerWidgetsPage::OnFontChange(wxFontPickerEvent& event)
 {
-    wxLogMessage("The font changed to '%s' with size %d !",
-                 event.GetFont().GetFaceName(), event.GetFont().GetPointSize());
+    wxLogMessage("The font changed to '%s' with size %d, style %s, weight %d !",
+                 event.GetFont().GetFaceName(), event.GetFont().GetPointSize(),
+                 event.GetFont().GetStyle() == wxFONTSTYLE_NORMAL ? "regular" : "italic",
+                 event.GetFont().GetNumericWeight());
 }
 
 void FontPickerWidgetsPage::OnCheckBox(wxCommandEvent &event)

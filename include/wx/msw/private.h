@@ -57,8 +57,6 @@ extern WXDLLIMPEXP_DATA_CORE(HFONT) wxSTATUS_LINE_FONT;
 // global data
 // ---------------------------------------------------------------------------
 
-extern WXDLLIMPEXP_DATA_BASE(HINSTANCE) wxhInstance;
-
 extern "C"
 {
     WXDLLIMPEXP_BASE HINSTANCE wxGetInstance();
@@ -119,8 +117,13 @@ extern LONG APIENTRY
 // useful macros and functions
 // ---------------------------------------------------------------------------
 
-// a wrapper macro for ZeroMemory()
-#define wxZeroMemory(obj)   ::ZeroMemory(&obj, sizeof(obj))
+// a wrapper for ZeroMemory()
+template <typename T>
+inline void wxZeroMemory(T& obj)
+{
+    // Cast is needed just to avoid clang "nontrivial-memcall" warning.
+    ::ZeroMemory(static_cast<void*>(&obj), sizeof(obj));
+}
 
 // This one is a macro so that it can be tested with #ifdef, it will be
 // undefined if it cannot be implemented for a given compiler.
@@ -185,13 +188,30 @@ struct WinStruct : public T
 {
     WinStruct()
     {
-        ::ZeroMemory(this, sizeof(T));
+        wxZeroMemory(*this);
 
         // explicit qualification is required here for this to be valid C++
         this->cbSize = sizeof(T);
     }
 };
 
+// Life wouldn't be fun if Windows didn't call the size member differently in
+// different structs, so define the equivalent of the above for the ones where
+// it's called dwSize.
+//
+// When we can require C++17 or preferably C++20 we could merge this with
+// WinStruct by detecting the presence of cbSize/dwSize member using SFINAE,
+// but for now just define it separately to keep things simple.
+template <class T>
+struct WinStructWordSize : public T
+{
+    WinStructWordSize()
+    {
+        wxZeroMemory(*this);
+
+        this->dwSize = sizeof(T);
+    }
+};
 
 // Macros for converting wxString to the type expected by API functions.
 //
@@ -310,6 +330,12 @@ extern HICON wxBitmapToHICON(const wxBitmap& bmp);
 extern
 HCURSOR wxBitmapToHCURSOR(const wxBitmap& bmp, int hotSpotX, int hotSpotY);
 
+// Return DPI for the given window.
+//
+// Implemented in src/msw/window.cpp.
+wxSize wxGetWindowDPI(HWND hwnd);
+
+// Also implemented in src/msw/window.cpp.
 extern int wxGetSystemMetrics(int nIndex, const wxWindow* win);
 
 extern bool wxSystemParametersInfo(UINT uiAction, UINT uiParam,
@@ -844,13 +870,13 @@ public:
     bool IsRegistered() const { return m_registered == 1; }
 
     // try to register the class if not done yet, return true on success
-    bool Register(const WNDCLASS& wc)
+    bool Register(const WNDCLASSW& wc)
     {
         // we should only be called if we hadn't been initialized yet
         wxASSERT_MSG( m_registered == -1,
                         wxT("calling ClassRegistrar::Register() twice?") );
 
-        m_registered = ::RegisterClass(&wc) ? 1 : 0;
+        m_registered = ::RegisterClassW(&wc) ? 1 : 0;
         if ( !IsRegistered() )
         {
             wxLogLastError(wxT("RegisterClassEx()"));
@@ -872,7 +898,7 @@ public:
     {
         if ( IsRegistered() )
         {
-            if ( !::UnregisterClass(m_clsname.t_str(), wxGetInstance()) )
+            if ( !::UnregisterClassW(m_clsname.wc_str(), wxGetInstance()) )
             {
                 wxLogLastError(wxT("UnregisterClass"));
             }
@@ -946,7 +972,7 @@ private:
 inline wxString wxGetFullModuleName(HMODULE hmod)
 {
     wxString fullname;
-    if ( !::GetModuleFileName
+    if ( !::GetModuleFileNameW
             (
                 hmod,
                 wxStringBuffer(fullname, MAX_PATH),
@@ -1037,6 +1063,16 @@ WXDLLIMPEXP_CORE wxFont wxCreateFontFromLogFont(const LOGFONT *logFont);
 
 WXDLLIMPEXP_CORE void wxGetCharSize(WXHWND wnd, int *x, int *y, const wxFont& the_font);
 WXDLLIMPEXP_CORE wxFontEncoding wxGetFontEncFromCharSet(int charset);
+
+// Helper function to check if the facename might be truncated: if it is,
+// wxGetMSWFaceNameFromHFONT() should be used to get the full name.
+inline bool wxIsFaceNamePossiblyTruncated(const wxString& facename)
+{
+    return facename.size() == LF_FACESIZE - 1;
+}
+
+// Get full face name (i.e. possibly longer than LF_FACESIZE) from an HFONT.
+wxString wxGetMSWFaceNameFromHFONT(HFONT hFont);
 
 inline void wxSetWindowFont(HWND hwnd, const wxFont& font)
 {
@@ -1150,6 +1186,21 @@ inline wxLayoutDirection wxGetEditLayoutDirection(WXHWND hWnd)
 
     return style & WS_EX_RTLREADING ? wxLayout_RightToLeft
                                     : wxLayout_LeftToRight;
+}
+
+// Check if WM_SETTINGCHANGE notifies about the system colours change.
+inline bool wxIsSystemColourChange(LPARAM lParam)
+{
+    // Note that "ImmersiveColorSet" is set both when switching between
+    // light and dark themes and also when changing high contrast mode,
+    // for which an additional message with "WindowsThemeElement" is
+    // also sent, but we don't need to check for it as handling this
+    // one is enough
+    if ( !lParam )
+       return false;
+
+    auto* const what = reinterpret_cast<const TCHAR*>(lParam);
+    return wxStrcmp(what, wxT("ImmersiveColorSet")) == 0;
 }
 
 // ----------------------------------------------------------------------------

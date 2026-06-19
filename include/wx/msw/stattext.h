@@ -34,6 +34,8 @@ public:
                 long style = 0,
                 const wxString& name = wxASCII_STR(wxStaticTextNameStr));
 
+    virtual ~wxStaticText();
+
     // override some methods to resize the window properly
     virtual void SetLabel(const wxString& label) override;
     virtual bool SetFont( const wxFont &font ) override;
@@ -42,6 +44,10 @@ public:
 
 protected:
     // implement/override some base class virtuals
+#if wxUSE_MARKUP
+    virtual bool DoSetLabelMarkup(const wxString& markup) override;
+#endif // wxUSE_MARKUP
+
     virtual void DoSetSize(int x, int y, int w, int h,
                            int sizeFlags = wxSIZE_AUTO) override;
     virtual wxSize DoGetBestClientSize() const override;
@@ -53,6 +59,13 @@ protected:
 
     virtual wxString WXGetVisibleLabel() const override;
     virtual void WXSetVisibleLabel(const wxString& str) override;
+
+#if wxUSE_MARKUP
+    class wxMarkupText* m_markupText = nullptr;
+
+    // This is only used when m_markupText is non-null.
+    void WXOnPaint(wxPaintEvent& event);
+#endif // wxUSE_MARKUP
 
     wxDECLARE_DYNAMIC_CLASS_NO_COPY(wxStaticText);
 };

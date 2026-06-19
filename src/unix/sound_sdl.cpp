@@ -130,6 +130,7 @@ bool wxSoundBackendSDL::IsAvailable() const
         return true;
     if (SDL_WasInit(SDL_INIT_AUDIO) != SDL_INIT_AUDIO)
     {
+        SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
         if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_NOPARACHUTE) == -1)
             return false;
     }
@@ -210,7 +211,7 @@ bool wxSoundBackendSDL::OpenAudio()
             char driver[256];
 #if SDL_MAJOR_VERSION == 1
             SDL_AudioDriverName(driver, 256);
-#elif SDL_MAJOR_VERSION > 1            
+#elif SDL_MAJOR_VERSION > 1
             wxStrlcpy(driver, SDL_GetCurrentAudioDriver(), 256);
 #endif
             wxLogTrace(wxT("sound"), wxT("opened audio, driver '%s'"),

@@ -464,16 +464,25 @@ wxImage::Scale( int width, int height, wxImageResizeQuality quality ) const
     switch ( quality )
     {
         case wxIMAGE_QUALITY_NORMAL:
-            // When downscaling, we prefer to use bilinear resampling as it
-            // results in better quality at reasonable speed.
+            // When downscaling, use bilinear algorithm for shrinking to an
+            // integer multiple of the target size and then box average by the
+            // integer part.
             if ( width <= old_width && height <= old_height )
             {
-                image = ResampleBilinear(width, height);
-                break;
-            }
+                const double shrinkFactorX = double(old_width) / width;
+                const double shrinkFactorY = double(old_height) / height;
 
-            // Otherwise use NEAREST for upscaling.
-            wxFALLTHROUGH;
+                const int shrinkInt(wxMin(shrinkFactorX, shrinkFactorY));
+
+                image = ResampleBilinear(width * shrinkInt, height * shrinkInt);
+                if ( shrinkInt != 1 )
+                    image = image.ResampleBox(width, height);
+            }
+            else // Use box average algorithm for upscaling.
+            {
+                image = ResampleBox(width, height);
+            }
+            break;
 
         case wxIMAGE_QUALITY_FAST:
         case wxIMAGE_QUALITY_NEAREST:
@@ -528,6 +537,8 @@ wxImage wxImage::ResampleNearest(int width, int height) const
 {
     wxImage image;
 
+    wxCHECK_MSG( IsOk(), image, "invalid image" );
+
     // We use wxUIntPtr to rescale images of larger size in 64-bit builds:
     // using long wouldn't allow using images larger than 2^16 in either
     // direction because of the check below, as sizeof(long) == 4 even in 64
@@ -568,13 +579,13 @@ wxImage wxImage::ResampleNearest(int width, int height) const
 
     unsigned char* dest_pixel = target_data;
 
-    wxUIntPtr y = 0;
+    wxUIntPtr y = y_delta / 2;
     for (int j = 0; j < height; j++)
     {
         const unsigned char* src_line = &source_data[(y>>16)*old_width*3];
         const unsigned char* src_alpha_line = source_alpha ? &source_alpha[(y>>16)*old_width] : nullptr ;
 
-        wxUIntPtr x = 0;
+        wxUIntPtr x = x_delta / 2;
         for (int i = 0; i < width; i++)
         {
             const unsigned char* src_pixel = &src_line[(x>>16)*3];
@@ -650,6 +661,8 @@ void ResampleBoxPrecalc(wxVector<BoxPrecalc>& boxes, int oldDim)
 
 wxImage wxImage::ResampleBox(int width, int height) const
 {
+    wxCHECK_MSG( IsOk(), {}, "invalid image" );
+
     // This function implements a simple pre-blur/box averaging method for
     // downsampling that gives reasonably smooth results To scale the image
     // down we will need to gather a grid of pixels of the size of the scale
@@ -810,6 +823,8 @@ void ResampleBilinearPrecalc(wxVector<BilinearPrecalc>& precalcs, int oldDim)
 
 wxImage wxImage::ResampleBilinear(int width, int height) const
 {
+    wxCHECK_MSG( IsOk(), {}, "invalid image" );
+
     // This function implements a Bilinear algorithm for resampling.
     wxImage ret_image(width, height, false);
     const unsigned char* src_data = M_IMGDATA->m_data;
@@ -963,6 +978,8 @@ void ResampleBicubicPrecalc(wxVector<BicubicPrecalc> &aWeight, int oldDim)
 // This is the bicubic resampling algorithm
 wxImage wxImage::ResampleBicubic(int width, int height) const
 {
+    wxCHECK_MSG( IsOk(), {}, "invalid image" );
+
     // This function implements a Bicubic B-Spline algorithm for resampling.
     // This method is certainly a little slower than wxImage's default pixel
     // replication method, however for most reasonably sized images not being
@@ -1048,7 +1065,7 @@ wxImage wxImage::ResampleBicubic(int width, int height) const
                     const double
                         pixel_weight = vPrecalc.weight[k + 1] * hPrecalc.weight[i + 1];
 
-                    // Create a sum of all velues for each color channel
+                    // Create a sum of all values for each color channel
                     // adjusted for the pixel's calculated weight
                     if ( src_alpha )
                     {
@@ -2120,6 +2137,41 @@ void wxImage::SetData( unsigned char *data, int new_width, int new_height, bool 
     m_refData = newRefData;
 }
 
+void wxImage::SetDataRGBA(const unsigned char* data)
+{
+    wxCHECK_RET(IsOk(), wxT("invalid image"));
+
+    wxImageRefData* newRefData = new wxImageRefData();
+
+    newRefData->m_width = M_IMGDATA->m_width;
+    newRefData->m_height = M_IMGDATA->m_height;
+
+    size_t pixel_count = (size_t)newRefData->m_width * (size_t)newRefData->m_height;
+    newRefData->m_data = (unsigned char*)malloc(3 * pixel_count);
+    newRefData->m_alpha = (unsigned char*)malloc(pixel_count);
+
+    size_t rgba_index = 0, rgb_index = 0, alpha_index = 0;
+    for (size_t pixel_counter = 0; pixel_counter < pixel_count; pixel_counter++)
+    {
+        newRefData->m_data[rgb_index++] = data[rgba_index++]; // R
+        newRefData->m_data[rgb_index++] = data[rgba_index++]; // G
+        newRefData->m_data[rgb_index++] = data[rgba_index++]; // B
+        newRefData->m_alpha[alpha_index++] = data[rgba_index++]; // A
+    }
+
+    newRefData->m_ok = true;
+    newRefData->m_maskRed = M_IMGDATA->m_maskRed;
+    newRefData->m_maskGreen = M_IMGDATA->m_maskGreen;
+    newRefData->m_maskBlue = M_IMGDATA->m_maskBlue;
+    newRefData->m_hasMask = M_IMGDATA->m_hasMask;
+    newRefData->m_static = false;
+    newRefData->m_staticAlpha = false;
+
+    UnRef();
+
+    m_refData = newRefData;
+}
+
 // ----------------------------------------------------------------------------
 // alpha channel support
 // ----------------------------------------------------------------------------
@@ -2565,8 +2617,7 @@ int wxImage::GetLoadFlags() const
 
 // Under Windows we can load wxImage not only from files but also from
 // resources.
-#if defined(__WINDOWS__) && wxUSE_WXDIB && wxUSE_IMAGE \
-&& !defined(__WXQT__) // undefined reference to `wxDIB::ConvertToImage(wxDIB::ConversionFlags) const'
+#if defined(__WINDOWS__) && wxUSE_WXDIB && wxUSE_IMAGE
     #define HAS_LOAD_FROM_RESOURCE
 #endif
 

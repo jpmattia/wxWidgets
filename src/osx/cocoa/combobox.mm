@@ -40,11 +40,17 @@
 + (void)initialize
 {
     static BOOL initialized = NO;
-    if (!initialized) 
+    if (!initialized)
     {
         initialized = YES;
         wxOSXCocoaClassAddWXMethods( self );
     }
+}
+
+- (void)dealloc
+{
+    self.WXFieldEditor = nil;
+    [super dealloc];
 }
 
 - (void)controlTextDidChange:(NSNotification *)aNotification
@@ -144,11 +150,11 @@
 {
     wxUnusedVar(textView);
     wxUnusedVar(control);
-    
+
     BOOL handled = NO;
 
     // send back key events wx' common code knows how to handle
-    
+
     wxWidgetCocoaImpl* impl = (wxWidgetCocoaImpl* ) wxWidgetImpl::FindFromWXWidget( self );
     if ( impl  )
     {
@@ -193,7 +199,7 @@ void wxNSComboBoxControl::mouseEvent(WX_NSEvent event, WXWidget slf, void *_cmd)
     // NSComboBox has its own event loop, which reacts very badly to our synthetic
     // events used to signal when a wxEvent is posted, so during that time we switch
     // the wxEventLoop::WakeUp implementation to a lower-level version
-    
+
     bool reset = false;
     wxEventLoop* const loop = (wxEventLoop*) wxEventLoopBase::GetActive();
 
@@ -202,10 +208,10 @@ void wxNSComboBoxControl::mouseEvent(WX_NSEvent event, WXWidget slf, void *_cmd)
         reset = true;
         loop->OSXUseLowLevelWakeup(true);
     }
-    
+
     wxOSX_EventHandlerPtr superimpl = (wxOSX_EventHandlerPtr) [[slf superclass] instanceMethodForSelector:(SEL)_cmd];
     superimpl(slf, (SEL)_cmd, event);
- 
+
     if ( reset )
     {
         loop->OSXUseLowLevelWakeup(false);
@@ -324,13 +330,13 @@ void wxNSComboBoxControl::SetEditable(bool editable)
         [m_comboBox setSelectable:YES];
 }
 
-wxWidgetImplType* wxWidgetImpl::CreateComboBox( wxComboBox* wxpeer, 
-                                    wxWindowMac* WXUNUSED(parent), 
-                                    wxWindowID WXUNUSED(id), 
+wxWidgetImplType* wxWidgetImpl::CreateComboBox( wxComboBox* wxpeer,
+                                    wxWindowMac* WXUNUSED(parent),
+                                    wxWindowID WXUNUSED(id),
                                     wxMenu* WXUNUSED(menu),
-                                    const wxPoint& pos, 
+                                    const wxPoint& pos,
                                     const wxSize& size,
-                                    long style, 
+                                    long style,
                                     long WXUNUSED(extraStyle))
 {
     NSRect r = wxOSXGetFrameForControl( wxpeer, pos , size ) ;
@@ -354,26 +360,26 @@ wxSize wxComboBox::DoGetBestSize() const
     wxSize baseSize = wxWindow::DoGetBestSize();
     int lbHeight = baseSize.y;
     int wLine;
-    
+
     {
         wxInfoDC dc(const_cast<wxComboBox*>(this));
-        
+
         // Find the widest line
         for(unsigned int i = 0; i < GetCount(); i++)
         {
             wxString str(GetString(i));
-            
+
             wxCoord width, height ;
             dc.GetTextExtent( str , &width, &height);
             wLine = width ;
-            
+
             lbWidth = wxMax( lbWidth, wLine ) ;
         }
-        
+
         // Add room for the popup arrow
         lbWidth += 2 * lbHeight ;
     }
-    
+
     return wxSize( lbWidth, lbHeight );
 }
 

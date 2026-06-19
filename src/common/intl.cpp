@@ -55,7 +55,7 @@
 
 #ifdef __WIN32__
     #include "wx/msw/private/uilocale.h"
-#elif defined(__WXOSX__)
+#elif defined(__DARWIN__)
     #include "wx/osx/core/cfref.h"
     #include "wx/osx/core/cfstring.h"
     #include <CoreFoundation/CFLocale.h>
@@ -179,13 +179,13 @@ static bool gs_languagesDBInitialized = false;
 
 const wxLanguageInfos& wxGetLanguageInfos()
 {
-    wxUILocale::CreateLanguagesDB();
+    wxUILocaleImpl::CreateLanguagesDB();
 
     return gs_languagesDB;
 }
 
 /*static*/
-void wxUILocale::CreateLanguagesDB()
+void wxUILocaleImpl::CreateLanguagesDB()
 {
     if (!gs_languagesDBInitialized)
     {
@@ -196,7 +196,7 @@ void wxUILocale::CreateLanguagesDB()
 }
 
 /*static*/
-void wxUILocale::DestroyLanguagesDB()
+void wxUILocaleImpl::DestroyLanguagesDB()
 {
     if (gs_languagesDBInitialized)
     {
@@ -208,7 +208,7 @@ void wxUILocale::DestroyLanguagesDB()
 /* static */
 void wxUILocale::AddLanguage(const wxLanguageInfo& info)
 {
-    CreateLanguagesDB();
+    wxUILocaleImpl::CreateLanguagesDB();
     gs_languagesDB.push_back(info);
 }
 
@@ -219,13 +219,13 @@ void wxUILocale::AddLanguage(const wxLanguageInfo& info)
 /*static*/
 void wxLocale::CreateLanguagesDB()
 {
-    wxUILocale::CreateLanguagesDB();
+    wxUILocaleImpl::CreateLanguagesDB();
 }
 
 /*static*/
 void wxLocale::DestroyLanguagesDB()
 {
-    wxUILocale::DestroyLanguagesDB();
+    wxUILocaleImpl::DestroyLanguagesDB();
 }
 
 void wxLocale::DoCommonInit()
@@ -535,7 +535,7 @@ wxString wxLocale::GetSystemEncodingName()
     default:
         encname.Printf(wxS("windows-%u"), codepage);
     }
-#elif defined(__WXMAC__)
+#elif defined(__DARWIN__)
     encname = wxCFStringRef::AsString(
         CFStringGetNameOfEncoding(CFStringGetSystemEncoding())
     );
@@ -621,6 +621,7 @@ wxFontEncoding wxLocale::GetSystemEncoding()
     case 65001:
         return wxFONTENCODING_UTF8;
     }
+    return wxFONTENCODING_SYSTEM;
 #elif defined(__WXMAC__)
     CFStringEncoding encoding = 0;
     encoding = CFStringGetSystemEncoding();
@@ -645,11 +646,11 @@ wxFontEncoding wxLocale::GetSystemEncoding()
         {
             return enc;
         }
-        //else: return wxFONTENCODING_SYSTEM below
     }
-#endif // Win32/Unix
-
     return wxFONTENCODING_SYSTEM;
+#else
+    return wxFONTENCODING_SYSTEM;
+#endif
 }
 
 /* static */
@@ -818,7 +819,7 @@ wxString wxLocale::GetHeaderValue(const wxString& header,
 // accessors for locale-dependent data
 // ----------------------------------------------------------------------------
 
-#if defined(__WINDOWS__) || defined(__WXOSX__)
+#if defined(__WINDOWS__) || defined(__DARWIN__)
 
 namespace
 {
@@ -1242,7 +1243,7 @@ wxString wxLocale::GetOSInfo(wxLocaleInfo index, wxLocaleCategory cat)
     return wxUILocale::GetCurrent().GetInfo(index, cat);
 }
 
-#elif defined(__WXOSX__)
+#elif defined(__DARWIN__)
 
 // This function is also used by wxUILocaleImpl, so don't make it private.
 extern wxString

@@ -34,7 +34,7 @@
 #include <windowsx.h>
 
 #if wxUSE_OWNER_DRAWN
-    #include  "wx/ownerdrw.h"
+    #include "wx/msw/private/listboxitem.h"
 
     namespace
     {
@@ -49,24 +49,7 @@
 
 #if wxUSE_OWNER_DRAWN
 
-class wxListBoxItem : public wxOwnerDrawn
-{
-public:
-    wxListBoxItem(wxListBox *parent)
-        { m_parent = parent; }
-
-    wxListBox *GetParent() const
-        { return m_parent; }
-
-    int GetIndex() const
-        { return m_parent->GetItemIndex(const_cast<wxListBoxItem*>(this)); }
-
-    wxString GetName() const override
-        { return m_parent->GetString(GetIndex()); }
-
-private:
-    wxListBox *m_parent;
-};
+using wxListBoxItem = wxListBoxItemBase<wxListBox>;
 
 wxOwnerDrawn *wxListBox::CreateLboxItem(size_t WXUNUSED(n))
 {
@@ -190,6 +173,12 @@ WXDWORD wxListBox::MSWGetStyle(long style, WXDWORD *exstyle) const
     return msStyle;
 }
 
+void wxListBox::MSWGetDarkModeSupport(MSWDarkModeSupport& support) const
+{
+    support.themeName = L"Explorer";
+    support.themeId = L"ScrollBar";
+}
+
 void wxListBox::MSWUpdateFontOnDPIChange(const wxSize& newDPI)
 {
     wxListBoxBase::MSWUpdateFontOnDPIChange(newDPI);
@@ -213,7 +202,7 @@ void wxListBox::MSWOnItemsChanged()
 {
     // we need to do two things when items change: update their max horizontal
     // extent so that horizontal scrollbar could be shown or hidden as
-    // appropriate and also invlaidate the best size
+    // appropriate and also invalidate the best size
     //
     // updating the max extent is slow (it's an O(N) operation) and so we defer
     // it until the idle time but the best size should be invalidated

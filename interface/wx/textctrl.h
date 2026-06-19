@@ -1129,6 +1129,112 @@ public:
 };
 
 /**
+    Search options for wxTextCtrl::SearchText().
+
+    This is a builder class, where property functions can be
+    called during construction. For example:
+
+    @code
+    wxTextSearchResult result =
+        textctrl->SearchText(wxTextSearch(L"Institutional Research").
+            SearchDirection(wxTextSearch::Direction::Down).
+            MatchCase().
+            MatchWholeWord());
+    @endcode
+
+    @since 3.3.0
+*/
+struct wxTextSearch
+{
+    /**
+       The string to search for.
+     */
+    wxTextSearch(const wxString& text) : m_searchValue(text) {}
+
+    /**
+        One of the following values can be passed to wxTextSearch::SearchDirection() to
+        control direction when searching a wxTextCtrl.
+
+        @since 3.3.0
+    */
+    enum class Direction
+    {
+        Down,
+        Up
+    };
+
+    /**
+       The string to search for.
+     */
+    wxTextSearch& SearchValue(const wxString& value)
+    {
+        m_searchValue = value;
+        return *this;
+    }
+
+    /**
+       Whether the search should match case (i.e., be case sensitive).
+
+       By default, this is @c false; search will be case insensitive.
+     */
+    wxTextSearch& MatchCase(const bool matchCase = true)
+    {
+        m_matchCase = matchCase;
+        return *this;
+    }
+
+    /**
+       Whether the search should match the whole word.
+
+       By default, this is @c false; searching will not match by whole word.
+     */
+    wxTextSearch& MatchWholeWord(const bool matchWholeWord = true)
+    {
+        m_wholeWord = matchWholeWord;
+        return *this;
+    }
+
+    /**
+       Whether the search should go up or down in the text control.
+
+       By default, search will go downward.
+     */
+    wxTextSearch& SearchDirection(const wxTextSearch::Direction direction)
+    {
+        m_direction = direction;
+        return *this;
+    }
+
+    /**
+       Where the search should start from. By default, if searching down,
+       then the search will start at 0. If searching up, then will start
+       at the end of control.
+     */
+    wxTextSearch& Start(const long startPosition)
+    {
+        m_startingPosition = startPosition;
+        return *this;
+    }
+
+    wxString              m_searchValue;
+    long                  m_startingPosition = -1;
+    bool                  m_matchCase = true;
+    bool                  m_wholeWord = false;
+    Direction m_direction = Direction::Down;
+};
+
+/** Result from wxTextCtrl::SearchText(), specifying the range of the found text.
+    Range values will be @c wxNOT_FOUND if a match was not found.
+
+    @since 3.3.0
+*/
+struct wxTextSearchResult
+{
+    long m_start = wxNOT_FOUND;
+    long m_end = wxNOT_FOUND;
+};
+
+/**
     @class wxTextProofOptions
 
     This class provides a convenient means of passing multiple parameters to
@@ -1702,6 +1808,16 @@ public:
     void SetRTFValue(const wxString& val);
 
     /**
+        Searches for a string in the control, using the provided search options.
+
+        The range of the match will be returned as a wxTextSearchResult, which will
+        contain -1 values if no match was found.
+
+        @since 3.3.0
+    */
+    wxTextSearchResult SearchText(const wxTextSearch& search) const;
+
+    /**
         Finds the position of the character at the specified point.
 
         If the return code is not @c wxTE_HT_UNKNOWN the position of the
@@ -1997,8 +2113,8 @@ public:
     void OSXEnableNewLineReplacement(bool enable);
 
     /**
-        Enables the automatic replacement of ASCII quotation marks and
-        apostrophes with their typographic symbols.
+        Enables the automatic replacement of straight (ASCII) quotation marks and
+        apostrophes with smart ("curly") quotes.
 
         This feature is enabled by default.
 
@@ -2008,7 +2124,7 @@ public:
     void OSXEnableAutomaticQuoteSubstitution(bool enable);
 
     /**
-        Enables the automatic conversion of two ASCII hyphens into an m-dash.
+        Enables the automatic conversion of two ASCII hyphens into an em dash.
 
         This feature is enabled by default.
 
@@ -2062,6 +2178,25 @@ public:
         @since 3.3
     */
     GtkEditable *GTKGetEditable();
+
+    /**
+        Sets the content of a multiline text control from a Pango markup buffer.
+
+        This offers more granular control of content formatting, as well as a
+        significant performance benefit with larger content.
+
+        This is the GTK equivalent of SetRTFValue().
+
+        This functionality is only available in GTK versions greater than 3.16,
+        the function does nothing and returns @false when using older GTK
+        version, the application should handle this case and fall back to some
+        other way of setting the control contents.
+
+        @onlyfor{wxgtk}
+
+        @since 3.3
+    */
+    bool GTKSetPangoMarkup(const wxString& str);
 
     ///@}
 
