@@ -55,7 +55,7 @@ public:
 
     virtual ~IPCTestConnection() {}
 
-    virtual bool OnExec(const wxString& topic, const wxString& data)
+    virtual bool OnExec(const wxString& topic, const wxString& data) override
     {
         if ( topic != IPC_TEST_TOPIC )
             return false;
@@ -67,7 +67,7 @@ public:
                           const wxString& item,
                           const void* data,
                           size_t size,
-                          wxIPCFormat format)
+                          wxIPCFormat format) override
     {
         if ( topic != IPC_TEST_TOPIC )
             return false;
@@ -107,7 +107,7 @@ public:
     }
 
 
-    virtual bool OnDisconnect();
+    virtual bool OnDisconnect() override;
 
 private:
 
@@ -240,7 +240,7 @@ public:
         }
     }
 
-    wxConnectionBase* OnMakeConnection()
+    wxConnectionBase* OnMakeConnection() override
     {
         return new IPCTestConnection(this);
     }
@@ -333,7 +333,7 @@ public:
     }
 
 protected:
-    virtual void *Entry()
+    virtual void *Entry() override
     {
         IPCTestConnection& conn = gs_client->GetConn();
 
@@ -341,7 +341,7 @@ protected:
         {
             wxString s = m_label + wxString::Format(" %zu", n);
             size_t size=0;
-            const char* data = (char*) conn.Request(s, &size, wxIPC_PRIVATE);
+            const char* data = (const char*) conn.Request(s, &size, wxIPC_PRIVATE);
 
             // Catch2 macros are not thread safe, so we check explicitly and
             // store any deviation from the expected result.
