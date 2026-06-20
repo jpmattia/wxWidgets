@@ -183,7 +183,7 @@ public:
     // they refer to has been destroyed: dispatching such a stale event would
     // dereference a dangling wxSocketBase pointer. To guard against this we
     // keep the set of sockets that currently have a live connection and ignore
-    // events for any socket which is not in it. The check compares only 
+    // events for any socket which is not in it. The check compares only
     // pointer values, so it is safe even if the socket has already been freed.
     void RegisterConnectionSocket(wxSocketBase* socket);
     void UnregisterConnectionSocket(wxSocketBase* socket);
