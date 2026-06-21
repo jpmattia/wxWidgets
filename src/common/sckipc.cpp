@@ -43,8 +43,10 @@
 #include <errno.h>
 
 #include <set>
+#include <functional>
 
 #include "wx/socket.h"
+#include "wx/thread.h"
 
 class wxIPCMessageBase;
 
@@ -190,6 +192,13 @@ public:
     bool IsConnectionSocket(wxSocketBase* socket);
 
     wxCRIT_SECT_DECLARE_MEMBER(m_cs_process_msgs);
+
+    // Runs fn on the main thread, blocking the caller until it completes (on the
+    // main thread fn runs directly). All IPC socket I/O must happen on the main
+    // thread: the wxFDIODispatcher used by the main event loop is not safe to
+    // mutate from worker threads, so worker-thread Request()/Advise()/etc. funnel
+    // their socket work through here.
+    void RunOnMainThread(const std::function<void()>& fn);
 
 private:
     wxTCPConnection* GetConnection(wxSocketBase* socket);
@@ -1218,8 +1227,12 @@ bool wxTCPConnection::DoExecute(const void *data,
     if ( !m_handler )
         return false;
 
-    wxIPCMessageExecute msg(m_sock, data, size, format);
-    return m_handler->WriteMessageToSocket(msg);
+    bool result = false;
+    m_handler->RunOnMainThread([&] {
+        wxIPCMessageExecute msg(m_sock, data, size, format);
+        result = m_handler->WriteMessageToSocket(msg);
+    });
+    return result;
 }
 
 const void *wxTCPConnection::Request(const wxString& item,
@@ -1229,26 +1242,30 @@ const void *wxTCPConnection::Request(const wxString& item,
     if ( !m_handler )
         return nullptr;
 
-    // Don't let ProcessIncomingMessages interfere with getting a response
-    wxCRIT_SECT_LOCKER(lock, m_handler->m_cs_process_msgs);
+    const void* result = nullptr;
+    m_handler->RunOnMainThread([&] {
+        // Don't let ProcessIncomingMessages interfere with getting a response
+        wxCRIT_SECT_LOCKER(lock, m_handler->m_cs_process_msgs);
 
-    wxIPCMessageRequest msg(m_sock, item, format);
-    if ( !m_handler->WriteMessageToSocket(msg) )
-        return nullptr;
+        wxIPCMessageRequest msg(m_sock, item, format);
+        if ( !m_handler->WriteMessageToSocket(msg) )
+            return;
 
-    wxIPCMessageBase* msg_reply = nullptr;
+        wxIPCMessageBase* msg_reply = nullptr;
 
-    if ( !m_handler->FindMessage(IPC_REQUEST_REPLY, m_sock, &msg_reply) )
-        return nullptr;
+        if ( !m_handler->FindMessage(IPC_REQUEST_REPLY, m_sock, &msg_reply) )
+            return;
 
-    wxIPCMessageBaseLocker lockmsg(msg_reply);
-    if ( !msg_reply || !msg_reply->IsOk() )
-        return nullptr;
+        wxIPCMessageBaseLocker lockmsg(msg_reply);
+        if ( !msg_reply || !msg_reply->IsOk() )
+            return;
 
-    if (size)
-        *size = msg_reply->GetSize();
+        if (size)
+            *size = msg_reply->GetSize();
 
-    return msg_reply->GetReadData();
+        result = msg_reply->GetReadData();
+    });
+    return result;
 }
 
 bool wxTCPConnection::DoPoke(const wxString& item,
@@ -1259,8 +1276,12 @@ bool wxTCPConnection::DoPoke(const wxString& item,
     if ( !m_handler )
         return false;
 
-    wxIPCMessagePoke msg(m_sock, item, data, size, format);
-    return m_handler->WriteMessageToSocket(msg);
+    bool result = false;
+    m_handler->RunOnMainThread([&] {
+        wxIPCMessagePoke msg(m_sock, item, data, size, format);
+        result = m_handler->WriteMessageToSocket(msg);
+    });
+    return result;
 }
 
 bool wxTCPConnection::StartAdvise(const wxString& item)
@@ -1271,11 +1292,15 @@ bool wxTCPConnection::StartAdvise(const wxString& item)
     // Don't let ProcessIncomingMessages interfere with getting a response
     wxCRIT_SECT_LOCKER(lock, m_handler->m_cs_process_msgs);
 
-    wxIPCMessageAdviseStart msg(m_sock, item);
-    if ( !m_handler->WriteMessageToSocket(msg) )
-        return false;
+    bool result = false;
+    m_handler->RunOnMainThread([&] {
+        wxIPCMessageAdviseStart msg(m_sock, item);
+        if ( !m_handler->WriteMessageToSocket(msg) )
+            return;
 
-    return m_handler->FindMessage(IPC_ADVISE_START, m_sock, wxNO_RETURN_MESSAGE);
+        result = m_handler->FindMessage(IPC_ADVISE_START, m_sock, wxNO_RETURN_MESSAGE);
+    });
+    return result;
 }
 
 bool wxTCPConnection::StopAdvise (const wxString& item)
@@ -1286,11 +1311,15 @@ bool wxTCPConnection::StopAdvise (const wxString& item)
     // Don't let ProcessIncomingMessages interfere with getting a response
     wxCRIT_SECT_LOCKER(lock, m_handler->m_cs_process_msgs);
 
-    wxIPCMessageAdviseStop msg(m_sock, item);
-    if ( !m_handler->WriteMessageToSocket(msg) )
-        return false;
+    bool result = false;
+    m_handler->RunOnMainThread([&] {
+        wxIPCMessageAdviseStop msg(m_sock, item);
+        if ( !m_handler->WriteMessageToSocket(msg) )
+            return;
 
-    return m_handler->FindMessage(IPC_ADVISE_STOP, m_sock, wxNO_RETURN_MESSAGE);
+        result = m_handler->FindMessage(IPC_ADVISE_STOP, m_sock, wxNO_RETURN_MESSAGE);
+    });
+    return result;
 }
 
 
@@ -1303,8 +1332,12 @@ bool wxTCPConnection::DoAdvise(const wxString& item,
     if ( !m_handler )
         return false;
 
-    wxIPCMessageAdvise msg(m_sock, item, data, size, format);
-    return m_handler->WriteMessageToSocket(msg);
+    bool result = false;
+    m_handler->RunOnMainThread([&] {
+        wxIPCMessageAdvise msg(m_sock, item, data, size, format);
+        result = m_handler->WriteMessageToSocket(msg);
+    });
+    return result;
 }
 
 // --------------------------------------------------------------------------
@@ -1635,6 +1668,26 @@ bool wxTCPEventHandler::ExecuteMessage(wxIPCMessageBase* msg, wxSocketBase *sock
 // the matching IPCCode is found.  If msgptr is non-null, then the message is
 // also returned and the caller is responsible for deleting the returned
 // message.
+void wxTCPEventHandler::RunOnMainThread(const std::function<void()>& fn)
+{
+    if ( wxThread::IsMain() )
+    {
+        fn();
+        return;
+    }
+
+    // Marshal to the main thread and block until it has run the work. CallAfter()
+    // posts an async method-call event that the main event loop dispatches; the
+    // worker waits on the semaphore meanwhile, so the by-reference captures stay
+    // valid. The wait is bounded by the work itself (the 10s wxIPCTimeout).
+    wxSemaphore done;
+    CallAfter([&fn, &done] {
+        fn();
+        done.Post();
+    });
+    done.Wait();
+}
+
 bool wxTCPEventHandler::FindMessage(IPCCode code,
                                     wxSocketBase* socket,
                                     wxIPCMessageBase** return_msgptr)

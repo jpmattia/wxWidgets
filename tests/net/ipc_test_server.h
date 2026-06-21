@@ -39,13 +39,16 @@ void RunIPCServerUntilStopped();
 // Dispatch client-side socket events (implemented in ipc.cpp).
 void IPCClientDispatch(unsigned long timeoutMs = 10);
 
-// Wait for a joinable thread to finish. Do not dispatch client socket events
-// here: worker threads may be blocked in Request() and re-entrant dispatch
-// corrupts the IPC connection.
+// Wait for a joinable thread to finish while pumping the client event loop.
+// Worker threads marshal their IPC socket I/O to the main thread (see
+// wxTCPEventHandler::RunOnMainThread), so we must keep dispatching here for those
+// marshaled jobs to run; otherwise the worker blocks forever. This is safe now
+// that workers no longer touch the socket themselves (which is what previously
+// made re-entrant dispatch corrupt the connection).
 inline void WaitForThreadWithDispatch(wxThread& thread)
 {
     while ( thread.IsRunning() )
-        wxMilliSleep(10);
+        IPCClientDispatch(10);
 
     thread.Wait();
 }

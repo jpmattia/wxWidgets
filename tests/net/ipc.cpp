@@ -273,6 +273,14 @@ void IPCClientDispatch(unsigned long timeoutMs)
         return;
 
     wxEventLoopActivator activate(gs_clientLoop);
+
+    // Run any queued CallAfter() work first: worker threads marshal their IPC
+    // socket I/O to the main thread via wxTCPEventHandler::RunOnMainThread(),
+    // which posts async method-call events. DispatchTimeout() only services FD
+    // (socket) events, so without this the marshaled jobs would never run.
+    if ( wxTheApp )
+        wxTheApp->ProcessPendingEvents();
+
     gs_clientLoop->DispatchTimeout(timeoutMs);
 }
 
