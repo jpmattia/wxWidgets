@@ -110,10 +110,7 @@ bool wxEpollDispatcher::RegisterFD(int fd, wxFDIOHandler* handler, int flags)
     ev.events = GetEpollMask(flags, fd);
     ev.data.ptr = handler;
 
-    int ret = epoll_ctl(m_epollDescriptor, EPOLL_CTL_ADD, fd, &ev);
-    if ( ret != 0 && errno == EEXIST )
-        ret = epoll_ctl(m_epollDescriptor, EPOLL_CTL_MOD, fd, &ev);
-
+    const int ret = epoll_ctl(m_epollDescriptor, EPOLL_CTL_ADD, fd, &ev);
     if ( ret != 0 )
     {
         wxLogSysError(_("Failed to add descriptor %d to epoll descriptor %d"),
@@ -133,10 +130,7 @@ bool wxEpollDispatcher::ModifyFD(int fd, wxFDIOHandler* handler, int flags)
     ev.events = GetEpollMask(flags, fd);
     ev.data.ptr = handler;
 
-    int ret = epoll_ctl(m_epollDescriptor, EPOLL_CTL_MOD, fd, &ev);
-    if ( ret != 0 && errno == ENOENT )
-        ret = epoll_ctl(m_epollDescriptor, EPOLL_CTL_ADD, fd, &ev);
-
+    const int ret = epoll_ctl(m_epollDescriptor, EPOLL_CTL_MOD, fd, &ev);
     if ( ret != 0 )
     {
         wxLogSysError(_("Failed to modify descriptor %d in epoll descriptor %d"),

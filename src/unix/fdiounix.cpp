@@ -85,9 +85,9 @@ void wxFDIOManagerUnix::RemoveInput(wxFDIOHandler *handler, int fd, Direction d)
     if ( !ok )
     {
         wxLogDebug("Failed to unregister %d in direction %d", fd, d);
-        return;
     }
 
+    // do this even after a failure to unregister it, we still tried...
     handler->ClearRegisteredEvent(flag);
 }
 
