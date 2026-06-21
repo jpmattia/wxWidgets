@@ -272,7 +272,9 @@ void IPCClientDispatch(unsigned long timeoutMs)
     if ( !gs_clientLoop )
         return;
 
-    wxEventLoopActivator activate(gs_clientLoop);
+    // The client loop is already active for the lifetime of IPCFixture, so do
+    // NOT re-activate it per call: that writes ms_activeLoop and races the
+    // worker threads reading it via CallAfter() -> WakeUpIdle().
 
     // Run any queued CallAfter() work first: worker threads marshal their IPC
     // socket I/O to the main thread via wxTCPEventHandler::RunOnMainThread(),
@@ -293,8 +295,8 @@ static void DrainPendingIPCEvents()
 {
     if ( gs_clientLoop )
     {
-        wxEventLoopActivator activate(gs_clientLoop);
-
+        // No per-call activation: the client loop is already active via IPCFixture
+        // (and DispatchTimeout()/Pending() act on the loop object directly).
         for ( int i = 0; i < 100; ++i )
         {
             if ( !gs_clientLoop->Pending() )
@@ -382,6 +384,7 @@ public:
 class IPCFixture
 {
     std::unique_ptr<wxEventLoop> m_clientLoop{new wxEventLoop};
+    std::unique_ptr<wxEventLoopActivator> m_loopActivator;
     IPCServerThread m_server;
 
 public:
@@ -394,6 +397,13 @@ public:
         DrainPendingIPCEvents();
 
         gs_clientLoop = m_clientLoop.get();
+
+        // Activate the client loop once for the lifetime of this fixture so its
+        // worker threads see a stable wxEventLoopBase::ms_activeLoop. Activating
+        // per IPCClientDispatch() call would write ms_activeLoop and race the
+        // workers' CallAfter() -> WakeUpIdle() -> GetActive() reads.
+        m_loopActivator.reset(new wxEventLoopActivator(m_clientLoop.get()));
+
         gs_client = new IPCTestClient;
 
         REQUIRE( m_server.Start() );
@@ -425,6 +435,7 @@ public:
 
         DrainPendingIPCEvents();
 
+        m_loopActivator.reset(); // restore the previously-active loop, once
         gs_clientLoop = nullptr;
         m_clientLoop.reset();
 
