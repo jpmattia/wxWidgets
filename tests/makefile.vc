@@ -75,6 +75,7 @@ TEST_OBJECTS =  \
 	$(OBJS)\test_pathlist.obj \
 	$(OBJS)\test_typeinfotest.obj \
 	$(OBJS)\test_ipc.obj \
+	$(OBJS)\test_ipc_test_server.obj \
 	$(OBJS)\test_socket.obj \
 	$(OBJS)\test_webrequest.obj \
 	$(OBJS)\test_regextest.obj \
@@ -893,7 +894,7 @@ $(OBJS)\test_dummy.obj: .\dummy.cpp
 	$(CXX) /c /nologo /TP /Fo$@ $(TEST_CXXFLAGS) /Yctestprec.h .\dummy.cpp
 
 $(OBJS)\test_test.obj: .\test.cpp
-	$(CXX) /c /nologo /TP /Fo$@ $(TEST_CXXFLAGS) .\test.cpp
+	$(CXX) /c /nologo /TP /Fo$@ $(TEST_CXXFLAGS) /DTEST_HAS_IPC_SERVER .\test.cpp
 
 $(OBJS)\test_anytest.obj: .\any\anytest.cpp
 	$(CXX) /c /nologo /TP /Fo$@ $(TEST_CXXFLAGS) .\any\anytest.cpp
@@ -1023,6 +1024,9 @@ $(OBJS)\test_typeinfotest.obj: .\misc\typeinfotest.cpp
 
 $(OBJS)\test_ipc.obj: .\net\ipc.cpp
 	$(CXX) /c /nologo /TP /Fo$@ $(TEST_CXXFLAGS) .\net\ipc.cpp
+
+$(OBJS)\test_ipc_test_server.obj: .\net\ipc_test_server.cpp
+	$(CXX) /c /nologo /TP /Fo$@ $(TEST_CXXFLAGS) .\net\ipc_test_server.cpp
 
 $(OBJS)\test_socket.obj: .\net\socket.cpp
 	$(CXX) /c /nologo /TP /Fo$@ $(TEST_CXXFLAGS) .\net\socket.cpp

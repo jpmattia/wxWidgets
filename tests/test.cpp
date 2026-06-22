@@ -55,6 +55,10 @@ std::string wxTheCurrentTestClass, wxTheCurrentTestMethod;
 #include "wx/socket.h"
 #include "wx/evtloop.h"
 
+#if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER)
+    #include "net/ipc_test_server.h"
+#endif
+
 using namespace std;
 
 // ----------------------------------------------------------------------------
@@ -351,6 +355,23 @@ public:
 #else // !wxUSE_GUI
     virtual int OnRun() override
     {
+#if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER)
+        // The IPC test is console-only: its server is started by re-executing
+        // this same binary with WX_IPC_TEST_SERVER set and then running a bare
+        // event loop here. The IPC sources and TEST_HAS_IPC_SERVER are built only
+        // into the console "test" program (not "test_gui"), so this entry point
+        // deliberately lives only in the non-GUI OnRun(). It is intentionally not
+        // run in GUI or monolithic builds: see
+        // https://github.com/wxWidgets/wxWidgets/issues/24909 -- a GUI-only
+        // component inserts itself into the wxAppConsole server; As shown in the
+        // ipc sample, baseserver stops receiving data.
+        if ( wxGetEnv("WX_IPC_TEST_SERVER", nullptr) )
+        {
+            RunIPCServerUntilStopped();
+            return 0;
+        }
+#endif // wxUSE_THREADS && TEST_HAS_IPC_SERVER
+
         return RunTests();
     }
 #endif // wxUSE_GUI/!wxUSE_GUI

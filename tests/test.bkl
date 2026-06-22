@@ -34,6 +34,7 @@
 
     <exe id="test" template="wx_sample_console,wx_test"
                    template_append="wx_append_base">
+        <cxxflags>-DTEST_HAS_IPC_SERVER</cxxflags>
         <sources>
             test.cpp
             any/anytest.cpp
@@ -79,6 +80,7 @@
             misc/pathlist.cpp
             misc/typeinfotest.cpp
             net/ipc.cpp
+            net/ipc_test_server.cpp
             net/socket.cpp
             net/webrequest.cpp
             regex/regextest.cpp
