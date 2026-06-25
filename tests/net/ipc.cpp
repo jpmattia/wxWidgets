@@ -9,18 +9,24 @@
 
 #include "testprec.h"
 
-// this test needs threads as it runs the test server concurrently with the client
+// This test requires wxUSE_THREADS==1 since it runs the test server
+// concurrently with the client.
 //
-// It is deliberately excluded from wxMSW monolithic builds, where wxIPC itself
-// is broken by wxWidgets#24909: in a monolithic library a GUI-only component
-// inserts itself into the wxAppConsole server, after which the base server stops
-// receiving data. Running this test there fails for reasons unrelated to what it
-// is meant to check, so we skip it rather than report a spurious failure. The
-// bug is wxMSW-specific -- a GTK monolithic build runs these tests cleanly -- so
-// the guard keys off wxMONOLITHIC, which is defined (to 1) only in wxMSW
-// monolithic builds. (For the guard to engage, the MSVC monolithic test build
-// must define wxMONOLITHIC=1; it currently selects the monolithic library via
-// the makefile's $(MONOLITHIC) but does not pass it to the compiler as a -D.)
+// This test is deliberately excluded from wxMSW monolithic builds,
+// where wxIPC itself is broken by wxWidgets#24909. In that issue, we
+// noted that in a monolithic build, a GUI-only component inserts
+// itself into the wxAppConsole server. The bug can be demonstrated by
+// compile the IPC sample in a monolithic build, where it will be seen
+// that the base server sample stops receiving data. 
+//
+// Running this test there fails for reasons unrelated to what it is
+// meant to check, so we skip it rather than report a spurious
+// failure. The bug is wxMSW-specific -- a GTK monolithic build runs
+// these tests cleanly -- so the guard keys off wxMONOLITHIC, which is
+// defined (to 1) only in wxMSW monolithic builds. (For the guard to
+// engage, the MSVC monolithic test build must define wxMONOLITHIC=1;
+// it currently selects the monolithic library via the makefile's
+// $(MONOLITHIC) but does not pass it to the compiler as a -D.)
 #if wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
 
 #ifndef WX_PRECOMP
