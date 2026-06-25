@@ -11,14 +11,16 @@
 
 // this test needs threads as it runs the test server concurrently with the client
 //
-// It is also excluded from wxMSW monolithic builds: wxWidgets#24909 (a GUI-only
-// component inserts itself into the wxAppConsole server, after which the base
-// server stops receiving data) breaks wxIPC there. The bug is MSW-specific --
-// the GTK monolithic build runs these tests cleanly -- so the guard keys off
-// wxMONOLITHIC, which is only ever defined (to 1) in wxMSW monolithic builds.
-// NB: for this to take effect the MSVC monolithic *test* build must define
-// wxMONOLITHIC=1; the makefiles currently select the mono lib via $(MONOLITHIC)
-// but do not pass it as a -D, so that addition is still needed on the build side.
+// It is deliberately excluded from wxMSW monolithic builds, where wxIPC itself
+// is broken by wxWidgets#24909: in a monolithic library a GUI-only component
+// inserts itself into the wxAppConsole server, after which the base server stops
+// receiving data. Running this test there fails for reasons unrelated to what it
+// is meant to check, so we skip it rather than report a spurious failure. The
+// bug is wxMSW-specific -- a GTK monolithic build runs these tests cleanly -- so
+// the guard keys off wxMONOLITHIC, which is defined (to 1) only in wxMSW
+// monolithic builds. (For the guard to engage, the MSVC monolithic test build
+// must define wxMONOLITHIC=1; it currently selects the monolithic library via
+// the makefile's $(MONOLITHIC) but does not pass it to the compiler as a -D.)
 #if wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
 
 #ifndef WX_PRECOMP
