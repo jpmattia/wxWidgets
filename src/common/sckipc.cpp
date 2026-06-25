@@ -36,7 +36,10 @@
     #include "wx/log.h"
     #include "wx/event.h"
     #include "wx/module.h"
+    #include "wx/app.h"
 #endif
+
+#include "wx/evtloop.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -1712,6 +1715,25 @@ bool wxTCPEventHandler::SendAndGetReply(wxIPCMessageBase& msg,
         return SendAndGetReply_WorkerThread(msg, expected_code, return_msgptr);
 }
 
+namespace
+{
+
+// RAII guard that leaves an already-entered critical section on destruction
+// (the inverse of wxCRIT_SECT_LOCKER, which enters on construction). Used when
+// the section was acquired with TryEnter() in a custom wait loop.
+class CritSectLeaver
+{
+public:
+    explicit CritSectLeaver(wxCriticalSection& cs) : m_cs(cs) {}
+    ~CritSectLeaver() { m_cs.Leave(); }
+
+private:
+    wxCriticalSection& m_cs;
+    wxDECLARE_NO_COPY_CLASS(CritSectLeaver);
+};
+
+} // anonymous namespace
+
 // Take over socket processing from OnSocketInput until we find the
 // return message.
 bool wxTCPEventHandler::SendAndGetReply_MainThread(wxIPCMessageBase& msg,
@@ -1719,7 +1741,30 @@ bool wxTCPEventHandler::SendAndGetReply_MainThread(wxIPCMessageBase& msg,
                                                    wxSocketBase* socket,
                                                    wxIPCMessageBase** return_msgptr)
 {
-    wxCRIT_SECT_LOCKER(find_message_lock, m_cs_process_msgs);
+    // A worker thread may be holding m_cs_process_msgs while parked in
+    // RunOnMainThread(), waiting for *this* (the main) thread to run its
+    // marshalled socket I/O. Blocking on the lock here would stop us pumping the
+    // event loop and deadlock. So acquire it without blocking the loop: spin on
+    // TryEnter(), pumping pending events (the worker's RunOnMainThread() jobs)
+    // and socket I/O (its reply) between attempts so the worker can finish and
+    // release the lock.
+    while ( !m_cs_process_msgs.TryEnter() )
+    {
+        wxEventLoopBase* const loop = wxEventLoopBase::GetActive();
+        if ( !loop )
+        {
+            // No event loop to pump, so no worker can be waiting on us; the only
+            // safe thing left is to block until the lock is free.
+            m_cs_process_msgs.Enter();
+            break;
+        }
+
+        if ( wxTheApp )
+            wxTheApp->ProcessPendingEvents();
+        loop->DispatchTimeout(1);
+    }
+    CritSectLeaver find_message_lock(m_cs_process_msgs);
+
     wxCRIT_SECT_LOCKER(socket_processing_lock, m_cs_socket_processing);
 
     if ( !WriteMessageToSocket(msg) )
