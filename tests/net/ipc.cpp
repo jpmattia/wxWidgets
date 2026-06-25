@@ -10,7 +10,16 @@
 #include "testprec.h"
 
 // this test needs threads as it runs the test server concurrently with the client
-#if wxUSE_THREADS
+//
+// It is also excluded from wxMSW monolithic builds: wxWidgets#24909 (a GUI-only
+// component inserts itself into the wxAppConsole server, after which the base
+// server stops receiving data) breaks wxIPC there. The bug is MSW-specific --
+// the GTK monolithic build runs these tests cleanly -- so the guard keys off
+// wxMONOLITHIC, which is only ever defined (to 1) in wxMSW monolithic builds.
+// NB: for this to take effect the MSVC monolithic *test* build must define
+// wxMONOLITHIC=1; the makefiles currently select the mono lib via $(MONOLITHIC)
+// but do not pass it as a -D, so that addition is still needed on the build side.
+#if wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
 
 #ifndef WX_PRECOMP
     #include "wx/app.h"
@@ -972,4 +981,4 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( worker.m_error.IsEmpty() );
 }
 
-#endif // wxUSE_THREADS
+#endif // wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)

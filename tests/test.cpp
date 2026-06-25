@@ -55,7 +55,10 @@ std::string wxTheCurrentTestClass, wxTheCurrentTestMethod;
 #include "wx/socket.h"
 #include "wx/evtloop.h"
 
-#if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER)
+// wxMONOLITHIC guard: see the longer note in tests/net/ipc.cpp -- the IPC test
+// (and its server) is excluded from wxMSW monolithic builds because of #24909.
+#if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER) && \
+        (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
     #include "net/ipc_test_server.h"
 #endif
 
@@ -355,7 +358,8 @@ public:
 #else // !wxUSE_GUI
     virtual int OnRun() override
     {
-#if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER)
+#if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER) && \
+        (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
         // The IPC test is console-only: its server is started by re-executing
         // this same binary with WX_IPC_TEST_SERVER set and then running a bare
         // event loop here. The IPC sources and TEST_HAS_IPC_SERVER are built only
@@ -370,7 +374,7 @@ public:
             RunIPCServerUntilStopped();
             return 0;
         }
-#endif // wxUSE_THREADS && TEST_HAS_IPC_SERVER
+#endif // wxUSE_THREADS && TEST_HAS_IPC_SERVER && !wxMONOLITHIC
 
         return RunTests();
     }
