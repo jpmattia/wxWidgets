@@ -40,6 +40,7 @@ bool g_show_message_timing = false;
 
 // Output for g_show_message_timing uses std::cout, so we can get a sense of the
 // raw arrival times.
+#include <atomic>
 #include <iostream>
 #include <memory>
 
@@ -339,13 +340,20 @@ public:
     {
         m_label = label;
 
+        // Resolve the connection here, on the main thread (the test constructs
+        // us before calling Run()). GetConn() uses REQUIRE(), a Catch2 macro
+        // that is not thread-safe, so it must not run on the worker thread in
+        // Entry(). The connection is stable for our lifetime, so caching the
+        // pointer is safe.
+        m_conn = &gs_client->GetConn();
+
         Create();
     }
 
 protected:
     virtual void *Entry() override
     {
-        IPCTestConnection& conn = gs_client->GetConn();
+        IPCTestConnection& conn = *m_conn;
 
         for (size_t n=1; n < MESSAGE_ITERATIONS + 1; n++)
         {
@@ -376,6 +384,7 @@ protected:
 public:
     wxString m_label;
     wxString m_error;
+    IPCTestConnection* m_conn = nullptr;
 
     wxDECLARE_NO_COPY_CLASS(MultiRequestThread);
 };
@@ -854,6 +863,90 @@ TEST_CASE_METHOD(IPCFixture,
 
     INFO( wxString(data) );
     CHECK( wxString(data).IsEmpty() );
+}
+
+// A deadlock cannot be detected from the main thread, because the main thread
+// is precisely what gets stuck. This watchdog runs on its own thread and aborts
+// the process with a diagnostic if the test does not signal completion in time,
+// turning an otherwise indefinite hang into a clear, bounded failure.
+class DeadlockWatchdog : public wxThread
+{
+public:
+    explicit DeadlockWatchdog(int timeoutMs)
+        : wxThread(wxTHREAD_JOINABLE), m_timeoutMs(timeoutMs) {}
+
+    // Called by the test once it has completed normally.
+    void Done() { m_done.store(true); }
+
+protected:
+    void* Entry() override
+    {
+        const int step = 50;
+        for ( int waited = 0; waited < m_timeoutMs; waited += step )
+        {
+            if ( m_done.load() )
+                return nullptr;
+            wxMilliSleep(step);
+        }
+
+        std::cerr << "\nDEADLOCK: concurrent main-thread + worker-thread "
+                     "Request() on the same connection did not complete within "
+                  << m_timeoutMs << " ms.\n" << std::flush;
+        abort();
+    }
+
+    const int m_timeoutMs;
+    std::atomic<bool> m_done{false};
+
+    wxDECLARE_NO_COPY_CLASS(DeadlockWatchdog);
+};
+
+// Exercises the case where a Request() is issued on the main thread while a
+// worker thread is also issuing Request()s on the same connection.
+//
+// A main-thread Request() goes through SendAndGetReply_MainThread(), which
+// blocks acquiring m_cs_process_msgs. A worker thread holds that critical
+// section for the whole of its exchange, including while it marshals its socket
+// write to the main thread (RunOnMainThread) and blocks waiting for the main
+// thread to run it. So if the main thread blocks on m_cs_process_msgs at that
+// moment, it stops pumping the event loop, the worker's marshalled write never
+// runs, and both threads are stuck.
+//
+// The watchdog bounds the failure; the test should complete near-instantly once
+// main-thread and worker-thread Request()s are properly serialized.
+TEST_CASE_METHOD(IPCFixture,
+                 "IPC::ConcurrentMainAndWorkerRequest", "[net][ipc][multi_command]")
+{
+    CHECK( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    IPCTestConnection& conn = gs_client->GetConn();
+
+    DeadlockWatchdog watchdog(5000);
+    watchdog.Run();
+
+    MultiRequestThread worker("MultiRequest thread 1");
+    worker.Run();
+
+    // Hammer the connection from the main thread while the worker does the same
+    // from its thread. Pump between requests so that, absent the deadlock, the
+    // worker's marshalled socket I/O can run on the main thread.
+    while ( worker.IsRunning() )
+    {
+        size_t size = 0;
+        const char* pong = (const char*) conn.Request("ping", &size, wxIPC_PRIVATE);
+
+        CHECK( pong != nullptr );
+        if ( pong )
+            CHECK( wxString(pong) == "pong" );
+
+        IPCClientDispatch(5);
+    }
+
+    worker.Wait();
+    watchdog.Done();
+    watchdog.Wait();
+
+    INFO( worker.m_error );
+    CHECK( worker.m_error.IsEmpty() );
 }
 
 #endif // wxUSE_THREADS
