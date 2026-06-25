@@ -32,6 +32,7 @@
 #include <wx/thread.h>
 #include <wx/utils.h>
 #include <wx/evtloop.h>
+#include <wx/stopwatch.h>
 
 // forward decl
 class IPCTestClient;
@@ -428,12 +429,17 @@ public:
 
         // Wait for the server to actually be ready to accept connections rather
         // than sleeping a fixed amount: the re-exec'd server process can take a
-        // while to come up -- well over a second under sanitizers or on a loaded
-        // CI runner -- and a fixed delay races that startup (every later
-        // PumpConnect() then fails). Poll with a throwaway connection until one
-        // succeeds, then drop it so each test starts from a clean state.
+        // while to come up -- well over a second under sanitizers, on a loaded CI
+        // runner, or as a GUI (test_gui) process doing full toolkit init -- and a
+        // fixed delay races that startup (every later PumpConnect() then fails).
+        // Poll with a throwaway connection until one succeeds, then drop it so
+        // each test starts from a clean state. The bound is wall-clock based, not
+        // iteration based: in a GUI event loop IPCClientDispatch() returns at once
+        // (idle events), so a fixed iteration count would expire in a fraction of
+        // a second, before a GUI server is listening.
         bool serverReady = false;
-        for ( int i = 0; i < 200 && !serverReady; ++i )   // up to ~10s
+        wxStopWatch sw;
+        while ( !serverReady && sw.Time() < 30000 )   // up to 30s
         {
             if ( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) )
             {

@@ -612,7 +612,19 @@ public:
     void OnTimer(wxTimerEvent& WXUNUSED(event))
     {
         wxSetEnv("WX_IPC_TEST_SERVER", "1");
-        m_state->pid = wxExecute(m_state->command, wxEXEC_ASYNC, m_state->process);
+
+        // Pass the environment to the child explicitly. Relying on wxExecute()
+        // to inherit a variable set via wxSetEnv() works for the console "test"
+        // but not for the wxGTK GUI "test_gui": there the re-executed child did
+        // not see WX_IPC_TEST_SERVER and ran the whole test suite instead of the
+        // IPC server. Building the env map and handing it to wxExecute() makes
+        // the hand-off reliable in both programs.
+        wxExecuteEnv execEnv;
+        wxGetEnvMap(&execEnv.env);
+        execEnv.env["WX_IPC_TEST_SERVER"] = "1";
+
+        m_state->pid = wxExecute(m_state->command, wxEXEC_ASYNC,
+                                 m_state->process, &execEnv);
 
         if ( wxEventLoop::GetActive() )
             wxEventLoop::GetActive()->Exit();

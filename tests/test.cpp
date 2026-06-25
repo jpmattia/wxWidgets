@@ -347,6 +347,23 @@ public:
 
     virtual int OnRun() override
     {
+#if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER) && \
+        (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
+        // The IPC test re-executes this same binary as its server (with
+        // WX_IPC_TEST_SERVER set), so test_gui must run the server here too,
+        // exactly as the console test does in the non-GUI OnRun() below. See the
+        // note there and tests/net/ipc.cpp for the wxMONOLITHIC exclusion.
+        if ( wxGetEnv("WX_IPC_TEST_SERVER", nullptr) )
+        {
+            // Suppress the idle-driven test runner: RunIPCServerUntilStopped()
+            // spins its own event loop, and our OnIdle() would otherwise fire
+            // there and run the whole test suite inside the server process.
+            m_runTests = false;
+            RunIPCServerUntilStopped();
+            return 0;
+        }
+#endif // wxUSE_THREADS && TEST_HAS_IPC_SERVER && !wxMONOLITHIC
+
         if ( !IsGUIEnabled() )
             return 0;
 
@@ -360,15 +377,14 @@ public:
     {
 #if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER) && \
         (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
-        // The IPC test is console-only: its server is started by re-executing
-        // this same binary with WX_IPC_TEST_SERVER set and then running a bare
-        // event loop here. The IPC sources and TEST_HAS_IPC_SERVER are built only
-        // into the console "test" program (not "test_gui"), so this entry point
-        // deliberately lives only in the non-GUI OnRun(). It is intentionally not
-        // run in GUI or monolithic builds: see
+        // The IPC test starts its server by re-executing this same binary with
+        // WX_IPC_TEST_SERVER set and then running a bare event loop here. The IPC
+        // sources and TEST_HAS_IPC_SERVER are built into both the console "test"
+        // and "test_gui" programs, so the GUI OnRun() above has the same hook.
+        // Excluded from wxMSW monolithic builds: see
         // https://github.com/wxWidgets/wxWidgets/issues/24909 -- a GUI-only
         // component inserts itself into the wxAppConsole server, after which the
-        // baseserver stops receiving data.
+        // baseserver stops receiving data (MSW-specific; GTK monolithic is fine).
         if ( wxGetEnv("WX_IPC_TEST_SERVER", nullptr) )
         {
             RunIPCServerUntilStopped();
