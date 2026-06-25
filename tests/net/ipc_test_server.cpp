@@ -8,7 +8,12 @@
 
 #include "testprec.h"
 
-#if wxUSE_THREADS
+// Must match the guard in tests/net/ipc.cpp: this file calls IPCClientDispatch()
+// (defined there), so it has to be compiled out under the same conditions --
+// otherwise a wxMSW monolithic build (wxMONOLITHIC=1) leaves a dangling
+// reference to IPCClientDispatch() and fails to link. See ipc.cpp for why the
+// IPC test is excluded from wxMSW monolithic builds (#24909).
+#if wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
 
 #ifndef WX_PRECOMP
     #include "wx/app.h"
@@ -690,4 +695,4 @@ void IPCServerThread::WaitForExit()
     launcher.DoStop();
 }
 
-#endif // wxUSE_THREADS
+#endif // wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
