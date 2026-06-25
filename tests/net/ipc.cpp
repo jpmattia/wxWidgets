@@ -417,7 +417,26 @@ public:
 
         REQUIRE( m_server.Start() );
 
-        wxMilliSleep(200);
+        // Wait for the server to actually be ready to accept connections rather
+        // than sleeping a fixed amount: the re-exec'd server process can take a
+        // while to come up -- well over a second under sanitizers or on a loaded
+        // CI runner -- and a fixed delay races that startup (every later
+        // PumpConnect() then fails). Poll with a throwaway connection until one
+        // succeeds, then drop it so each test starts from a clean state.
+        bool serverReady = false;
+        for ( int i = 0; i < 200 && !serverReady; ++i )   // up to ~10s
+        {
+            if ( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) )
+            {
+                gs_client->Disconnect();
+                serverReady = true;
+            }
+            else
+            {
+                IPCClientDispatch(50);
+            }
+        }
+        REQUIRE( serverReady );
     }
 
     ~IPCFixture()
