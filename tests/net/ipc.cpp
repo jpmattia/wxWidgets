@@ -690,9 +690,12 @@ TEST_CASE_METHOD(IPCFixture,
 
     CHECK( conn.StartAdvise(item) );
 
-    // wait a maximum of 2 seconds for completion.
-    int cnt = 0;
-    while ( cnt++ < 200 && !conn.m_advise_complete )
+    // Wait a maximum of 2 seconds for completion. The bound is wall-clock based,
+    // not iteration based: under a GUI event loop PumpDispatch() returns at once
+    // (idle events), so a fixed iteration count would expire almost immediately,
+    // before the server's advise arrives.
+    wxStopWatch sw;
+    while ( sw.Time() < 2000 && !conn.m_advise_complete )
     {
         PumpDispatch();
     }
@@ -727,9 +730,10 @@ TEST_CASE_METHOD(IPCFixture,
 
     CHECK( conn.StartAdvise(item) );
 
-    // wait a maximum of 20 seconds for completion.
-    int cnt = 0;
-    while ( cnt++ < 2000 &&
+    // Wait a maximum of 20 seconds for completion (wall-clock bounded; see the
+    // note in IPC::SingleAdvise about GUI event loops and PumpDispatch()).
+    wxStopWatch sw;
+    while ( sw.Time() < 20000 &&
             conn.m_thread1_advise_lastval != MESSAGE_ITERATIONS )
     {
         PumpDispatch();
@@ -770,9 +774,10 @@ TEST_CASE_METHOD(IPCFixture,
 
     CHECK( conn.StartAdvise(item) );
 
-    // wait a maximum of 20 seconds for completion.
-    int cnt = 0;
-    while ( cnt++ < 2000 )
+    // Wait a maximum of 20 seconds for completion (wall-clock bounded; see the
+    // note in IPC::SingleAdvise about GUI event loops and PumpDispatch()).
+    wxStopWatch sw;
+    while ( sw.Time() < 20000 )
     {
         PumpDispatch();
 
@@ -844,8 +849,9 @@ TEST_CASE_METHOD(IPCFixture,
     WaitForThreadWithDispatch(thread3);
 
     // Phase 2: dispatch any remaining Advise() notifications on the main thread.
-    int cnt = 0;
-    while ( cnt++ < 20000 )
+    // Wall-clock bounded; see the note in IPC::SingleAdvise about GUI event loops.
+    wxStopWatch sw;
+    while ( sw.Time() < 20000 )
     {
         PumpDispatch();
 
