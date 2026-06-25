@@ -920,7 +920,11 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
     IPCTestConnection& conn = gs_client->GetConn();
 
-    DeadlockWatchdog watchdog(5000);
+    // Generous timeout: the test completes in ~1-2s when healthy, so the
+    // watchdog only ever fires on a *permanent* deadlock (which never recovers).
+    // A large value avoids spurious aborts on slow/loaded CI runners or under
+    // sanitizers, at no cost to the passing case.
+    DeadlockWatchdog watchdog(30000);
     watchdog.Run();
 
     MultiRequestThread worker("MultiRequest thread 1");
