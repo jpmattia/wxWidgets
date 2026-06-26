@@ -233,7 +233,16 @@ bool IPCServerConnection::OnExec(const wxString& topic, const wxString& data)
 
 bool IPCServerConnection::OnDisconnect()
 {
-    m_server->m_conn = nullptr;
+    // Only clear the server's current-connection pointer if *this* connection is
+    // still the current one. Connections can briefly overlap -- e.g. the fixture
+    // probes server readiness with a throwaway connect/disconnect, and that
+    // probe's disconnect can be processed after the real connection has already
+    // been accepted and stored. Nulling unconditionally there would discard the
+    // live connection, after which GetConn() fabricates an unconnected one and
+    // server-side Advise() fails. (Surfaced under the GUI event loop, where the
+    // overlap is more likely.)
+    if ( m_server->m_conn == this )
+        m_server->m_conn = nullptr;
     return wxConnection::OnDisconnect();
 }
 
