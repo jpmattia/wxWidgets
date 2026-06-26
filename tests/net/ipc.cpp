@@ -17,7 +17,7 @@
 // noted that in a monolithic build, a GUI-only component inserts
 // itself into the wxAppConsole server. The bug can be demonstrated by
 // compile the IPC sample in a monolithic build, where it will be seen
-// that the base server sample stops receiving data. 
+// that the base server sample stops receiving data.
 //
 // Running this test there fails for reasons unrelated to what it is
 // meant to check, so we skip it rather than report a spurious

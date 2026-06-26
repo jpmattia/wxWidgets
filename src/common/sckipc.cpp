@@ -170,15 +170,15 @@ public:
 
     bool ProcessMessage(wxIPCMessageBase* msg, wxSocketBase *socket);
 
-    bool SendAndGetReply(wxIPCMessageBase& msg,
+    bool SendAndGetReply(wxIPCMessageBase& send_msg,
                          IPCCode expected_code,
                          wxSocketBase* socket,
                          wxIPCMessageBase** return_msgptr);
-    bool SendAndGetReply_MainThread(wxIPCMessageBase& msg,
+    bool SendAndGetReply_MainThread(wxIPCMessageBase& send_msg,
                                     IPCCode expected_code,
                                     wxSocketBase* socket,
                                     wxIPCMessageBase** return_msgptr);
-    bool SendAndGetReply_WorkerThread(wxIPCMessageBase& msg,
+    bool SendAndGetReply_WorkerThread(wxIPCMessageBase& send_msg,
                                       IPCCode expected_code,
                                       wxIPCMessageBase** return_msgptr);
 
@@ -215,7 +215,7 @@ public:
 
     // Reply handoff between a worker thread blocked in SendAndWaitForReply() and
     // the main thread's OnSocketInput(). Only one reply is ever pending at a
-    // time, which is guarenteed by m_cs_process_msgs (serializing reply-expecting 
+    // time, which is guarenteed by m_cs_process_msgs (serializing reply-expecting
     // commands)
     wxMutex m_replyMutex;
     wxCondition m_replyCond{m_replyMutex};
@@ -1375,7 +1375,7 @@ void wxTCPEventHandler::OnSocketInput(wxSocketEvent &event)
 
     // This socket is being deleted
     if ( !connection )
-    {        
+    {
         FailPendingReply();
         return;
     }
@@ -1702,7 +1702,7 @@ void wxTCPEventHandler::RunOnMainThread(const std::function<void()>& fn)
 
 
 
-bool wxTCPEventHandler::SendAndGetReply(wxIPCMessageBase& msg,
+bool wxTCPEventHandler::SendAndGetReply(wxIPCMessageBase& send_msg,
                                         IPCCode expected_code,
                                         wxSocketBase* socket,
                                         wxIPCMessageBase** return_msgptr)
@@ -1710,9 +1710,9 @@ bool wxTCPEventHandler::SendAndGetReply(wxIPCMessageBase& msg,
     // The structure of FindMessage changes greatly whether we are on
     // wxThread::Main or not.  Divide them into two submethods:
     if (wxThread::IsMain())
-        return SendAndGetReply_MainThread(msg, expected_code, socket, return_msgptr);
+        return SendAndGetReply_MainThread(send_msg, expected_code, socket, return_msgptr);
     else
-        return SendAndGetReply_WorkerThread(msg, expected_code, return_msgptr);
+        return SendAndGetReply_WorkerThread(send_msg, expected_code, return_msgptr);
 }
 
 namespace
@@ -1736,7 +1736,7 @@ private:
 
 // Take over socket processing from OnSocketInput until we find the
 // return message.
-bool wxTCPEventHandler::SendAndGetReply_MainThread(wxIPCMessageBase& msg,
+bool wxTCPEventHandler::SendAndGetReply_MainThread(wxIPCMessageBase& send_msg,
                                                    IPCCode expected_code,
                                                    wxSocketBase* socket,
                                                    wxIPCMessageBase** return_msgptr)
@@ -1767,7 +1767,7 @@ bool wxTCPEventHandler::SendAndGetReply_MainThread(wxIPCMessageBase& msg,
 
     wxCRIT_SECT_LOCKER(socket_processing_lock, m_cs_socket_processing);
 
-    if ( !WriteMessageToSocket(msg) )
+    if ( !WriteMessageToSocket(send_msg) )
         return false;
 
     while ( GetConnection(socket) )
@@ -1799,7 +1799,7 @@ bool wxTCPEventHandler::SendAndGetReply_MainThread(wxIPCMessageBase& msg,
 }
 
 // worker thread
-bool wxTCPEventHandler::SendAndGetReply_WorkerThread(wxIPCMessageBase& msg,
+bool wxTCPEventHandler::SendAndGetReply_WorkerThread(wxIPCMessageBase& send_msg,
                                                      IPCCode expected_code,
                                                      wxIPCMessageBase** return_msgptr)
 {
@@ -1826,7 +1826,7 @@ bool wxTCPEventHandler::SendAndGetReply_WorkerThread(wxIPCMessageBase& msg,
     // across the write would deadlock: the worker waits on the main thread while
     // the main thread waits on the mutex the worker holds.
     bool ok = false;
-    if ( WriteMessageToSocket(msg) )
+    if ( WriteMessageToSocket(send_msg) )
     {
         wxMutexLocker waitlock(m_replyMutex);
 
