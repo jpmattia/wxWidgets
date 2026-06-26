@@ -55,10 +55,13 @@ std::string wxTheCurrentTestClass, wxTheCurrentTestMethod;
 #include "wx/socket.h"
 #include "wx/evtloop.h"
 
-// wxMONOLITHIC guard: see the longer note in tests/net/ipc.cpp -- the IPC test
-// (and its server) is excluded from wxMSW monolithic builds because of #24909.
+// wxMONOLITHIC/__WXQT__ guard: see the longer note in tests/net/ipc.cpp -- the
+// IPC test (and its server) is excluded from wxMSW monolithic builds (#24909)
+// and from wxQt (cross-thread CallAfter() not processed by the wxQt event loop,
+// fixed separately on branch jpmattia/wxQT-CallAfter-wxWakeUpIdle).
 #if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER) && \
-        (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
+        (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0) && \
+        !defined(__WXQT__)
     #include "net/ipc_test_server.h"
 #endif
 
@@ -348,7 +351,8 @@ public:
     virtual int OnRun() override
     {
 #if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER) && \
-        (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
+        (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0) && \
+        !defined(__WXQT__)
         // The IPC test re-executes this same binary as its server (with
         // WX_IPC_TEST_SERVER set), so test_gui must run the server here too,
         // exactly as the console test does in the non-GUI OnRun() below. See the
@@ -362,7 +366,7 @@ public:
             RunIPCServerUntilStopped();
             return 0;
         }
-#endif // wxUSE_THREADS && TEST_HAS_IPC_SERVER && !wxMONOLITHIC
+#endif // wxUSE_THREADS && TEST_HAS_IPC_SERVER && !wxMONOLITHIC && !__WXQT__
 
         if ( !IsGUIEnabled() )
             return 0;
@@ -376,7 +380,8 @@ public:
     virtual int OnRun() override
     {
 #if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER) && \
-        (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
+        (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0) && \
+        !defined(__WXQT__)
         // The IPC test starts its server by re-executing this same binary with
         // WX_IPC_TEST_SERVER set and then running a bare event loop here. The IPC
         // sources and TEST_HAS_IPC_SERVER are built into both the console "test"
@@ -390,7 +395,7 @@ public:
             RunIPCServerUntilStopped();
             return 0;
         }
-#endif // wxUSE_THREADS && TEST_HAS_IPC_SERVER && !wxMONOLITHIC
+#endif // wxUSE_THREADS && TEST_HAS_IPC_SERVER && !wxMONOLITHIC && !__WXQT__
 
         return RunTests();
     }

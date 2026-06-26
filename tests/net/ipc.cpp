@@ -27,7 +27,17 @@
 // engage, the MSVC monolithic test build must define wxMONOLITHIC=1;
 // it currently selects the monolithic library via the makefile's
 // $(MONOLITHIC) but does not pass it to the compiler as a -D.)
-#if wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
+//
+// It is also excluded from wxQt builds (__WXQT__). wxIPC worker threads marshal
+// their socket I/O to the main thread via CallAfter(), but a cross-thread
+// CallAfter() is not reliably processed by the wxQt event loop:
+// wxQtEventLoopBase::WakeUp() wakes the loop without posting a Qt event, so the
+// idle handler that runs pending events is never scheduled, and server-pushed
+// Advise() notifications stall. That is a wxQt event-loop bug, not a wxIPC bug;
+// it is fixed separately on branch jpmattia/wxQT-CallAfter-wxWakeUpIdle. Exclude
+// the test here until that fix lands upstream.
+#if wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0) && \
+    !defined(__WXQT__)
 
 #ifndef WX_PRECOMP
     #include "wx/app.h"
@@ -1001,4 +1011,4 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( worker.m_error.IsEmpty() );
 }
 
-#endif // wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
+#endif // wxUSE_THREADS && !wxMONOLITHIC && !__WXQT__

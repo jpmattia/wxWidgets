@@ -12,8 +12,9 @@
 // (defined there), so it has to be compiled out under the same conditions --
 // otherwise a wxMSW monolithic build (wxMONOLITHIC=1) leaves a dangling
 // reference to IPCClientDispatch() and fails to link. See ipc.cpp for why the
-// IPC test is excluded from wxMSW monolithic builds (#24909).
-#if wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
+// IPC test is excluded from wxMSW monolithic builds (#24909) and from wxQt.
+#if wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0) && \
+    !defined(__WXQT__)
 
 #ifndef WX_PRECOMP
     #include "wx/app.h"
@@ -704,4 +705,4 @@ void IPCServerThread::WaitForExit()
     launcher.DoStop();
 }
 
-#endif // wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
+#endif // wxUSE_THREADS && !wxMONOLITHIC && !__WXQT__

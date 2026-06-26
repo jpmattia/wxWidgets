@@ -16,7 +16,8 @@
 // Match the guard in tests/net/ipc.cpp and ipc_test_server.cpp: the IPC test is
 // excluded from wxMSW monolithic builds (#24909), so its declarations must be
 // too.
-#if wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
+#if wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0) && \
+    !defined(__WXQT__)
 
 // Starts the IPC test server and blocks until it is listening (or failed).
 // Stops the server in WaitForExit().
@@ -56,6 +57,6 @@ inline void WaitForThreadWithDispatch(wxThread& thread)
     thread.Wait();
 }
 
-#endif // wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0)
+#endif // wxUSE_THREADS && !wxMONOLITHIC && !__WXQT__
 
 #endif // _WX_TESTS_NET_IPC_TEST_SERVER_H_
