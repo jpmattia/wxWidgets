@@ -209,13 +209,13 @@ public:
     // Runs fn on the main thread, blocking the caller until completion (on the
     // main thread fn runs directly). All IPC socket I/O must happen on the main
     // thread: the wxFDIODispatcher used by the main event loop in Unix+Mac is not
-    // safe to mutate from worker threads, so worker-thread
-    // Request()/Advise()/etc. funnel their socket work through here.
+    // safe to mutate from worker threads, so worker-thread socket usage is
+    // funneled through this method.
     void RunOnMainThread(const std::function<void()>& fn);
 
     // Reply handoff between a worker thread blocked in SendAndWaitForReply() and
     // the main thread's OnSocketInput(). Only one reply is ever pending at a
-    // time, which is guarenteed by m_cs_process_msgs
+    // time, which is guarenteed by m_cs_process_msgs.
     wxMutex m_replyMutex;
     wxCondition m_replyCond{m_replyMutex};
     struct PendingReply
@@ -521,8 +521,9 @@ protected:
     wxDECLARE_CLASS(wxIPCMessageBase);
 };
 
-// Reads a 32-bit size from the socket, allocates a buffer of that size, then
-// read nbytes worth of data from the socket into m_read_data.
+// Reads a 32-bit word to get the desired buffer m_size from the socket, allocates
+// a buffer of that size, then read m_size bytes worth of data from the socket
+// into m_read_data.
 bool wxIPCMessageBase::ReadSizeAndData()
 {
     if (!Read32(m_size))
@@ -845,7 +846,7 @@ protected:
     wxDECLARE_DYNAMIC_CLASS(wxIPCMessageAdvise);
 };
 
-// Member var item to be used for failure reason (for debug)
+// m_item to be used for failure reason (for debug)
 class wxIPCMessageFail : public wxIPCMessageBase
 {
 public:
@@ -976,9 +977,6 @@ public:
 
     wxIPCMessageBase* m_msg;
 };
-
-// Create a wxIPCMessage object from the given code. Caller is
-// responsible for deleting the message when done.
 
 // ==========================================================================
 // implementation
@@ -1307,9 +1305,6 @@ bool wxTCPConnection::StartAdvise(const wxString& item)
     if ( !m_handler )
         return false;
 
-    // Don't let ProcessIncomingMessages interfere with getting a response
-    wxCRIT_SECT_LOCKER(lock, m_handler->m_cs_process_msgs);
-
     wxIPCMessageAdviseStart msg(m_sock, item);
     return m_handler->SendAndGetReply(msg, IPC_ADVISE_START, m_sock, wxNO_RETURN_MESSAGE);
 }
@@ -1318,9 +1313,6 @@ bool wxTCPConnection::StopAdvise (const wxString& item)
 {
     if ( !m_handler )
         return false;
-
-    // Don't let ProcessIncomingMessages interfere with getting a response
-    wxCRIT_SECT_LOCKER(lock, m_handler->m_cs_process_msgs);
 
     wxIPCMessageAdviseStop msg(m_sock, item);
     return m_handler->SendAndGetReply(msg, IPC_ADVISE_STOP, m_sock, wxNO_RETURN_MESSAGE);
@@ -1890,6 +1882,27 @@ void wxTCPEventHandler::FailPendingReply()
     m_replyCond.Signal();
 }
 
+// Utility to post a wxSOCKET_INPUT event to the socket. This is
+// sometimes necessary because sometimes we receive a sincle
+// wxSOCKET_INPUT for several wxIPCMessages received, but we processed
+// only one.  By reposting wxSOCKET_INPUT, the main loop re-scans and
+// drains the rest of the pending IPCMessages.  A spurious event is
+// harmless: the handler peeks, finds nothing, and returns.
+void wxTCPEventHandler::PostSocketInputEvent(wxSocketBase* socket)
+{
+    if ( socket && socket->GetEventHandler() )
+    {
+        wxSocketEvent event(wxID_ANY);
+        event.m_event = wxSOCKET_INPUT;
+        event.m_clientData = socket->GetClientData();
+        event.SetEventObject(socket);
+
+        socket->GetEventHandler()->AddPendingEvent(event);
+    }
+}
+
+// Create a wxIPCMessage object from the given code. Caller is responsible for
+// deleting the message when done.
 wxIPCMessageBase* wxTCPEventHandler::GetIPCMessageFromCode(IPCCode code, wxSocketBase* socket)
 {
     switch ( code )
@@ -1926,26 +1939,6 @@ wxIPCMessageBase* wxTCPEventHandler::GetIPCMessageFromCode(IPCCode code, wxSocke
 
     default:
         return new wxIPCMessageNull(socket);
-    }
-}
-
-
-// Utility to post a wxSOCKET_INPUT event to the socket. This is
-// sometimes necessary because sometimes we receive a sincle
-// wxSOCKET_INPUT for several wxIPCMessages received, but we processed
-// only one.  By reposting wxSOCKET_INPUT, the main loop re-scans and
-// drains the rest of the pending IPCMessages.  A spurious event is
-// harmless: the handler peeks, finds nothing, and returns.
-void wxTCPEventHandler::PostSocketInputEvent(wxSocketBase* socket)
-{
-    if ( socket && socket->GetEventHandler() )
-    {
-        wxSocketEvent event(wxID_ANY);
-        event.m_event = wxSOCKET_INPUT;
-        event.m_clientData = socket->GetClientData();
-        event.SetEventObject(socket);
-
-        socket->GetEventHandler()->AddPendingEvent(event);
     }
 }
 
