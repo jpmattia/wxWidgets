@@ -3875,15 +3875,21 @@ wxWindowMSW::MSWHandleMessage(WXLRESULT *result,
 
                     // Draw the theme border and background.
 
-                    // The EDIT theme gives a good general purpose border in light mode.
-                    // There does not seem to be a dark mode EDIT theme that looks good.
-                    // The ListView theme below looks good in dark mode.
-                    wxUxThemeHandle hTheme(this, L"EDIT", L"DarkMode_DarkTheme::ListView");
+                    // The EDIT class gives a good general purpose border in light mode.
+                    // There does not seem to be a dark mode EDIT class that looks good.
+                    // The ListView class below looks good in dark mode but was not
+                    // available until Windows 11 build 26200. The Button class below
+                    // looks OK in dark mode on older Windows.
+                    const auto darkClass = wxCheckOsVersion(10, 0, 26200) ?
+                        L"DarkMode_DarkTheme::ListView" :
+                        L"DarkMode_Explorer::Button";
+                    wxUxThemeHandle hTheme(this, L"EDIT", darkClass);
 
-                    // Ensure that the part and state we use have the same
-                    // values for both EDIT and ListView.
+                    // The part and state values match for the themes we use.
                     static_assert((int)EP_EDITTEXT == (int)LVP_LISTITEM, "parts differ?");
+                    static_assert((int)EP_EDITTEXT == (int)BP_PUSHBUTTON, "parts differ?");
                     static_assert((int)ETS_NORMAL == (int)LISS_NORMAL, "states differ?");
+                    static_assert((int)ETS_NORMAL == (int)PBS_NORMAL, "states differ?");
 
                     // Make sure the background is in a proper state
                     if (::IsThemeBackgroundPartiallyTransparent(hTheme, EP_EDITTEXT, ETS_NORMAL))
@@ -4105,6 +4111,7 @@ WXHWND wxWindowMSW::MSWCreateWindowAtAnyPosition(WXDWORD exStyle, const wxChar* 
 
 void wxWindowMSW::MSWGetDarkModeSupport(MSWDarkModeSupport& support) const
 {
+    // This is the default theme name for dark mode.
     // This theme works for a few controls (buttons, texts, comboboxes) and
     // doesn't seem to do any harm for those that don't support it, so use it
     // by default.
@@ -4114,10 +4121,31 @@ void wxWindowMSW::MSWGetDarkModeSupport(MSWDarkModeSupport& support) const
 void wxWindowMSW::MSWSetDarkOrLightMode(SetMode WXUNUSED(setmode))
 {
     MSWDarkModeSupport support;
-    MSWGetDarkModeSupport(support);
+    if ( wxMSWDarkMode::IsActive() )
+    {
+        MSWGetDarkModeSupport(support);
+    }
+    else
+    {
+        // This is the theme name for light mode.
+        support.themeName = L"Explorer";
+    }
 
     // This updates scroll bars, if there are any.
     wxMSWDarkMode::AllowForWindow(m_hWnd, support.themeName, support.themeId);
+
+    // If the window class has a background brush, update it.
+    // This is the value in WNDCLASS::hbrBackground.
+    if ( ::GetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND) != 0 )
+    {
+        // The brush value was originally a colour index plus 1, for example
+        // wxSYS_COLOUR_WINDOW+1. Assume that colour index matches the colour
+        // returned by GetDefaultAttributes().
+        wxColour colBg = GetDefaultAttributes().colBg;
+        wxBrush* brush = wxTheBrushList->FindOrCreateBrush(colBg);
+        HBRUSH hbr = GetHbrushOf(*brush);
+        ::SetClassLongPtr(m_hWnd, GCLP_HBRBACKGROUND, LONG_PTR(hbr));
+    }
 }
 
 // ===========================================================================
@@ -4983,46 +5011,6 @@ void wxWindowMSW::MSWUpdateFontOnDPIChange(const wxSize& newDPI)
     }
 }
 
-// Called from MSWUpdateonDPIChange() to recursively update the window
-// sizer and any child sizers and spacers.
-static void UpdateSizerOnDPIChange(wxSizer* sizer, wxSize oldDPI, wxSize newDPI)
-{
-    if ( !sizer )
-    {
-        return;
-    }
-
-    for ( wxSizerItemList::compatibility_iterator
-            node = sizer->GetChildren().GetFirst();
-            node;
-            node = node->GetNext() )
-    {
-        wxSizerItem* sizerItem = node->GetData();
-
-        int border = sizerItem->GetBorder();
-        border = wxRescaleCoord(border).From(oldDPI).To(newDPI);
-        sizerItem->SetBorder(border);
-
-        // only scale sizers and spacers, not windows
-        if ( sizerItem->IsSizer() || sizerItem->IsSpacer() )
-        {
-            wxSize min = sizerItem->GetMinSize();
-            min = wxRescaleCoord(min).From(oldDPI).To(newDPI);
-            sizerItem->SetMinSize(min);
-
-            if ( sizerItem->IsSpacer() )
-            {
-                wxSize size = sizerItem->GetSize();
-                size = wxRescaleCoord(size).From(oldDPI).To(newDPI);
-                sizerItem->SetDimension(wxDefaultPosition, size);
-            }
-
-            // Update any child sizers if this is a sizer
-            UpdateSizerOnDPIChange(sizerItem->GetSizer(), oldDPI, newDPI);
-        }
-    }
-}
-
 bool
 wxWindowMSW::MSWUpdateOnDPIChange(const wxSize& oldDPI, const wxSize& newDPI)
 {
@@ -5041,7 +5029,8 @@ wxWindowMSW::MSWUpdateOnDPIChange(const wxSize& oldDPI, const wxSize& newDPI)
     MSWUpdateFontOnDPIChange(newDPI);
 
     // update sizers
-    UpdateSizerOnDPIChange(GetSizer(), oldDPI, newDPI);
+    if ( wxSizer* const sizer = GetSizer() )
+        sizer->UpdateOnDPIChange(oldDPI, newDPI);
 
     // update children
     for ( wxWindowList::compatibility_iterator node = GetChildren().GetFirst();
@@ -5603,9 +5592,10 @@ wxWindowMSW::MSWGetBgBrushForChild(WXHDC hDC, wxWindowMSW *child)
         return hbrush;
     }
 
-    // Otherwise see if we have a custom background colour or if we're a TLW,
-    // as nothing else would provide the brush in the latter case.
-    if ( m_hasBgCol || IsTopLevel() )
+    // Otherwise see if we have a background colour (which is only set if we
+    // need to use it) or if we're a TLW (in which case nothing else would
+    // provide the brush, so we have to do it).
+    if ( m_backgroundColour.IsOk() || IsTopLevel() )
     {
         wxBrush *
             brush = wxTheBrushList->FindOrCreateBrush(GetBackgroundColour());
