@@ -963,10 +963,10 @@ protected:
 // worker thread is also issuing Request()s on the same connection.
 //
 // A main-thread Request() goes through SendAndGetReply_MainThread(), which
-// blocks acquiring m_cs_process_msgs. A worker thread holds that critical
+// blocks acquiring m_cs_awaiting_reply. A worker thread holds that critical
 // section for the whole of its exchange, including while it marshals its socket
 // write to the main thread (RunOnMainThread) and blocks waiting for the main
-// thread to run it. So if the main thread blocks on m_cs_process_msgs at that
+// thread to run it. So if the main thread blocks on m_cs_awaiting_reply at that
 // moment, it stops pumping the event loop, the worker's marshalled write never
 // runs, and both threads are stuck.
 //

@@ -203,7 +203,7 @@ public:
     void UnregisterConnectionSocket(wxSocketBase* socket);
     bool IsConnectionSocket(wxSocketBase* socket);
 
-    wxCRIT_SECT_DECLARE_MEMBER(m_cs_process_msgs);
+    wxCRIT_SECT_DECLARE_MEMBER(m_cs_awaiting_reply);
     wxCRIT_SECT_DECLARE_MEMBER(m_cs_socket_processing);
 
     // Runs fn on the main thread, blocking the caller until completion (on the
@@ -213,9 +213,9 @@ public:
     // funneled through this method.
     void RunOnMainThread(const std::function<void()>& fn);
 
-    // Reply handoff between a worker thread blocked in SendAndWaitForReply() and
+    // Reply handoff between a worker thread blocked in SendAndGetReply() and
     // the main thread's OnSocketInput(). Only one reply is ever pending at a
-    // time, which is guarenteed by m_cs_process_msgs.
+    // time, which is guarenteed by m_cs_awaiting_reply.
     wxMutex m_replyMutex;
     wxCondition m_replyCond{m_replyMutex};
     struct PendingReply
@@ -1347,16 +1347,15 @@ void wxTCPEventHandler::OnSocketInput(wxSocketEvent &event)
 {
     wxCRIT_SECT_LOCKER(socket_processing_lock, m_cs_socket_processing);
 
-    // This handler is a shared, process-lifetime singleton, so it may receive
-    // a socket event that was queued before its socket was destroyed (e.g. a
-    // wxSOCKET_LOST generated as a connection is being torn down). Such an
-    // event must be ignored without touching the socket, as it now points to
-    // freed memory. Even obtaining the typed pointer via GetSocket() performs a
-    // checked downcast (wxObject* -> wxSocketBase*), which is undefined behavior
-    // on a freed object and trips UBSAN's vptr check, so use reinterpret_cast
-    // (not vptr-instrumented) purely for the registry pointer-value lookup
-    // below. IsConnectionSocket() only compares the pointer value and never
-    // dereferences it, so it is safe to call here.
+    // The handler may receive a socket event that was queued before its socket
+    // was destroyed (e.g. a wxSOCKET_LOST generated as a connection is being torn
+    // down). Such an event must be ignored without dereferencing the socket,
+    // since it now points to freed memory. Even obtaining the typed pointer via
+    // GetSocket() performs a checked downcast (wxObject* -> wxSocketBase*), which
+    // is undefined behavior on a freed object and trips UBSAN's vptr check, so
+    // use reinterpret_cast (not vptr-instrumented) purely for the registry
+    // pointer-value lookup below. IsConnectionSocket() only compares the pointer
+    // value and never dereferences it, so it is safe to call here.
     wxSocketBase *sock =
         reinterpret_cast<wxSocketBase *>(event.GetEventObject());
     if ( !IsConnectionSocket(sock) )
@@ -1384,9 +1383,6 @@ void wxTCPEventHandler::OnSocketInput(wxSocketEvent &event)
         wxIPCMessageBase* msg = ReadMessageFromSocket(sock);
 
         // If a worker thread is blocked waiting for this reply, hand it over.
-        // The match against m_pending must be tested inside DeliverPendingReply()
-        // under m_replyMutex -- reading m_pending.active / m_pending.expected
-        // here without the lock races the worker thread updating them.
         if ( DeliverPendingReply(msg) )
             continue;   // msg ownership handed to the waiting worker
 
@@ -1667,10 +1663,8 @@ bool wxTCPEventHandler::ProcessMessage(wxIPCMessageBase* msg, wxSocketBase *sock
     return true;
 }
 
-// Find a message with IPCCode code. Returns true when a valid message with
-// the matching IPCCode is found.  If msgptr is non-null, then the message is
-// also returned and the caller is responsible for deleting the returned
-// message.
+//Runs fn on the main thread, blocking the caller until completion. On the
+// main thread, fn runs directly.
 void wxTCPEventHandler::RunOnMainThread(const std::function<void()>& fn)
 {
     if ( wxThread::IsMain() )
@@ -1682,7 +1676,7 @@ void wxTCPEventHandler::RunOnMainThread(const std::function<void()>& fn)
     // Marshal to the main thread and block until it has run the work. CallAfter()
     // posts an async method-call event that the main event loop dispatches; the
     // worker waits on the semaphore meanwhile, so the by-reference captures stay
-    // valid. The wait is bounded by the work itself (the 10s wxIPCTimeout).
+    // valid. The wait is bounded by wxIPCTimeout.
     wxSemaphore done;
     CallAfter([&fn, &done] {
         fn();
@@ -1691,8 +1685,10 @@ void wxTCPEventHandler::RunOnMainThread(const std::function<void()>& fn)
     done.Wait();
 }
 
-
-
+// Messages that are sent to the server with an expected reply are handled here.
+// The main complication is making sure that the request and reply are matched,
+// which is handle by making sure that there is only one pending request at a
+// time.
 bool wxTCPEventHandler::SendAndGetReply(wxIPCMessageBase& send_msg,
                                         IPCCode expected_code,
                                         wxSocketBase* socket,
@@ -1732,21 +1728,21 @@ bool wxTCPEventHandler::SendAndGetReply_MainThread(wxIPCMessageBase& send_msg,
                                                    wxSocketBase* socket,
                                                    wxIPCMessageBase** return_msgptr)
 {
-    // A worker thread may be holding m_cs_process_msgs while parked in
+    // A worker thread may have triggered m_cs_awaiting_reply while parked in
     // RunOnMainThread(), waiting for *this* (the main) thread to run its
     // marshalled socket I/O. Blocking on the lock here would stop us pumping the
     // event loop and deadlock. So acquire it without blocking the loop: spin on
     // TryEnter(), pumping pending events (the worker's RunOnMainThread() jobs)
     // and socket I/O (its reply) between attempts so the worker can finish and
     // release the lock.
-    while ( !m_cs_process_msgs.TryEnter() )
+    while ( !m_cs_awaiting_reply.TryEnter() )
     {
         wxEventLoopBase* const loop = wxEventLoopBase::GetActive();
         if ( !loop )
         {
             // No event loop to pump, so no worker can be waiting on us; the only
             // safe thing left is to block until the lock is free.
-            m_cs_process_msgs.Enter();
+            m_cs_awaiting_reply.Enter();
             break;
         }
 
@@ -1754,7 +1750,7 @@ bool wxTCPEventHandler::SendAndGetReply_MainThread(wxIPCMessageBase& send_msg,
             wxTheApp->ProcessPendingEvents();
         loop->DispatchTimeout(1);
     }
-    CritSectLeaver find_message_lock(m_cs_process_msgs);
+    CritSectLeaver find_message_lock(m_cs_awaiting_reply);
 
     wxCRIT_SECT_LOCKER(socket_processing_lock, m_cs_socket_processing);
 
@@ -1795,7 +1791,7 @@ bool wxTCPEventHandler::SendAndGetReply_WorkerThread(wxIPCMessageBase& send_msg,
                                                      wxIPCMessageBase** return_msgptr)
 {
     // Serialize reply-expecting commands: only one reply is pending at a time.
-    wxCRIT_SECT_LOCKER(txlock, m_cs_process_msgs);
+    wxCRIT_SECT_LOCKER(txlock, m_cs_awaiting_reply);
 
     // Register the pending reply *before* writing, so a reply that comes back
     // before we start waiting is still recorded (DeliverPendingReply() stores it
@@ -1853,9 +1849,11 @@ bool wxTCPEventHandler::SendAndGetReply_WorkerThread(wxIPCMessageBase& send_msg,
     return ok;
 }
 
-
 bool wxTCPEventHandler::DeliverPendingReply(wxIPCMessageBase* msg)
 {
+    // The match against m_pending must be tested under m_replyMutex -- reading
+    // m_pending.active / m_pending.expected here without the lock races the
+    // worker thread updating them.
     wxMutexLocker lock(m_replyMutex);
 
     if ( !m_pending.active )
@@ -1869,9 +1867,8 @@ bool wxTCPEventHandler::DeliverPendingReply(wxIPCMessageBase* msg)
     return true;
 }
 
-// When a worker is waiting on a pending reply and some failure
-// occurs, FailPendingReply makes the worker fail fast instead of
-// waiting for timeout.
+// When a worker is waiting on a pending reply and some failure occurs,
+// FailPendingReply makes the worker fail fast instead of waiting for timeout.
 void wxTCPEventHandler::FailPendingReply()
 {
     wxMutexLocker lock(m_replyMutex);
@@ -1882,12 +1879,12 @@ void wxTCPEventHandler::FailPendingReply()
     m_replyCond.Signal();
 }
 
-// Utility to post a wxSOCKET_INPUT event to the socket. This is
-// sometimes necessary because sometimes we receive a sincle
-// wxSOCKET_INPUT for several wxIPCMessages received, but we processed
-// only one.  By reposting wxSOCKET_INPUT, the main loop re-scans and
-// drains the rest of the pending IPCMessages.  A spurious event is
-// harmless: the handler peeks, finds nothing, and returns.
+// Utility to post a wxSOCKET_INPUT event to the socket. This is sometimes
+// necessary because sometimes we receive a single wxSOCKET_INPUT for several
+// wxIPCMessages received, but we processed only one.  By reposting
+// wxSOCKET_INPUT, the main loop re-scans and drains the rest of the pending
+// IPCMessages.  A spurious event is harmless: the handler peeks, finds nothing,
+// and returns.
 void wxTCPEventHandler::PostSocketInputEvent(wxSocketBase* socket)
 {
     if ( socket && socket->GetEventHandler() )
@@ -1952,12 +1949,12 @@ void wxTCPEventHandler::SendFailMessage(const wxString& reason, wxSocketBase* so
 
 void wxTCPEventHandler::HandleDisconnect(wxTCPConnection *connection)
 {
-    // connection was closed (either gracefully or not): destroy everything
+    // Connection was closed (either gracefully or not): destroy everything
     UnregisterConnectionSocket(connection->m_sock);
     connection->m_sock->Notify(false);
     connection->m_sock->Close();
 
-    // don't leave references to this soon-to-be-dangling connection in the
+    // Don't leave references to this soon-to-be-dangling connection in the
     // socket as it won't be destroyed immediately as its destruction will be
     // delayed in case there are more events pending for it
     connection->m_sock->SetClientData(nullptr);
