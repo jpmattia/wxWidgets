@@ -9,33 +9,34 @@
 
 #include "testprec.h"
 
-// This test requires wxUSE_THREADS==1 since it runs the test server
-// concurrently with the client.
+
+// The IPC tests use a single test binary: the server is started by re-executing
+// the same test program with WX_IPC_TEST_SERVER set (see ipc_test_server.cpp).
+// The client runs in the main Catch2 process. Catch2 cannot run checks in the
+// server process, so the client queries the server for state and verifies it
+// here.
 //
-// This test is deliberately excluded from wxMSW monolithic builds,
-// where wxIPC itself is broken by wxWidgets#24909. In that issue, we
-// noted that in a monolithic build, a GUI-only component inserts
-// itself into the wxAppConsole server. The bug can be demonstrated by
-// compile the IPC sample in a monolithic build, where it will be seen
-// that the base server sample stops receiving data.
+// This test requires wxUSE_THREADS==1 since it runs the test server concurrently
+// with the client. There are two CI builds that are excluded: wxMSW monolithic
+// and wxQt.
 //
-// Running this test there fails for reasons unrelated to what it is
-// meant to check, so we skip it rather than report a spurious
-// failure. The bug is wxMSW-specific -- a GTK monolithic build runs
-// these tests cleanly -- so the guard keys off wxMONOLITHIC, which is
-// defined (to 1) only in wxMSW monolithic builds. (For the guard to
-// engage, the MSVC monolithic test build must define wxMONOLITHIC=1;
-// it currently selects the monolithic library via the makefile's
-// $(MONOLITHIC) but does not pass it to the compiler as a -D.)
+// wxMSW monolithic builds are broken by the issue raised in wxWidgets#24909: In
+// a monolithic build, a GUI-only component inserts itself into the wxAppConsole
+// server. The bug can be demonstrated by the IPC sample, where it will be seen
+// that the base server sample stops receiving data when compiled with
+// --enable-monolithic. The compile guard for this test keys off wxMONOLITHIC,
+// which is defined (to 1) only in wxMSW monolithic builds. The bug is
+// wxMSW-specific; a GTK monolithic build runs these tests cleanly.
 //
-// It is also excluded from wxQt builds (__WXQT__). wxIPC worker threads marshal
-// their socket I/O to the main thread via CallAfter(), but a cross-thread
-// CallAfter() is not reliably processed by the wxQt event loop:
-// wxQtEventLoopBase::WakeUp() wakes the loop without posting a Qt event, so the
-// idle handler that runs pending events is never scheduled, and server-pushed
-// Advise() notifications stall. That is a wxQt event-loop bug, not a wxIPC bug;
-// it is fixed separately on branch jpmattia/wxQT-CallAfter-wxWakeUpIdle. Exclude
-// the test here until that fix lands upstream.
+// wxQt is excluded because of a bug in wxQt found during our testing:
+// wxIPC worker threads marshal their socket I/O to the main thread via
+// CallAfter(), but a cross-thread CallAfter() is not reliably processed by the
+// wxQt event loop. wxQtEventLoopBase::WakeUp() wakes the loop without posting a
+// Qt event, so the idle handler that runs pending events is never scheduled, and
+// server-pushed Advise() notifications stall. That is a wxQt event-loop bug, not
+// a wxIPC bug; it is fixed separately on branch
+// jpmattia/wxQT-CallAfter-wxWakeUpIdle, which will be a separate PR.
+//
 #if wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0) && \
     !defined(__WXQT__)
 
@@ -51,15 +52,11 @@
 #include <wx/utils.h>
 #include <wx/evtloop.h>
 #include <wx/stopwatch.h>
+#include <atomic>
+#include <memory>
 
 // forward decl
 class IPCTestClient;
-
-// The IPC tests use a single test binary: the server is started by re-executing
-// the same test program with WX_IPC_TEST_SERVER set (see ipc_test_server.cpp).
-// The client runs in the main Catch2 process. Catch2 cannot run checks in the
-// server process, so the client queries the server for state and verifies it
-// here.
 
 // When g_show_message_timing is set to true, Advise() and RequestReply()
 // messages will be printed when they arrive. This shows how the IPC messages
@@ -68,9 +65,7 @@ bool g_show_message_timing = false;
 
 // Output for g_show_message_timing uses std::cout, so we can get a sense of the
 // raw arrival times.
-#include <atomic>
 #include <iostream>
-#include <memory>
 
 // Test connection class used by the client.
 class IPCTestConnection : public wxConnection
@@ -368,10 +363,10 @@ public:
     {
         m_label = label;
 
-        // Resolve the connection here, on the main thread (the test constructs
-        // us before calling Run()). GetConn() uses REQUIRE(), a Catch2 macro
-        // that is not thread-safe, so it must not run on the worker thread in
-        // Entry(). The connection is stable for our lifetime, so caching the
+        // Resolve the connection on the main thread. GetConn() uses
+        // REQUIRE(), a Catch2 macro that is not thread-safe, so it
+        // must not run on the worker thread in Entry(). The
+        // connection is stable for our lifetime, so caching the
         // pointer is safe.
         m_conn = &gs_client->GetConn();
 
@@ -445,16 +440,15 @@ public:
 
         REQUIRE( m_server.Start() );
 
-        // Wait for the server to actually be ready to accept connections rather
-        // than sleeping a fixed amount: the re-exec'd server process can take a
-        // while to come up -- well over a second under sanitizers, on a loaded CI
-        // runner, or as a GUI (test_gui) process doing full toolkit init -- and a
-        // fixed delay races that startup (every later PumpConnect() then fails).
-        // Poll with a throwaway connection until one succeeds, then drop it so
-        // each test starts from a clean state. The bound is wall-clock based, not
-        // iteration based: in a GUI event loop IPCClientDispatch() returns at once
-        // (idle events), so a fixed iteration count would expire in a fraction of
-        // a second, before a GUI server is listening.
+        // Wait for the server to be ready to accept connections: the re-exec'd
+        // server process can take a while to come up on a loaded CI runner (well
+        // over a second under sanitizers), or as a GUI (test_gui) process doing
+        // full toolkit init. Poll with a throwaway connection until one
+        // succeeds, then drop it so each test starts from a clean state. The
+        // bound is wall-clock based, not iteration based: in a GUI event loop
+        // IPCClientDispatch() returns at once (idle events), so a fixed
+        // iteration count would expire in a fraction of a second, before a GUI
+        // server is listening.
         bool serverReady = false;
         wxStopWatch sw;
         while ( !serverReady && sw.Time() < 30000 )   // up to 30s
@@ -537,8 +531,8 @@ TEST_CASE_METHOD(IPCFixture,
     if ( g_show_message_timing )
         std::cout << "Running test SingleRequest\n" << std::flush;
 
-    // Use REQUIRE: if the connection itself failed there is no point in
-    // probing the server, and it distinguishes a connect failure from a
+    // If the connection itself failed there is no point in probing
+    // the server, and it distinguishes a connect failure from a
     // Request() failure below.
     REQUIRE( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
 
@@ -837,7 +831,6 @@ TEST_CASE_METHOD(IPCFixture,
 // wxMilliSleep in the client and server threads to make the interleave happen
 // properly, which is a stringent test of race conditions that might be present
 // in wxIPC.
-// Concurrent simultaneous Advise and Request IPC stress test.
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::AdviseAndRequestMultiThread", "[net][ipc][multi_thread]")
 {
@@ -960,18 +953,12 @@ protected:
 };
 
 // Exercises the case where a Request() is issued on the main thread while a
-// worker thread is also issuing Request()s on the same connection.
+// worker thread is also issuing Request()s on the same connection, which was
+// a source of several problems.
 //
-// A main-thread Request() goes through SendAndGetReply_MainThread(), which
-// blocks acquiring m_cs_awaiting_reply. A worker thread holds that critical
-// section for the whole of its exchange, including while it marshals its socket
-// write to the main thread (RunOnMainThread) and blocks waiting for the main
-// thread to run it. So if the main thread blocks on m_cs_awaiting_reply at that
-// moment, it stops pumping the event loop, the worker's marshalled write never
-// runs, and both threads are stuck.
-//
-// The watchdog bounds the failure; the test should complete near-instantly once
-// main-thread and worker-thread Request()s are properly serialized.
+// When this test fails, the watchdog bounds the time-to-failure; the test should
+// complete near-instantly if main-thread and worker-thread Request()s are
+// properly serialized.
 TEST_CASE_METHOD(IPCFixture,
                  "IPC::ConcurrentMainAndWorkerRequest", "[net][ipc][multi_command]")
 {

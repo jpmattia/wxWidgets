@@ -203,7 +203,6 @@ public:
     void UnregisterConnectionSocket(wxSocketBase* socket);
     bool IsConnectionSocket(wxSocketBase* socket);
 
-    wxCRIT_SECT_DECLARE_MEMBER(m_cs_awaiting_reply);
     wxCRIT_SECT_DECLARE_MEMBER(m_cs_socket_processing);
 
     // Runs fn on the main thread, blocking the caller until completion (on the
@@ -213,9 +212,9 @@ public:
     // funneled through this method.
     void RunOnMainThread(const std::function<void()>& fn);
 
-    // Reply handoff between a worker thread blocked in SendAndGetReply() and
-    // the main thread's OnSocketInput(). Only one reply is ever pending at a
-    // time, which is guarenteed by m_cs_awaiting_reply.
+    // The handoff objects between a worker thread blocked in SendAndGetReply()
+    // and the main thread's OnSocketInput(). Only one reply is ever pending at a
+    // time, which is guaranteed by m_cs_awaiting_reply.
     wxMutex m_replyMutex;
     wxCondition m_replyCond{m_replyMutex};
     struct PendingReply
@@ -226,6 +225,8 @@ public:
         bool              done     = false;
         bool              failed   = false;
     } m_pending;
+
+    wxCRIT_SECT_DECLARE_MEMBER(m_cs_awaiting_reply);
 
     bool DeliverPendingReply(wxIPCMessageBase* msg);
     void FailPendingReply();
@@ -1796,7 +1797,7 @@ bool wxTCPEventHandler::SendAndGetReply_WorkerThread(wxIPCMessageBase& send_msg,
     // Register the pending reply *before* writing, so a reply that comes back
     // before we start waiting is still recorded (DeliverPendingReply() stores it
     // and we observe it via the predicate in the wait loop below, rather than
-    // blocking forever -- so there is no lost-wakeup race even though we release
+    // blocking forever, so there is no lost-wakeup race even though we release
     // m_replyMutex between here and the wait).
     {
         wxMutexLocker setup(m_replyMutex);
@@ -1851,7 +1852,7 @@ bool wxTCPEventHandler::SendAndGetReply_WorkerThread(wxIPCMessageBase& send_msg,
 
 bool wxTCPEventHandler::DeliverPendingReply(wxIPCMessageBase* msg)
 {
-    // The match against m_pending must be tested under m_replyMutex -- reading
+    // The match against m_pending must be tested under m_replyMutex. Reading
     // m_pending.active / m_pending.expected here without the lock races the
     // worker thread updating them.
     wxMutexLocker lock(m_replyMutex);
@@ -1976,9 +1977,7 @@ wxIPCMessageBase* wxTCPEventHandler::ReadMessageFromSocket(wxSocketBase* socket)
         // Serialize all socket I/O: wxSocketBase is not safe for concurrent use
         // from multiple threads on the same connection. The lock is taken here,
         // inside the marshalled work, so it is only ever held on the thread that
-        // actually performs the I/O -- never across the worker->main handoff in
-        // RunOnMainThread(), which would let a worker block the main thread that
-        // it is waiting on (deadlock).
+        // actually performs the I/O.
         wxCRIT_SECT_LOCKER(lock, gs_critical_io);
         wxIPCMessageNull null_msg(socket);
         ok_read = null_msg.ReadIPCCode();

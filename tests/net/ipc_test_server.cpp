@@ -8,11 +8,8 @@
 
 #include "testprec.h"
 
-// Must match the guard in tests/net/ipc.cpp: this file calls IPCClientDispatch()
-// (defined there), so it has to be compiled out under the same conditions --
-// otherwise a wxMSW monolithic build (wxMONOLITHIC=1) leaves a dangling
-// reference to IPCClientDispatch() and fails to link. See ipc.cpp for why the
-// IPC test is excluded from wxMSW monolithic builds (#24909) and from wxQt.
+// Match the guard in tests/net/ipc.cpp
+
 #if wxUSE_THREADS && (!defined(wxMONOLITHIC) || wxMONOLITHIC == 0) && \
     !defined(__WXQT__)
 
