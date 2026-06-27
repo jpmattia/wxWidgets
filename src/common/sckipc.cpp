@@ -191,14 +191,14 @@ public:
 
     char* GetBufPtr(size_t size);
 
-    // This event handler is a process-wide singleton shared by every IPC
+    // This event handler is a single process-wide object shared by every IPC
     // connection (client and server) and it lives until the program exits.
     // Socket events are queued on it and may still be pending after the socket
-    // they refer to has been destroyed: dispatching such a stale event would
-    // dereference a dangling wxSocketBase pointer. To guard against this we
-    // keep the set of sockets that currently have a live connection and ignore
-    // events for any socket which is not in it. The check compares only
-    // pointer values, so it is safe even if the socket has already been freed.
+    // they refer to has been destroyed: Dispatching a stale event would
+    // dereference a dangling wxSocketBase pointer. To guard against this we keep
+    // the set of sockets that currently have a live connection and ignore events
+    // for any socket which is not in it. The check compares only pointer values,
+    // so it is safe even if the socket has already been freed.
     void RegisterConnectionSocket(wxSocketBase* socket);
     void UnregisterConnectionSocket(wxSocketBase* socket);
     bool IsConnectionSocket(wxSocketBase* socket);
@@ -206,17 +206,16 @@ public:
     wxCRIT_SECT_DECLARE_MEMBER(m_cs_process_msgs);
     wxCRIT_SECT_DECLARE_MEMBER(m_cs_socket_processing);
 
-    // Runs fn on the main thread, blocking the caller until it completes (on the
+    // Runs fn on the main thread, blocking the caller until completion (on the
     // main thread fn runs directly). All IPC socket I/O must happen on the main
-    // thread: the wxFDIODispatcher used by the main event loop is not safe to
-    // mutate from worker threads, so worker-thread Request()/Advise()/etc. funnel
-    // their socket work through here.
+    // thread: the wxFDIODispatcher used by the main event loop in Unix+Mac is not
+    // safe to mutate from worker threads, so worker-thread
+    // Request()/Advise()/etc. funnel their socket work through here.
     void RunOnMainThread(const std::function<void()>& fn);
 
     // Reply handoff between a worker thread blocked in SendAndWaitForReply() and
     // the main thread's OnSocketInput(). Only one reply is ever pending at a
-    // time, which is guarenteed by m_cs_process_msgs (serializing reply-expecting
-    // commands)
+    // time, which is guarenteed by m_cs_process_msgs
     wxMutex m_replyMutex;
     wxCondition m_replyCond{m_replyMutex};
     struct PendingReply
@@ -251,8 +250,8 @@ private:
 
 enum
 {
-    _CLIENT_ONREQUEST_ID = 1000,
-    _SERVER_ONREQUEST_ID
+    _SOCKET_INPUT_ID = 1000,
+    _SERVER_SOCKET_CONNECTION_ID
 };
 
 // --------------------------------------------------------------------------
@@ -1064,7 +1063,7 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
                     connection->m_handler = handler;
                     connection->m_topic = topic;
 
-                    client->SetEventHandler(*handler, _CLIENT_ONREQUEST_ID);
+                    client->SetEventHandler(*handler, _SOCKET_INPUT_ID);
                     client->SetClientData(connection);
                     handler->RegisterConnectionSocket(client);
                     client->SetNotify(wxSOCKET_INPUT_FLAG | wxSOCKET_LOST_FLAG);
@@ -1174,7 +1173,7 @@ bool wxTCPServer::Create(const wxString& serverName)
     }
 
     m_server->SetEventHandler(wxTCPEventHandlerModule::GetHandler(),
-                              _SERVER_ONREQUEST_ID);
+                              _SERVER_SOCKET_CONNECTION_ID);
     m_server->SetClientData(this);
     m_server->SetNotify(wxSOCKET_CONNECTION_FLAG);
     m_server->Notify(true);
@@ -1346,8 +1345,8 @@ bool wxTCPConnection::DoAdvise(const wxString& item,
 // --------------------------------------------------------------------------
 
 wxBEGIN_EVENT_TABLE(wxTCPEventHandler, wxEvtHandler)
-    EVT_SOCKET(_CLIENT_ONREQUEST_ID, wxTCPEventHandler::OnSocketInput)
-    EVT_SOCKET(_SERVER_ONREQUEST_ID, wxTCPEventHandler::OnSocketConnection)
+    EVT_SOCKET(_SOCKET_INPUT_ID, wxTCPEventHandler::OnSocketInput)
+    EVT_SOCKET(_SERVER_SOCKET_CONNECTION_ID, wxTCPEventHandler::OnSocketConnection)
 wxEND_EVENT_TABLE()
 
 // Function that gets called when wxSocket receives info. It always
@@ -1466,7 +1465,7 @@ void wxTCPEventHandler::OnSocketConnection(wxSocketEvent &event)
 
                             sock->SetTimeout(wxIPCTimeout);
                             sock->SetEventHandler(wxTCPEventHandlerModule::GetHandler(),
-                                                  _CLIENT_ONREQUEST_ID);
+                                                  _SOCKET_INPUT_ID);
                             sock->SetClientData(new_connection);
                             RegisterConnectionSocket(sock);
                             sock->SetNotify(wxSOCKET_INPUT_FLAG | wxSOCKET_LOST_FLAG);
