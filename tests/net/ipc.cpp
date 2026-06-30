@@ -412,9 +412,67 @@ public:
     wxDECLARE_NO_COPY_CLASS(MultiRequestThread);
 };
 
+// A deadlock cannot be detected from the main thread, because the main thread
+// is precisely what gets stuck. This watchdog runs on its own thread and aborts
+// the process with a diagnostic if the test does not signal completion in time,
+// turning an otherwise indefinite hang into a clear, bounded failure.
+class DeadlockWatchdog : public wxThread
+{
+public:
+    explicit DeadlockWatchdog(int timeoutMs, const wxString& what = "the IPC test")
+        : wxThread(wxTHREAD_JOINABLE), m_timeoutMs(timeoutMs), m_what(what) {}
+
+    // Called by the test once it has completed normally.
+    void Done() { m_done.store(true); }
+
+protected:
+    void* Entry() override
+    {
+        const int step = 50;
+        for ( int waited = 0; waited < m_timeoutMs; waited += step )
+        {
+            if ( m_done.load() )
+                return nullptr;
+            wxMilliSleep(step);
+        }
+
+        std::cerr << "\nIPC WATCHDOG: " << m_what
+                  << " did not complete within " << m_timeoutMs
+                  << " ms; aborting to avoid a CI hang.\n" << std::flush;
+        abort();
+    }
+
+    const int m_timeoutMs;
+    const wxString m_what;
+    std::atomic<bool> m_done{false};
+
+    wxDECLARE_NO_COPY_CLASS(DeadlockWatchdog);
+};
+
+// RAII wrapper that runs a DeadlockWatchdog for its whole lifetime. Used as the
+// first member of IPCFixture so a watchdog covers the entire fixture (setup,
+// test body, and teardown): if any of them blocks -- e.g. a socket Connect()
+// that never returns under an environment where the test server can't run, as
+// on the Wine-based wxMSW cross-builds -- the watchdog aborts with a diagnostic
+// after the timeout instead of letting CI hang until its multi-hour job cap.
+class FixtureWatchdog
+{
+public:
+    FixtureWatchdog(int timeoutMs, const wxString& what)
+        : m_watchdog(timeoutMs, what) { m_watchdog.Run(); }
+    ~FixtureWatchdog() { m_watchdog.Done(); m_watchdog.Wait(); }
+
+private:
+    DeadlockWatchdog m_watchdog;
+    wxDECLARE_NO_COPY_CLASS(FixtureWatchdog);
+};
+
 // IPCFixture starts the in-process server and the client.
 class IPCFixture
 {
+    // Declared first so it is constructed first and destroyed last: the watchdog
+    // then covers the whole fixture lifetime (setup, test body, teardown).
+    FixtureWatchdog m_watchdog{180000, "an IPC test (setup, body, or teardown)"};
     std::unique_ptr<wxEventLoop> m_clientLoop{new wxEventLoop};
     std::unique_ptr<wxEventLoopActivator> m_loopActivator;
     IPCServerThread m_server;
@@ -916,42 +974,6 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( wxString(data).IsEmpty() );
 }
 
-// A deadlock cannot be detected from the main thread, because the main thread
-// is precisely what gets stuck. This watchdog runs on its own thread and aborts
-// the process with a diagnostic if the test does not signal completion in time,
-// turning an otherwise indefinite hang into a clear, bounded failure.
-class DeadlockWatchdog : public wxThread
-{
-public:
-    explicit DeadlockWatchdog(int timeoutMs)
-        : wxThread(wxTHREAD_JOINABLE), m_timeoutMs(timeoutMs) {}
-
-    // Called by the test once it has completed normally.
-    void Done() { m_done.store(true); }
-
-protected:
-    void* Entry() override
-    {
-        const int step = 50;
-        for ( int waited = 0; waited < m_timeoutMs; waited += step )
-        {
-            if ( m_done.load() )
-                return nullptr;
-            wxMilliSleep(step);
-        }
-
-        std::cerr << "\nDEADLOCK: concurrent main-thread + worker-thread "
-                     "Request() on the same connection did not complete within "
-                  << m_timeoutMs << " ms.\n" << std::flush;
-        abort();
-    }
-
-    const int m_timeoutMs;
-    std::atomic<bool> m_done{false};
-
-    wxDECLARE_NO_COPY_CLASS(DeadlockWatchdog);
-};
-
 // Exercises the case where a Request() is issued on the main thread while a
 // worker thread is also issuing Request()s on the same connection, which was
 // a source of several problems.
@@ -969,7 +991,8 @@ TEST_CASE_METHOD(IPCFixture,
     // watchdog only ever fires on a *permanent* deadlock (which never recovers).
     // A large value avoids spurious aborts on slow/loaded CI runners or under
     // sanitizers, at no cost to the passing case.
-    DeadlockWatchdog watchdog(30000);
+    DeadlockWatchdog watchdog(30000,
+        "concurrent main- and worker-thread Request() on the same connection");
     watchdog.Run();
 
     MultiRequestThread worker("MultiRequest thread 1");
