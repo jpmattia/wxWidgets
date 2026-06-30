@@ -29,6 +29,8 @@
 #include <wx/filename.h>
 #include <wx/stdpaths.h>
 
+#include <cstdio> // TEMP DIAGNOSTIC (Wine cross-build) -- remove with the IPCDIAG lines
+
 #ifdef __UNIX__
     #include <unistd.h>
 #endif
@@ -523,7 +525,9 @@ public:
     {
         wxEventLoopActivator activate(&m_loop);
 
-        if ( !m_server->Create(IPC_TEST_PORT) )
+        const bool ok = m_server->Create(IPC_TEST_PORT);
+        fprintf(stderr, "IPCDIAG srv: wxServer::Create(port)=%d\n", (int)ok); fflush(stderr); // TEMP DIAGNOSTIC
+        if ( !ok )
             return false;
 
         m_started = true;
@@ -555,6 +559,7 @@ private:
 
 void RunIPCServerUntilStopped()
 {
+    fprintf(stderr, "IPCDIAG srv: RunIPCServerUntilStopped enter\n"); fflush(stderr); // TEMP DIAGNOSTIC
 #if wxUSE_SOCKETS
     wxSocketBase::Initialize();
 #endif
@@ -562,9 +567,14 @@ void RunIPCServerUntilStopped()
     IPCServerContext ctx;
 
     if ( !ctx.Start() )
+    {
+        fprintf(stderr, "IPCDIAG srv: Start() failed, _exit(1)\n"); fflush(stderr); // TEMP DIAGNOSTIC
         _exit(1);
+    }
 
+    fprintf(stderr, "IPCDIAG srv: entering run loop\n"); fflush(stderr); // TEMP DIAGNOSTIC
     ctx.RunUntilStopped();
+    fprintf(stderr, "IPCDIAG srv: run loop exited\n"); fflush(stderr); // TEMP DIAGNOSTIC
 }
 
 // ============================================================================
@@ -578,6 +588,7 @@ public:
 
     virtual void OnTerminate(int pid, int status) override
     {
+        fprintf(stderr, "IPCDIAG td: OnTerminate pid=%d status=%d\n", pid, status); fflush(stderr); // TEMP DIAGNOSTIC
         wxUnusedVar(status);
         wxUnusedVar(pid);
         m_finished = true;
@@ -638,14 +649,18 @@ public:
         m_state->pid = wxExecute(m_state->command, wxEXEC_ASYNC,
                                  m_state->process, &execEnv);
 
+        fprintf(stderr, "IPCDIAG cli: wxExecute server pid=%ld\n", m_state->pid); fflush(stderr); // TEMP DIAGNOSTIC
+
         if ( wxEventLoop::GetActive() )
             wxEventLoop::GetActive()->Exit();
     }
 
     void DoStop()
     {
+        fprintf(stderr, "IPCDIAG td: DoStop enter pid=%ld\n", m_state->pid); fflush(stderr); // TEMP DIAGNOSTIC
         if ( m_state->pid && !m_state->process->IsFinished() )
         {
+            fprintf(stderr, "IPCDIAG td: DoStop wxKill SIGTERM pid=%ld\n", m_state->pid); fflush(stderr); // TEMP DIAGNOSTIC
             wxKill(m_state->pid, wxSIGTERM);
             for ( int i = 0; i < 50 && !m_state->process->IsFinished(); ++i )
             {
@@ -656,15 +671,18 @@ public:
 
         m_state->pid = 0;
         wxUnsetEnv("WX_IPC_TEST_SERVER");
+        fprintf(stderr, "IPCDIAG td: DoStop done\n"); fflush(stderr); // TEMP DIAGNOSTIC
     }
 
     void WaitUntilFinished()
     {
+        fprintf(stderr, "IPCDIAG td: WaitUntilFinished enter pid=%ld\n", m_state->pid); fflush(stderr); // TEMP DIAGNOSTIC
         for ( int i = 0; i < 100 && !m_state->process->IsFinished(); ++i )
         {
             IPCClientDispatch(20);
             wxMilliSleep(20);
         }
+        fprintf(stderr, "IPCDIAG td: WaitUntilFinished exit finished=%d\n", (int)m_state->process->IsFinished()); fflush(stderr); // TEMP DIAGNOSTIC
     }
 
     IPCServerLaunchState* m_state;
@@ -694,12 +712,14 @@ bool IPCServerThread::Start()
 
 void IPCServerThread::WaitForExit()
 {
+    fprintf(stderr, "IPCDIAG td: WaitForExit enter pid=%ld\n", m_priv->state.pid); fflush(stderr); // TEMP DIAGNOSTIC
     if ( !m_priv->state.pid )
         return;
 
     IPCServerLauncher launcher(&m_priv->state);
     launcher.WaitUntilFinished();
     launcher.DoStop();
+    fprintf(stderr, "IPCDIAG td: WaitForExit done\n"); fflush(stderr); // TEMP DIAGNOSTIC
 }
 
 #endif // wxUSE_THREADS && !wxMONOLITHIC && !__WXQT__

@@ -54,6 +54,7 @@
 #include <wx/stopwatch.h>
 #include <atomic>
 #include <memory>
+#include <cstdio> // TEMP DIAGNOSTIC (Wine cross-build) -- remove with the IPCDIAG lines
 
 // forward decl
 class IPCTestClient;
@@ -496,7 +497,9 @@ public:
 
         gs_client = new IPCTestClient;
 
+        fprintf(stderr, "IPCDIAG cli: calling m_server.Start()\n"); fflush(stderr); // TEMP DIAGNOSTIC
         REQUIRE( m_server.Start() );
+        fprintf(stderr, "IPCDIAG cli: m_server.Start() ok\n"); fflush(stderr); // TEMP DIAGNOSTIC
 
         // Wait for the server to be ready to accept connections: the re-exec'd
         // server process can take a while to come up on a loaded CI runner (well
@@ -521,6 +524,8 @@ public:
                 IPCClientDispatch(50);
             }
         }
+        fprintf(stderr, "IPCDIAG cli: readiness loop done serverReady=%d elapsed=%ldms\n",
+                (int)serverReady, sw.Time()); fflush(stderr); // TEMP DIAGNOSTIC
         REQUIRE( serverReady );
     }
 
