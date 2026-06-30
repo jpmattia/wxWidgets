@@ -54,7 +54,6 @@
 #include <wx/stopwatch.h>
 #include <atomic>
 #include <memory>
-#include <cstdio> // TEMP DIAGNOSTIC (Wine cross-build) -- remove with the IPCDIAG lines
 
 // forward decl
 class IPCTestClient;
@@ -452,9 +451,9 @@ protected:
 
 // RAII wrapper that runs a DeadlockWatchdog for its whole lifetime. Used as the
 // first member of IPCFixture so a watchdog covers the entire fixture (setup,
-// test body, and teardown): if any of them blocks -- e.g. a socket Connect()
+// test body, and teardown): if any of them blocks, e.g. a socket Connect()
 // that never returns under an environment where the test server can't run, as
-// on the Wine-based wxMSW cross-builds -- the watchdog aborts with a diagnostic
+// on the Wine-based wxMSW cross-builds. The watchdog aborts with a diagnostic
 // after the timeout instead of letting CI hang until its multi-hour job cap.
 class FixtureWatchdog
 {
@@ -484,9 +483,7 @@ static void EnsureSharedServerStarted()
         return;
 
     gs_sharedServer = new IPCServerThread;
-    fprintf(stderr, "IPCDIAG cli: starting shared server\n"); fflush(stderr); // TEMP DIAGNOSTIC
     REQUIRE( gs_sharedServer->Start() );
-    fprintf(stderr, "IPCDIAG cli: shared server Start() ok\n"); fflush(stderr); // TEMP DIAGNOSTIC
 
     // Wait until the freshly-launched server accepts a connection. The bound is
     // wall-clock based (in a GUI event loop IPCClientDispatch() returns at once,
@@ -506,8 +503,6 @@ static void EnsureSharedServerStarted()
             IPCClientDispatch(50);
         }
     }
-    fprintf(stderr, "IPCDIAG cli: shared server readiness serverReady=%d elapsed=%ldms\n",
-            (int)serverReady, sw.Time()); fflush(stderr); // TEMP DIAGNOSTIC
     REQUIRE( serverReady );
 }
 
