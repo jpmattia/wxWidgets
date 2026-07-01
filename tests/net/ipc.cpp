@@ -467,46 +467,20 @@ private:
     wxDECLARE_NO_COPY_CLASS(FixtureWatchdog);
 };
 
-// A single IPC server process is shared by all IPC tests: started on first use
-// and stopped once at the end of the run (see SharedServerCleanup). Re-launching
-// a server per test made the client repeatedly connect to a just-restarted
-// localhost listener, which intermittently hung Connect() under the Wine-based
-// wxMSW cross-builds; one long-lived server removes that churn and matches the
-// original single-server test design. Each test still gets a fresh server-side
-// connection (IPCServerConnection resets its per-test state on accept), so test
-// isolation is preserved.
-static IPCServerThread* gs_sharedServer = nullptr;
-
-static void EnsureSharedServerStarted()
-{
-    if ( gs_sharedServer )
-        return;
-
-    gs_sharedServer = new IPCServerThread;
-    REQUIRE( gs_sharedServer->Start() );
-
-    // Wait until the freshly-launched server accepts a connection. The bound is
-    // wall-clock based (in a GUI event loop IPCClientDispatch() returns at once,
-    // so an iteration count would expire instantly). This runs once per test run
-    // now, not once per test.
-    bool serverReady = false;
-    wxStopWatch sw;
-    while ( !serverReady && sw.Time() < 30000 )   // up to 30s
-    {
-        if ( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) )
-        {
-            gs_client->Disconnect();
-            serverReady = true;
-        }
-        else
-        {
-            IPCClientDispatch(50);
-        }
-    }
-    REQUIRE( serverReady );
-}
-
-// IPCFixture connects a fresh client to the shared server for each test.
+// IPCFixture starts a fresh IPC server for each test, connects a client to it,
+// and shuts the server down again in the destructor -- so no IPC server process
+// is ever alive between tests, or during the unrelated GUI control tests that
+// run in the same test_gui binary.
+//
+// (A previous version shared one long-lived server across all IPC tests to dodge
+// an intermittent Wine Connect() hang caused by rapidly restarting the localhost
+// listener. But that left the server -- a second GUI process on the one Xvfb
+// display -- alive for the rest of the run, where it stole window-from-point and
+// focus from the client and failed ~30 non-IPC GUI tests, guifuncs/treectrl/
+// listbase/etc. The hang is now prevented at its source instead: the client's
+// connect attempt is time-bounded (wxIPCTimeout, see wxTCPClient::MakeConnection)
+// so a not-yet-ready server fails the attempt promptly and the readiness poll
+// below retries, rather than blocking on the socket's long default timeout.)
 class IPCFixture
 {
     // Declared first so it is constructed first and destroyed last: the watchdog
@@ -514,6 +488,7 @@ class IPCFixture
     FixtureWatchdog m_watchdog{180000, "an IPC test (setup, body, or teardown)"};
     std::unique_ptr<wxEventLoop> m_clientLoop{new wxEventLoop};
     std::unique_ptr<wxEventLoopActivator> m_loopActivator;
+    IPCServerThread m_server;
 
 public:
     IPCFixture()
@@ -534,14 +509,63 @@ public:
 
         gs_client = new IPCTestClient;
 
-        // Start the shared server on first use; subsequent tests reuse it.
-        EnsureSharedServerStarted();
+        REQUIRE( m_server.Start() );
+
+        // Wait until the freshly-launched server is ready to accept a
+        // connection: the re-exec'd server process can take a while to come up
+        // (well over a second under sanitizers, or as a GUI process doing full
+        // toolkit init). Poll with a throwaway connection until one succeeds,
+        // then drop it so the test starts from a clean state. The bound is
+        // wall-clock based, not iteration based: in a GUI event loop
+        // IPCClientDispatch() returns at once (idle events), so a fixed
+        // iteration count would expire before a GUI server is listening. Each
+        // Connect() attempt is itself time-bounded (see the class comment), so a
+        // not-yet-ready server fails promptly and we retry rather than blocking.
+        bool serverReady = false;
+        wxStopWatch sw;
+        while ( !serverReady && sw.Time() < 30000 )   // up to 30s
+        {
+            if ( gs_client->Connect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) )
+            {
+                gs_client->Disconnect();
+                serverReady = true;
+            }
+            else
+            {
+                // Pace the retries: a refused Connect() returns at once, and
+                // IPCClientDispatch() also returns immediately when idle, so
+                // without a sleep this loop spins hundreds of connect attempts
+                // (each creating and destroying a socket) while the server comes
+                // up -- enough churn to exhaust resources over a whole run of
+                // per-test servers. Sleep briefly so we poll ~20x/second instead.
+                IPCClientDispatch(50);
+                wxMilliSleep(50);
+            }
+        }
+        REQUIRE( serverReady );
     }
 
     ~IPCFixture()
     {
-        // Disconnect this test's client but leave the shared server running for
-        // the next test; it is stopped once at run end by SharedServerCleanup.
+        // Ask the server to shut down cleanly, then wait for the child to exit.
+        // This runs while the client loop is still active, so the server's
+        // wxProcess::OnTerminate() is dispatched before its handler is destroyed
+        // (see PumpForProcessExit() in the server launcher).
+        if ( gs_client )
+        {
+            if ( !gs_client->m_conn )
+                PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC);
+
+            if ( gs_client->m_conn )
+            {
+                const wxString s("shutdown");
+                gs_client->GetConn().Execute(s);
+                wxMilliSleep(100);
+            }
+        }
+
+        m_server.WaitForExit();
+
         DrainPendingIPCEvents();
 
         if ( gs_client )
@@ -564,24 +588,6 @@ public:
             std::cout << "teardown complete\n" << std::flush;
     }
 };
-
-// Stop the shared IPC server once, after the whole test run, so no server
-// process is left orphaned (see EnsureSharedServerStarted / gs_sharedServer).
-struct SharedServerCleanup : Catch::TestEventListenerBase
-{
-    using TestEventListenerBase::TestEventListenerBase;
-
-    void testRunEnded(Catch::TestRunStats const&) override
-    {
-        if ( gs_sharedServer )
-        {
-            gs_sharedServer->WaitForExit();
-            delete gs_sharedServer;
-            gs_sharedServer = nullptr;
-        }
-    }
-};
-CATCH_REGISTER_LISTENER(SharedServerCleanup)
 
 // Test the basics of Connect()
 TEST_CASE_METHOD(IPCFixture,

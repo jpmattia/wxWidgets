@@ -1058,6 +1058,14 @@ wxConnectionBase *wxTCPClient::MakeConnection(const wxString& host,
 
     wxSocketClient * const client = new wxSocketClient(wxSOCKET_WAITALL);
 
+    // Bound the connection attempt (the TCP connect and the topic handshake
+    // that follows) by the IPC timeout instead of leaving it at the socket's
+    // long default: without this, connecting to a listener that is not yet
+    // ready to complete the handshake blocks for the default timeout (ten
+    // minutes) rather than failing promptly so the caller can retry. The
+    // per-connection socket timeout is set to the same value once connected.
+    client->SetTimeout(wxIPCTimeout);
+
     bool ok = client->Connect(*addr);
     delete addr;
 
