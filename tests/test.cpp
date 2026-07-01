@@ -55,7 +55,7 @@ std::string wxTheCurrentTestClass, wxTheCurrentTestMethod;
 #include "wx/socket.h"
 #include "wx/evtloop.h"
 
-// wxMONOLITHIC/__WXQT__ guard: see the longer note in tests/net/ipc.cpp -- the
+// wxMONOLITHIC/__WXQT__ guard: see the longer note in tests/net/ipc.cpp. The
 // IPC test (and its server) is excluded from wxMSW monolithic builds (#24909)
 // and from wxQt (cross-thread CallAfter() not processed by the wxQt event loop,
 // fixed separately on branch jpmattia/wxQT-CallAfter-wxWakeUpIdle).
@@ -387,7 +387,7 @@ public:
         // sources and TEST_HAS_IPC_SERVER are built into both the console "test"
         // and "test_gui" programs, so the GUI OnRun() above has the same hook.
         // Excluded from wxMSW monolithic builds: see
-        // https://github.com/wxWidgets/wxWidgets/issues/24909 -- a GUI-only
+        // https://github.com/wxWidgets/wxWidgets/issues/24909 : a GUI-only
         // component inserts itself into the wxAppConsole server, after which the
         // baseserver stops receiving data (MSW-specific; GTK monolithic is fine).
         if ( wxGetEnv("WX_IPC_TEST_SERVER", nullptr) )

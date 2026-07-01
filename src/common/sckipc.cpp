@@ -214,7 +214,7 @@ public:
 
     // The handoff objects between a worker thread blocked in SendAndGetReply()
     // and the main thread's OnSocketInput(). Only one reply is ever pending at a
-    // time, which is guaranteed by m_cs_awaiting_reply.
+    // time, which is serialized by m_cs_awaiting_reply.
     wxMutex m_replyMutex;
     wxCondition m_replyCond{m_replyMutex};
     struct PendingReply

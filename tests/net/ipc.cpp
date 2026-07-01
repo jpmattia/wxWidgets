@@ -468,14 +468,14 @@ private:
 };
 
 // IPCFixture starts a fresh IPC server for each test, connects a client to it,
-// and shuts the server down again in the destructor -- so no IPC server process
+// and shuts the server down again in the destructor, so no IPC server process
 // is ever alive between tests, or during the unrelated GUI control tests that
 // run in the same test_gui binary.
 //
 // (A previous version shared one long-lived server across all IPC tests to dodge
 // an intermittent Wine Connect() hang caused by rapidly restarting the localhost
-// listener. But that left the server -- a second GUI process on the one Xvfb
-// display -- alive for the rest of the run, where it stole window-from-point and
+// listener. But that left the server (a second GUI process on the one Xvfb
+// display) alive for the rest of the run, where it stole window-from-point and
 // focus from the client and failed ~30 non-IPC GUI tests, guifuncs/treectrl/
 // listbase/etc. The hang is now prevented at its source instead: the client's
 // connect attempt is time-bounded (wxIPCTimeout, see wxTCPClient::MakeConnection)
@@ -536,7 +536,7 @@ public:
                 // IPCClientDispatch() also returns immediately when idle, so
                 // without a sleep this loop spins hundreds of connect attempts
                 // (each creating and destroying a socket) while the server comes
-                // up -- enough churn to exhaust resources over a whole run of
+                // up, enough churn to exhaust resources over a whole run of
                 // per-test servers. Sleep briefly so we poll ~20x/second instead.
                 IPCClientDispatch(50);
                 wxMilliSleep(50);
