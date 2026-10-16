@@ -1023,10 +1023,18 @@ namespace
     made concurrently from several threads cannot invalidate each other's
     returned data.
 
-    See UntranslatedStringHolder in translation.cpp for the explanation of the
-    MinGW thread_local bug requiring the first version of this class: the
-    destructor runs after the object's memory has been deallocated, so the
+    The first version of this class works around a long-standing MinGW bug in
+    its thread_local implementation (the object's memory is deallocated before
+    its destructor runs, see https://github.com/msys2/MINGW-packages/issues/2519
+    and the comment above UntranslatedStringHolder in translation.cpp): the
     buffers are kept in a global map and the destructor only touches globals.
+
+    Those globals are allocated on first use and never destroyed. The main
+    thread's thread_local destructor is run by the MinGW CRT's TLS terminator,
+    after the atexit table, i.e. after any static object (including a
+    function-local one) has been destroyed; entering a destroyed critical
+    section there crashed the process at exit. Leaking one critical section and
+    one map per process is the only ordering that is always safe.
  */
 #if defined(__MINGW32__) && \
     (!defined(__MINGW64_VERSION_MAJOR) || __MINGW64_VERSION_MAJOR < 15)
@@ -1034,16 +1042,25 @@ namespace
 class IPCRequestBufferHolder
 {
 private:
-    static wxCriticalSection ms_criticalSection;
-    static std::map<wxThreadIdType, char*> ms_buffersMap;
+    static wxCriticalSection& CriticalSection()
+    {
+        static wxCriticalSection* const cs = new wxCriticalSection;
+        return *cs;
+    }
+    static std::map<wxThreadIdType, char*>& BuffersMap()
+    {
+        static std::map<wxThreadIdType, char*>* const m =
+            new std::map<wxThreadIdType, char*>;
+        return *m;
+    }
 
 public:
     IPCRequestBufferHolder() = default;
 
     const void* assign(char* buf)
     {
-        wxCriticalSectionLocker locker(ms_criticalSection);
-        char*& slot = ms_buffersMap[wxThread::GetCurrentId()];
+        wxCriticalSectionLocker locker(CriticalSection());
+        char*& slot = BuffersMap()[wxThread::GetCurrentId()];
         delete[] slot;
         slot = buf;
         return buf;
@@ -1053,21 +1070,17 @@ public:
     {
         // This code is run after this object memory has been deallocated so we
         // cannot access any member variables, but we can access global ones.
-        wxCriticalSectionLocker locker(ms_criticalSection);
-        const auto it = ms_buffersMap.find(wxThread::GetCurrentId());
-        if ( it != ms_buffersMap.end() )
+        wxCriticalSectionLocker locker(CriticalSection());
+        const auto it = BuffersMap().find(wxThread::GetCurrentId());
+        if ( it != BuffersMap().end() )
         {
             delete[] it->second;
-            ms_buffersMap.erase(it);
+            BuffersMap().erase(it);
         }
     }
 
     wxDECLARE_NO_COPY_CLASS(IPCRequestBufferHolder);
 };
-
-wxCriticalSection IPCRequestBufferHolder::ms_criticalSection;
-
-std::map<wxThreadIdType, char*> IPCRequestBufferHolder::ms_buffersMap;
 
 #else // !__MINGW32__
 
