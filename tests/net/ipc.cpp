@@ -33,6 +33,7 @@
 #include "wx/utils.h"
 #include "wx/evtloop.h"
 #include "wx/stopwatch.h"
+#include "wx/timer.h"
 
 #include <atomic>
 #include <memory>
@@ -75,6 +76,14 @@ public:
     {
         if ( topic != IPC_TEST_TOPIC )
             return false;
+
+        if ( item.StartsWith("BigAdvise test ") )
+        {
+            // Large binary payload, see IPC::RequestDuringPartialAdvise: check
+            // it here, before anything converts it to a string.
+            HandleBigAdvise(item, static_cast<const char*>(data), size, format);
+            return true;
+        }
 
         CHECK( format == wxIPC_TEXT );
 
@@ -121,11 +130,17 @@ private:
 
         m_adviseComplete = false;
 
+        m_bigAdviseCount = 0;
+
         for ( auto& val : m_threadAdviseLastVal )
             val = 0;
     }
 
     void HandleThreadAdviseCounting(const wxString& adviseString);
+    void HandleBigAdvise(const wxString& item,
+                         const char* data,
+                         size_t size,
+                         wxIPCFormat format);
 
     wxCRIT_SECT_DECLARE_MEMBER(m_csAssignBuffer);
 
@@ -133,6 +148,9 @@ private:
 
 public:
     bool  m_adviseComplete;
+
+    // Number of "BigAdvise test" advises received, see HandleBigAdvise().
+    int m_bigAdviseCount;
 
     int m_threadAdviseLastVal[3];
 
@@ -197,6 +215,42 @@ void IPCTestConnection::HandleThreadAdviseCounting(const wxString& adviseString)
     if ( err )
     {
         m_generalError += errString;
+    }
+}
+
+// Helper for IPC::RequestDuringPartialAdvise: verify a "BigAdvise test <bytes>"
+// payload, which BigAdviseThread in the server fills with 'A' + n % 26. A
+// misaligned stream (bytes taken out of the body by a nested read) shows up
+// here as a size or content mismatch.
+void IPCTestConnection::HandleBigAdvise(const wxString& item,
+                                        const char* data,
+                                        size_t size,
+                                        wxIPCFormat format)
+{
+    m_bigAdviseCount++;
+
+    wxString sizeStr;
+    unsigned long expected = 0;
+    item.StartsWith("BigAdvise test ", &sizeStr);
+    sizeStr.ToULong(&expected);
+
+    if ( format != wxIPC_PRIVATE )
+        m_generalError << "BigAdvise: unexpected format " << format << '\n';
+
+    if ( size != expected )
+    {
+        m_generalError << "BigAdvise: expected " << expected
+                       << " bytes, received " << size << '\n';
+        return;
+    }
+
+    for ( size_t n = 0; n < size; n++ )
+    {
+        if ( data[n] != static_cast<char>('A' + n % 26) )
+        {
+            m_generalError << "BigAdvise: payload corrupt at offset " << n << '\n';
+            return;
+        }
     }
 }
 
@@ -1044,6 +1098,289 @@ TEST_CASE_METHOD(IPCFixture,
 
     INFO( worker.m_error );
     CHECK( worker.m_error.empty() );
+}
+
+// Counts wxWidgets assertion failures for as long as it lives, instead of the
+// test runner's default of throwing on the first one. The assert this is for
+// ("read reentrancy?" in wxSocketReadGuard) is raised from a timer handler
+// running inside a socket read, i.e. from inside a nested event-loop pump in
+// the middle of the socket code, and an exception unwinding through all of
+// that is not a path worth relying on. Counting lets the test report the
+// assert itself, and lets the code run on past it, so that the damage the
+// nested read does to the stream is caught by the checks as well.
+class AssertCounter
+{
+public:
+    AssertCounter()
+    {
+        ms_count = 0;
+        m_previous = wxSetAssertHandler(OnAssert);
+    }
+
+    ~AssertCounter()
+    {
+        wxSetAssertHandler(m_previous);
+    }
+
+    int Count() const { return ms_count; }
+    const wxString& First() const { return ms_first; }
+
+private:
+    static void OnAssert(const wxString& file,
+                         int line,
+                         const wxString& func,
+                         const wxString& cond,
+                         const wxString& msg)
+    {
+        if ( ms_count++ == 0 )
+        {
+            ms_first.Printf("%s in %s() at %s:%d",
+                            msg.empty() ? cond : msg, func, file, line);
+        }
+    }
+
+    static int ms_count;
+    static wxString ms_first;
+
+    wxAssertHandler_t m_previous;
+
+    wxDECLARE_NO_COPY_CLASS(AssertCounter);
+};
+
+int AssertCounter::ms_count = 0;
+wxString AssertCounter::ms_first;
+
+// Issues Request()s from a timer handler. A timer fires from the event loop,
+// and the socket code pumps the event loop whenever a read has to wait, so with
+// a partially arrived message in the socket a tick runs *inside* that read (on
+// every port). The connection must either answer the request or refuse it
+// cleanly: it must never read the socket again from inside the outer read.
+//
+// Each tick also queues the same request with CallAfter(). Where pending events
+// are run by the event loop itself (wxGTK's idle handling; wxMSW's message hook
+// in a GUI build, i.e. test_gui), that handler runs inside the read as well,
+// which is how a GUI application typically gets there. In the console build
+// the queued request runs from the test's own pump, at the top level.
+class NestedRequestTimer : public wxTimer
+{
+public:
+    // Outcome counts of the Request()s issued one way.
+    struct Counts
+    {
+        int fired = 0,    // Request()s issued
+            refused = 0,  // Request() returned null
+            ok = 0,       // Request() answered "pong"
+            bad = 0;      // answered something else: stream misaligned
+
+        void Add(const char* data)
+        {
+            fired++;
+            if ( !data )
+                refused++;
+            else if ( wxString(data) == "pong" )
+                ok++;
+            else
+                bad++;
+        }
+    };
+
+    explicit NestedRequestTimer(IPCTestConnection& conn)
+        : m_conn(conn),
+          m_queued(std::make_shared<Counts>()),
+          m_alive(std::make_shared<bool>(true))
+    {
+    }
+
+    virtual ~NestedRequestTimer()
+    {
+        *m_alive = false;
+    }
+
+    virtual void Notify() override
+    {
+        // Request() pumps the event loop while it waits for its reply, so when
+        // the next tick comes round before the reply does, this handler runs
+        // again from inside that wait. Issue one more request from there: it
+        // queues behind the outer one and both must be answered. Stop at that
+        // depth, as every further tick would nest yet another request for as
+        // long as the server is busy, until wxWidgets refuses to nest deeper.
+        if ( m_depth >= 2 )
+            return;
+
+        m_depth++;
+
+        if ( m_depth == 2 )
+        {
+            m_nested.Add(Ping(m_conn, "ping"));
+        }
+        else
+        {
+            // The server holds this reply back for longer than a timer tick,
+            // so that the next tick is sure to find this request waiting.
+            m_direct.Add(Ping(m_conn, "slow ping 50"));
+
+            // The queued copy may run after this timer is gone (the fixture
+            // drains pending events in its destructor), so it shares the counts
+            // and an "alive" flag with the timer instead of capturing it.
+            const std::shared_ptr<Counts> queued = m_queued;
+            const std::shared_ptr<bool> alive = m_alive;
+            wxTheApp->CallAfter([queued, alive]()
+            {
+                if ( !*alive || !gs_client || !gs_client->m_conn )
+                    return;
+
+                queued->Add(Ping(*gs_client->m_conn, "ping"));
+            });
+        }
+
+        m_depth--;
+    }
+
+    const Counts& Direct() const { return m_direct; }
+    const Counts& Nested() const { return m_nested; }
+    const Counts& Queued() const { return *m_queued; }
+
+private:
+    static const char* Ping(IPCTestConnection& conn, const wxString& item)
+    {
+        size_t size = 0;
+        return (const char*) conn.Request(item, &size, wxIPC_PRIVATE);
+    }
+
+    IPCTestConnection& m_conn;
+    int m_depth = 0;
+
+    Counts m_direct;
+    Counts m_nested;
+    std::shared_ptr<Counts> m_queued;
+    std::shared_ptr<bool> m_alive;
+
+    wxDECLARE_NO_COPY_CLASS(NestedRequestTimer);
+};
+
+static wxString Describe(const NestedRequestTimer::Counts& c)
+{
+    return wxString::Format("%d requests, %d answered, %d refused, %d bad",
+                            c.fired, c.ok, c.refused, c.bad);
+}
+
+// Regression test for a Request() issued from an event handler that runs while
+// the connection is in the middle of receiving a message, or while another
+// request waits for its reply.
+//
+// wxTCPEventHandler used to read a message from the socket with waiting
+// (WAITALL) reads, and a waiting read pumps the event loop. Any handler
+// dispatched by that pump (timers and input events on every port; on wxMSW
+// also every CallAfter() and AddPendingEvent() handler, which run from a
+// message hook) therefore ran inside the read, and if it called Request(),
+// StartAdvise() or StopAdvise(), a second read started on a socket that was
+// mid-message: that tripped wxSocketReadGuard's "read reentrancy?" assert (a
+// test failure here), and with asserts disabled it silently took bytes out of
+// the outer message. Now the socket is only ever read without waiting and the
+// messages are parsed from a buffer, so no handler can run inside a read, and
+// a request issued while another one waits for its reply queues behind it.
+//
+// The server sends one advise too large to have arrived whole by the time its
+// header is seen, so the client has to wait for the rest, and a fast timer
+// issues Request()s throughout; the server delays its replies to those, so
+// that the timer also fires while one of them waits and issues a request from
+// there. A worker thread sends its own stream of requests on the same
+// connection at the same time. Every request must be answered; the advise
+// must arrive once and intact; and the connection must still work afterwards.
+TEST_CASE_METHOD(IPCFixture,
+                 "IPC::RequestDuringPartialAdvise", "[net][ipc][multi_command]")
+{
+    if ( g_showMessageTiming )
+        std::cout << "Running test RequestDuringPartialAdvise\n" << std::flush;
+
+    REQUIRE( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    IPCTestConnection& conn = gs_client->GetConn();
+
+    // Before the fix, the nested read tripped "read reentrancy?" in
+    // wxSocketReadGuard; that is what this counts (see AssertCounter).
+    AssertCounter asserts;
+
+    // Well above any loopback socket buffer: a smaller advise can be sitting
+    // complete in the socket by the time its header arrives, and then nothing
+    // ever has to wait for its body and nothing is tested. (On Windows ~1 MB
+    // was found to arrive whole within a few tens of ms.)
+    const unsigned long bytes = 64ul * 1024 * 1024;
+    const wxString item = wxString::Format("BigAdvise test %lu", bytes);
+
+    NestedRequestTimer timer(conn);
+    MultiRequestThread worker("MultiRequest thread 1");
+
+    CHECK( conn.StartAdvise(item) );
+
+    worker.Run();
+
+    // Keep requesting for as long as the advise is in flight. The interval is
+    // rounded up to the platform's timer resolution (~10-16 ms on wxMSW).
+    timer.Start(1);
+
+    wxStopWatch sw;
+    while ( conn.m_bigAdviseCount == 0 && sw.Time() < 60000 )
+        PumpDispatch();
+
+    timer.Stop();
+
+    // The worker spaces its requests out, so it normally outlives the advise.
+    while ( worker.IsRunning() && sw.Time() < 60000 )
+        PumpDispatch();
+    worker.Wait();
+
+    // Let any still queued requests run (at the top level now).
+    DrainPendingIPCEvents();
+
+    INFO( "from the timer: " << Describe(timer.Direct()) );
+    INFO( "nested in a request from the timer: " << Describe(timer.Nested()) );
+    INFO( "queued with CallAfter: " << Describe(timer.Queued()) );
+
+    INFO( "first assert: " << asserts.First() );
+    CHECK( asserts.Count() == 0 );
+
+    CHECK( conn.m_bigAdviseCount == 1 );
+
+    // Every request issued from the timer must have been answered, from
+    // whichever point it was issued.
+    CHECK( timer.Direct().fired > 0 );
+    CHECK( timer.Direct().refused == 0 );
+    CHECK( timer.Direct().bad == 0 );
+    CHECK( timer.Queued().refused == 0 );
+    CHECK( timer.Queued().bad == 0 );
+
+    // Ticks must have come while an earlier request was waiting for its reply
+    // (the server delays those replies past the timer resolution to make sure
+    // of it), and the requests issued from there must have been answered too.
+    CHECK( timer.Nested().fired > 0 );
+    CHECK( timer.Nested().refused == 0 );
+    CHECK( timer.Nested().bad == 0 );
+
+    INFO( worker.m_error );
+    CHECK( worker.m_error.empty() );
+
+    INFO( conn.m_generalError );
+    CHECK( conn.m_generalError.empty() );
+
+    CHECK( conn.StopAdvise(item) );
+
+    // The stream must still be aligned: a request from the top level works and
+    // the server saw nothing wrong.
+    size_t size = 0;
+    const char* data = (const char*) conn.Request("ping", &size, wxIPC_PRIVATE);
+    REQUIRE( data != nullptr );
+    CHECK( wxString(data) == "pong" );
+
+    // The server must have seen all of the worker's requests, in order.
+    data = (const char*) conn.Request("get_thread1_request_counter", &size,
+                                      wxIPC_PRIVATE);
+    REQUIRE( data != nullptr );
+    CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+    data = (const char*) conn.Request("get_error_string", &size, wxIPC_PRIVATE);
+    REQUIRE( data != nullptr );
+    INFO( wxString(data) );
+    CHECK( wxString(data).empty() );
 }
 
 #endif // wxUSE_THREADS
