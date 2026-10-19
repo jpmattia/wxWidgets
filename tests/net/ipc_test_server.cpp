@@ -61,6 +61,11 @@ public:
     }
 
     virtual bool OnExec(const wxString& topic, const wxString& data) override;
+    virtual bool OnPoke(const wxString& topic,
+                        const wxString& item,
+                        const void* data,
+                        size_t size,
+                        wxIPCFormat format) override;
     virtual bool OnDisconnect() override;
 
     virtual const void* OnRequest(const wxString& topic,
@@ -102,6 +107,8 @@ private:
     int m_nextAvailable;
 
     wxString m_lastExecute;
+    size_t m_bigPokeBytes = 0;
+    bool m_bigPokeBad = false;
 
     int m_threadRequestLastVal[3];
 
@@ -158,6 +165,35 @@ protected:
     wxString m_item, m_label;
 
     wxDECLARE_NO_COPY_CLASS(MultiAdviseThread);
+};
+
+// Sends one Advise() whose payload is large enough that the client cannot have
+// received all of it by the time it has read the message header, so the client's
+// read of the body has to wait (and pump its event loop) for the rest. Used by
+// IPC::RequestDuringPartialAdvise. The payload is a deterministic pattern so
+// the client can verify that it arrived intact.
+class BigAdviseThread : public wxThread
+{
+public:
+    BigAdviseThread(IPCServerTestServer* server,
+                    const wxString& item,
+                    size_t bytes)
+        : wxThread(wxTHREAD_JOINABLE),
+          m_server(server),
+          m_item(item),
+          m_bytes(bytes)
+    {
+        Create();
+    }
+
+protected:
+    virtual void* Entry() override;
+
+    IPCServerTestServer* m_server;
+    wxString m_item;
+    size_t m_bytes;
+
+    wxDECLARE_NO_COPY_CLASS(BigAdviseThread);
 };
 
 class IPCServerTestServer : public wxServer
@@ -222,6 +258,49 @@ bool IPCServerConnection::OnExec(const wxString& topic, const wxString& data)
     return true;
 }
 
+bool IPCServerConnection::OnPoke(const wxString& topic,
+                                 const wxString& item,
+                                 const void* data,
+                                 size_t size,
+                                 wxIPCFormat format)
+{
+    if ( topic != IPC_TEST_TOPIC )
+        return false;
+
+    if ( item.StartsWith("sleep ") )
+    {
+        // "sleep <ms>": read nothing from the connection for that long (see
+        // IPC::RequestDuringBlockedWrite).
+        unsigned long ms = 0;
+        if ( !item.AfterLast(' ').ToULong(&ms) || ms > 10000 )
+            return false;
+
+        wxMilliSleep(ms);
+        return true;
+    }
+
+    if ( item == "big poke" )
+    {
+        // Same pattern as BigAdviseThread sends; the "big poke result" request
+        // reports the bytes received so far and whether all arrived intact.
+        const char* const p = static_cast<const char*>(data);
+        bool ok = format == wxIPC_PRIVATE && size > 0;
+        for ( size_t n = 0; ok && n < size; n++ )
+        {
+            if ( p[n] != static_cast<char>('A' + n % 26) )
+                ok = false;
+        }
+
+        m_bigPokeBytes += size;
+        if ( !ok )
+            m_bigPokeBad = true;
+        return true;
+    }
+
+    m_generalError += "Unknown Poke item: " + item + '\n';
+    return false;
+}
+
 bool IPCServerConnection::OnDisconnect()
 {
     // Clear the server's current-connection pointer only if *this* connection is
@@ -258,6 +337,19 @@ const void* IPCServerConnection::OnRequest(const wxString& topic,
 
         s = "pong";
     }
+    else if ( item.StartsWith("slow ping ") )
+    {
+        // "slow ping <ms>": answer like "ping", but only after that many
+        // milliseconds, so that the client is sure to wait for the reply (see
+        // IPC::RequestDuringPartialAdvise).
+        unsigned long ms = 0;
+        if ( format != wxIPC_PRIVATE ||
+                !item.AfterLast(' ').ToULong(&ms) || ms > 10000 )
+            return nullptr;
+
+        wxMilliSleep(ms);
+        s = "pong";
+    }
     else if ( item == "last_execute" )
     {
         s = m_lastExecute;
@@ -277,6 +369,24 @@ const void* IPCServerConnection::OnRequest(const wxString& topic,
     else if ( item == "get_thread3_request_counter")
     {
         s = wxString::Format("%d", m_threadRequestLastVal[2]);
+    }
+    else if ( item == "ping via advise" )
+    {
+        // Answer like "ping", but send an advise first: the client's handler
+        // for it issues a request from inside the wait for this reply (see
+        // NestedRequestTimer in ipc.cpp).
+        if ( format != wxIPC_PRIVATE )
+            return nullptr;
+
+        if ( !Advise("NestedPing", "go") )
+            m_generalError += "Advise(NestedPing) failed\n";
+
+        s = "pong";
+    }
+    else if ( item == "big poke result" )
+    {
+        s = wxString::Format("%zu %s", m_bigPokeBytes,
+                             m_bigPokeBad ? "bad" : "ok");
     }
     else if ( item == "get_error_string")
     {
@@ -417,6 +527,22 @@ bool IPCServerConnection::OnStartAdvise(const wxString& topic,
         StartAdviseWorker(
             new MultiAdviseThread(m_server, item, "MultiAdvise thread 3"));
     }
+    else if ( item.StartsWith("BigAdvise test ") )
+    {
+        // The item carries the payload size, see IPC::RequestDuringPartialAdvise.
+        wxString sizeStr;
+        unsigned long bytes = 0;
+        item.StartsWith("BigAdvise test ", &sizeStr);
+        if ( !sizeStr.ToULong(&bytes) || bytes == 0 )
+        {
+            m_generalError += "BigAdvise: bad size in StartAdvise item\n";
+            m_adviseActive = false;
+        }
+        else
+        {
+            StartAdviseWorker(new BigAdviseThread(m_server, item, bytes));
+        }
+    }
     else
     {
         m_generalError += "Unknown StartAdvise item\n";
@@ -484,6 +610,25 @@ void* MultiAdviseThread::Entry()
                                     "Advise() call returned false: %zu", n);
         }
     }
+
+    return nullptr;
+}
+
+void* BigAdviseThread::Entry()
+{
+    wxMilliSleep(50);
+
+    IPCServerConnection& conn = m_server->GetConn();
+    if ( !conn.m_adviseActive )
+        conn.m_generalError = "Advise() call without StartAdvise()\n";
+
+    // Same pattern as checked by IPCTestConnection::OnAdvise() in ipc.cpp.
+    std::unique_ptr<char[]> buf(new char[m_bytes]);
+    for ( size_t n = 0; n < m_bytes; n++ )
+        buf[n] = static_cast<char>('A' + n % 26);
+
+    if ( !conn.Advise(m_item, buf.get(), m_bytes, wxIPC_PRIVATE) )
+        conn.m_generalError = "BigAdvise: Advise() call returned false\n";
 
     return nullptr;
 }
