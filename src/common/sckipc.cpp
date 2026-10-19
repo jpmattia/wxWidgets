@@ -132,6 +132,10 @@ constexpr int wxIPCMaxNestedRequests = 8;
 // wxTCPEventHandler::Drain().
 constexpr size_t wxIPCReadChunk = 64 * 1024;
 
+// Messages queued for a connection whose peer is not reading are kept up to
+// this many bytes; beyond that, sending fails until the peer catches up.
+constexpr size_t wxIPCMaxSendBacklog = 64 * 1024 * 1024;
+
 
 // ----------------------------------------------------------------------------
 // private functions
@@ -224,6 +228,10 @@ public:
     wxIPCMessageBase* ReadMessageBlocking(wxSocketBase* socket);
     bool WriteMessageToSocket(wxIPCMessageBase& msg);
 
+    // Wait, for at most the IPC timeout, until everything queued for the
+    // connection has been written. For closing it.
+    void FlushBlocking(wxSocketBase* socket);
+
     // This event handler is a single process-wide object shared by every IPC
     // connection (client and server) and it lives until the program exits.
     // Socket events are queued on it and may still be pending after the socket
@@ -250,7 +258,7 @@ private:
     // written to a connection and whose reply has not been consumed yet.
     //
     // The entry is shared between the thread waiting for the reply and the
-    // connection's queue of expected replies (ReceiveState::pending). Its
+    // connection's queue of expected replies (ConnectionState::pending). Its
     // fields are protected by m_replyMutex, as the waiter may be a worker
     // thread while replies are always delivered by the main thread.
     struct PendingReply
@@ -275,9 +283,11 @@ private:
 
     using PendingReplyPtr = std::shared_ptr<PendingReply>;
 
-    // Everything received on a connection socket but not dispatched yet, plus
-    // the replies expected on it. Only ever touched by the main thread.
-    struct ReceiveState
+    // The state of a connection: everything received on its socket but not
+    // dispatched yet, everything queued for its socket but not taken by it
+    // yet, and the replies expected on it. Only ever touched by the main
+    // thread.
+    struct ConnectionState
     {
         // Bytes [rd, wr) of buf have been read from the socket and not parsed.
         std::vector<char> buf;
@@ -289,6 +299,14 @@ private:
         void Consume(size_t n) { rd += n; }
         void Compact();
 
+        // Bytes [outRd, out.size()) of out are to be written to the socket, in
+        // this order, which is the order of the messages they belong to.
+        std::vector<char> out;
+        size_t outRd = 0;
+
+        size_t Backlog() const { return out.size() - outRd; }
+        void CompactOut();
+
         // Replies expected on this connection, in the order the corresponding
         // messages were written, which is the order the peer answers them in:
         // the reply which arrives next always belongs to the front entry.
@@ -296,12 +314,27 @@ private:
     };
 
     wxTCPConnection* GetConnection(wxSocketBase* socket);
-    ReceiveState* GetReceiveState(wxSocketBase* socket);
+    ConnectionState* GetConnectionState(wxSocketBase* socket);
 
     // Move everything the socket has to offer right now into the buffer,
     // without waiting. Returns false if the peer has closed the connection or
     // the socket failed (what was read before that is still in the buffer).
-    bool Drain(wxSocketBase* socket, ReceiveState& state);
+    bool Drain(wxSocketBase* socket, ConnectionState& state);
+
+    // Write as much of what is queued for the connection as the socket takes
+    // without waiting. The rest stays queued and is written when the socket
+    // signals that it can take more. Returns false if the socket failed.
+    bool Flush(wxSocketBase* socket, ConnectionState& state);
+
+    // Flush() for a connection looked up by its socket; tears the connection
+    // down if the socket failed. Returns false in that case.
+    bool FlushConnection(wxSocketBase* socket);
+
+    // Serialize the message and queue it for its connection, writing what the
+    // socket takes right away; or, for a socket that is not a connection yet
+    // (the CONNECT handshake), write it directly. Main thread, with
+    // gs_critical_io held. Returns false if the message was not queued.
+    bool DoSend(wxIPCMessageBase& msg, wxSocketBase* socket);
 
     enum ParseResult
     {
@@ -310,7 +343,7 @@ private:
         Parse_Corrupt       // the buffer does not start with a message header
     };
 
-    ParseResult ParseMessage(ReceiveState& state,
+    ParseResult ParseMessage(ConnectionState& state,
                              wxSocketBase* socket,
                              wxIPCMessageBase*& msg);
 
@@ -320,11 +353,11 @@ private:
     // If msg is the reply the front pending entry waits for, hand it over
     // (taking ownership) and return true.
     bool DeliverReply(wxSocketBase* socket,
-                      ReceiveState& state,
+                      ConnectionState& state,
                       wxIPCMessageBase* msg);
 
     // Fail every reply still expected on the connection: it is going away.
-    void FailPendingReplies(wxSocketBase* socket, ReceiveState& state);
+    void FailPendingReplies(wxSocketBase* socket, ConnectionState& state);
 
     // Queue the entry on the connection and write the message, as one step.
     bool SendAndRegister(wxIPCMessageBase& send_msg,
@@ -355,7 +388,7 @@ private:
     int m_mainThreadRequests = 0;
 
     wxCRIT_SECT_DECLARE_MEMBER(m_cs_connection_sockets);
-    std::unordered_map<wxSocketBase*, std::unique_ptr<ReceiveState>> m_connections;
+    std::unordered_map<wxSocketBase*, std::unique_ptr<ConnectionState>> m_connections;
 
     wxDECLARE_EVENT_TABLE();
     wxDECLARE_NO_COPY_CLASS(wxTCPEventHandler);
@@ -461,8 +494,40 @@ private:
     size_t m_pos;
 };
 
-// This class and its derivatives manage the writing of messages to the socket
-// and their parsing from the bytes received from it.
+// Appends the fields of a message to a byte buffer, in the format that
+// wxIPCMessageReader parses.
+class wxIPCMessageWriter
+{
+public:
+    explicit wxIPCMessageWriter(std::vector<char>& out) : m_out(out) { }
+
+    void Write32(wxUint32 word)
+    {
+        WriteBlock(&word, 4);
+    }
+
+    void WriteByte(wxUint8 byte)
+    {
+        m_out.push_back(static_cast<char>(byte));
+    }
+
+    void WriteBlock(const void* data, size_t len)
+    {
+        if ( len )
+        {
+            const char* const p = static_cast<const char*>(data);
+            m_out.insert(m_out.end(), p, p + len);
+        }
+    }
+
+private:
+    std::vector<char>& m_out;
+
+    wxDECLARE_NO_COPY_CLASS(wxIPCMessageWriter);
+};
+
+// This class and its derivatives manage the serialization of messages to the
+// bytes sent on the socket and their parsing from the bytes received from it.
 class wxIPCMessageBase : public wxObject
 {
 public:
@@ -527,7 +592,16 @@ protected:
     // false if they have not all arrived yet.
     virtual bool ReadFrom(wxIPCMessageReader& in) = 0;
 
-    virtual bool DataToSocket() = 0;
+    // Serialize the message: the header word carrying the IPC code, then the
+    // fields in the format ReadFrom() parses.
+    void WriteTo(wxIPCMessageWriter& out)
+    {
+        out.Write32(IPCCodeHeader | GetIPCCode());
+        WriteFields(out);
+    }
+
+    // Serialize the fields following the IPC code.
+    virtual void WriteFields(wxIPCMessageWriter& out) = 0;
 
     // primitives for parsing a message from memory
 
@@ -544,81 +618,19 @@ protected:
     bool ReadString(wxIPCMessageReader& in, wxString& str);
     bool ReadSizeAndData(wxIPCMessageReader& in);
 
-    // primitives for writing to the socket
+    // primitives for serializing a message to memory
 
-    bool VerifyValidSocket()
+    void WriteIPCFormat(wxIPCMessageWriter& out)
     {
-        if (m_socket && m_socket->IsOk() && m_socket->IsConnected() )
-            return true;
-
-        SetError(wxSOCKET_INVSOCK);
-        return false;
+        out.WriteByte(static_cast<wxUint8>(m_ipcFormat));
     }
 
-    bool Write32(wxUint32 word)
+    void WriteString(wxIPCMessageWriter& out, const wxString& str);
+
+    void WriteSizeAndData(wxIPCMessageWriter& out)
     {
-        if ( !VerifyValidSocket() )
-            return false;
-
-        m_socket->Write(reinterpret_cast<char *>(&word), 4);
-
-        return VerifyLastWriteCount(4);
-    }
-
-    bool WriteData(const void* data, wxUint32 nbytes)
-    {
-        if ( !VerifyValidSocket() )
-            return false;
-
-        m_socket->Write(data, nbytes);
-
-        return VerifyLastWriteCount(nbytes);
-    }
-
-    bool WriteSizeAndData()
-    {
-        if (!Write32(m_size))
-            return false;
-
-        return WriteData(m_writeData, m_size);
-    }
-
-    bool WriteIPCCode()
-    {
-        wxUint32 code_with_header = IPCCodeHeader | GetIPCCode();
-        return Write32(code_with_header);
-    }
-
-    bool WriteIPCFormat()
-    {
-        if ( !VerifyValidSocket() )
-            return false;
-
-        const wxUint8 format = static_cast<wxUint8>(m_ipcFormat);
-        m_socket->Write(&format, 1);
-
-        return VerifyLastWriteCount(1);
-    }
-
-    bool WriteString(const wxString& str);
-
-    bool VerifyLastWriteCount(wxUint32 nbytes)
-    {
-        if ( !VerifyValidSocket() )
-            return false;
-
-        if (m_socket->Error())
-        {
-            SetError(m_socket->LastError());
-            return false;
-        }
-
-        if (m_socket->LastWriteCount() != nbytes)
-        {
-            SetError(wxSOCKET_IOERR);
-            return false;
-        }
-        return true;
+        out.Write32(m_size);
+        out.WriteBlock(m_writeData, m_size);
     }
 
     IPCCode m_ipcCode;
@@ -678,15 +690,13 @@ bool wxIPCMessageBase::ReadString(wxIPCMessageReader& in, wxString& str)
     return true;
 }
 
-bool wxIPCMessageBase::WriteString(const wxString& str)
+void wxIPCMessageBase::WriteString(wxIPCMessageWriter& out, const wxString& str)
 {
     const wxScopedCharBuffer& buf = str.utf8_str();
-    size_t len = buf.length();
+    const size_t len = buf.length();
 
-    if (len > 0)
-        return Write32(len) && WriteData(buf, len);
-    else
-        return Write32(len);
+    out.Write32(static_cast<wxUint32>(len));
+    out.WriteBlock(buf, len);
 }
 
 
@@ -715,9 +725,10 @@ public:
     }
 
 protected:
-    bool DataToSocket() override
+    void WriteFields(wxIPCMessageWriter& out) override
     {
-        return WriteIPCFormat() && WriteSizeAndData();
+        WriteIPCFormat(out);
+        WriteSizeAndData(out);
     }
 
     bool ReadFrom(wxIPCMessageReader& in) override
@@ -749,9 +760,10 @@ public:
     }
 
 protected:
-    bool DataToSocket() override
+    void WriteFields(wxIPCMessageWriter& out) override
     {
-        return WriteIPCFormat() && WriteString(m_item);
+        WriteIPCFormat(out);
+        WriteString(out, m_item);
     }
 
     bool ReadFrom(wxIPCMessageReader& in) override
@@ -802,9 +814,11 @@ public:
     }
 
 protected:
-    bool DataToSocket() override
+    void WriteFields(wxIPCMessageWriter& out) override
     {
-        return WriteIPCFormat() && WriteString(m_item) && WriteSizeAndData();
+        WriteIPCFormat(out);
+        WriteString(out, m_item);
+        WriteSizeAndData(out);
     }
 
     bool ReadFrom(wxIPCMessageReader& in) override
@@ -837,9 +851,11 @@ public:
     }
 
 protected:
-    bool DataToSocket() override
+    void WriteFields(wxIPCMessageWriter& out) override
     {
-        return WriteIPCFormat() && WriteString(m_item) && WriteSizeAndData();
+        WriteIPCFormat(out);
+        WriteString(out, m_item);
+        WriteSizeAndData(out);
     }
 
     bool ReadFrom(wxIPCMessageReader& in) override
@@ -867,9 +883,9 @@ public:
     }
 
 protected:
-    bool DataToSocket() override
+    void WriteFields(wxIPCMessageWriter& out) override
     {
-        return WriteString(m_item);
+        WriteString(out, m_item);
     }
 
     bool ReadFrom(wxIPCMessageReader& in) override
@@ -897,9 +913,9 @@ public:
     }
 
 protected:
-    bool DataToSocket() override
+    void WriteFields(wxIPCMessageWriter& out) override
     {
-        return WriteString(m_item);
+        WriteString(out, m_item);
     }
 
     bool ReadFrom(wxIPCMessageReader& in) override
@@ -933,9 +949,11 @@ public:
     }
 
 protected:
-    bool DataToSocket() override
+    void WriteFields(wxIPCMessageWriter& out) override
     {
-        return WriteIPCFormat() && WriteString(m_item) && WriteSizeAndData();
+        WriteIPCFormat(out);
+        WriteString(out, m_item);
+        WriteSizeAndData(out);
     }
 
     bool ReadFrom(wxIPCMessageReader& in) override
@@ -964,9 +982,9 @@ public:
     }
 
 protected:
-    bool DataToSocket() override
+    void WriteFields(wxIPCMessageWriter& out) override
     {
-        return WriteString(m_item);
+        WriteString(out, m_item);
     }
 
     bool ReadFrom(wxIPCMessageReader& in) override
@@ -988,9 +1006,9 @@ public:
     }
 
 protected:
-    bool DataToSocket() override
+    void WriteFields(wxIPCMessageWriter& WXUNUSED(out)) override
     {
-        return false;
+        wxFAIL_MSG( "a null message cannot be sent" );
     }
 
     bool ReadFrom(wxIPCMessageReader& WXUNUSED(in)) override
@@ -1021,9 +1039,9 @@ public:
     void SetTopic(const wxString& topic) { m_topic = topic; }
 
 protected:
-    bool DataToSocket() override
+    void WriteFields(wxIPCMessageWriter& out) override
     {
-        return WriteString(m_topic);
+        WriteString(out, m_topic);
     }
 
     bool ReadFrom(wxIPCMessageReader& in) override
@@ -1047,9 +1065,9 @@ public:
     }
 
 protected:
-    bool DataToSocket() override
+    void WriteFields(wxIPCMessageWriter& WXUNUSED(out)) override
     {
-        return true;
+        // Nothing but the IPC code.
     }
 
     bool ReadFrom(wxIPCMessageReader& WXUNUSED(in)) override
@@ -1456,18 +1474,23 @@ bool wxTCPConnection::Disconnect()
     if ( !GetConnected() )
         return true;
 
+    // Mark the connection closed first: the flush below may run the event
+    // loop, and a handler run by it must not come back here.
+    SetConnected(false);
+
     if ( m_sock && m_handler)
     {
-        // Send the disconnect message to the peer.
+        // Send the disconnect message to the peer, behind whatever is still
+        // queued for it, and give all of it a bounded time to go out.
         wxIPCMessageDisconnect msg(m_sock);
         if ( !m_handler->WriteMessageToSocket(msg) )
             wxLogDebug("Failed to send IPC_DISCONNECT message");
 
+        m_handler->FlushBlocking(m_sock);
+
         m_sock->Notify(false);
         m_sock->Close();
     }
-
-    SetConnected(false);
 
     return true;
 }
@@ -1585,7 +1608,7 @@ void wxTCPEventHandler::OnSocketInput(wxSocketEvent &event)
     // This socket is being deleted
     if ( !connection )
     {
-        if ( ReceiveState* const state = GetReceiveState(sock) )
+        if ( ConnectionState* const state = GetConnectionState(sock) )
             FailPendingReplies(sock, *state);
         return;
     }
@@ -1593,6 +1616,13 @@ void wxTCPEventHandler::OnSocketInput(wxSocketEvent &event)
     if ( event.GetSocketEvent() == wxSOCKET_LOST )
     {
         HandleDisconnect(connection);
+        return;
+    }
+
+    if ( event.GetSocketEvent() == wxSOCKET_OUTPUT )
+    {
+        // The socket can take more of what is queued for it.
+        FlushConnection(sock);
         return;
     }
 
@@ -1854,7 +1884,7 @@ void wxTCPEventHandler::RunOnMainThread(const std::function<void()>& fn)
 // the peer handles the messages it receives on a connection one after the
 // other and answers each before looking at the next, so the replies come back
 // in the order the messages were written. Each message expecting a reply is
-// queued on its connection (ReceiveState::pending) in the same step as it is
+// queued on its connection (ConnectionState::pending) in the same step as it is
 // written, and the next reply-class message parsed from that connection is the
 // reply to the front of the queue.
 //
@@ -1886,24 +1916,21 @@ bool wxTCPEventHandler::SendAndRegister(wxIPCMessageBase& send_msg,
         // whichever threads write to this connection.
         wxCRIT_SECT_LOCKER(lock, gs_critical_io);
 
-        ReceiveState* const state = GetReceiveState(socket);
+        ConnectionState* const state = GetConnectionState(socket);
         if ( !state )
             return;     // not a connection socket (any more)
 
         state->pending.push_back(entry);
 
-        ok = send_msg.WriteIPCCode() && send_msg.DataToSocket();
+        ok = DoSend(send_msg, socket);
         if ( !ok )
         {
-            // No (complete) message went out, so no reply will come back. The
-            // write may have pumped the event loop, so look the state up again
-            // rather than trusting the pointer from before it.
-            if ( ReceiveState* const st = GetReceiveState(socket) )
-            {
-                auto& pending = st->pending;
-                pending.erase(std::remove(pending.begin(), pending.end(), entry),
-                              pending.end());
-            }
+            // The message was not queued, so no reply will come back for it.
+            // Nothing waits inside DoSend(), so the state looked up above is
+            // still the one.
+            auto& pending = state->pending;
+            pending.erase(std::remove(pending.begin(), pending.end(), entry),
+                          pending.end());
         }
     });
 
@@ -1998,6 +2025,13 @@ bool wxTCPEventHandler::SendAndGetReply_MainThread(wxIPCMessageBase& send_msg,
         // anything in front of it (other replies, advises, ...) in order.
         DrainAndDispatch(socket);
 
+        // And write what is still queued for the connection, as far as the
+        // socket takes it: the output notification that would do this is a
+        // pending event, and those are not necessarily run from inside the
+        // wait below (console applications run them only at the top of the
+        // event loop).
+        FlushConnection(socket);
+
         {
             wxMutexLocker lock(m_replyMutex);
             if ( entry->done )
@@ -2012,14 +2046,19 @@ bool wxTCPEventHandler::SendAndGetReply_MainThread(wxIPCMessageBase& send_msg,
         if ( !connection || !connection->GetConnected() )
             break;
 
-        // Wait for more bytes, pumping the event loop meanwhile. The wait
-        // returns early when the socket signals input or when DeliverReply()
-        // interrupts it because a nested dispatch completed a main-thread
-        // entry, possibly ours; it is also kept short in case that wake-up is
-        // missed, e.g. because the nested dispatch happened inside a wait of
-        // its own which reset this socket's event flags. Going round the loop
-        // one more time costs nothing.
-        socket->WaitForRead(0, std::min(remaining, 100L));
+        // Wait for more bytes (and for room to write, while something is
+        // queued), pumping the event loop meanwhile. The wait returns early
+        // when the socket signals input or when DeliverReply() interrupts it
+        // because a nested dispatch completed a main-thread entry, possibly
+        // ours; it is also kept short in case that wake-up is missed, e.g.
+        // because the nested dispatch happened inside a wait of its own which
+        // reset this socket's event flags. Going round the loop one more time
+        // costs nothing.
+        const ConnectionState* const state = GetConnectionState(socket);
+        if ( state && state->Backlog() )
+            socket->Wait(0, std::min(remaining, 100L));
+        else
+            socket->WaitForRead(0, std::min(remaining, 100L));
     }
 
     return TakeReply(entry, expected_code, return_msgptr);
@@ -2062,7 +2101,7 @@ bool wxTCPEventHandler::SendAndGetReply_WorkerThread(wxIPCMessageBase& send_msg,
 }
 
 bool wxTCPEventHandler::DeliverReply(wxSocketBase* socket,
-                                     ReceiveState& state,
+                                     ConnectionState& state,
                                      wxIPCMessageBase* msg)
 {
     if ( state.pending.empty() )
@@ -2120,7 +2159,7 @@ bool wxTCPEventHandler::DeliverReply(wxSocketBase* socket,
 }
 
 void wxTCPEventHandler::FailPendingReplies(wxSocketBase* socket,
-                                           ReceiveState& state)
+                                           ConnectionState& state)
 {
     if ( state.pending.empty() )
         return;
@@ -2214,7 +2253,7 @@ wxIPCMessageBase* wxTCPEventHandler::ReadMessageBlocking(wxSocketBase* socket)
     wxIPCMessageBase* msg = nullptr;
 
     RunOnMainThread( [&] {
-        ReceiveState state;
+        ConnectionState state;
         wxStopWatch sw;
 
         for ( ;; )
@@ -2246,23 +2285,166 @@ wxIPCMessageBase* wxTCPEventHandler::ReadMessageBlocking(wxSocketBase* socket)
     return new wxIPCMessageNull(socket);
 };
 
-// Writes this message object to the socket.
+// Sends this message object on its socket: queues it for the connection and
+// writes what the socket takes right away, see DoSend(). Returns false if the
+// message was not queued, in which case no reply will come back for it.
 bool wxTCPEventHandler::WriteMessageToSocket(wxIPCMessageBase& msg)
 {
-    bool ok_write = false;
+    bool ok = false;
     RunOnMainThread( [&] {
         // Serialize all socket I/O: wxSocketBase is not safe for concurrent use
         // from multiple threads on the same connection. The lock is taken here,
         // inside the marshalled work, so it is only ever held on the thread that
         // actually performs the I/O.
         wxCRIT_SECT_LOCKER(lock, gs_critical_io);
-        ok_write = msg.WriteIPCCode() && msg.DataToSocket();
+        ok = DoSend(msg, msg.GetSocket());
     });
 
-    return ok_write;
-};
+    return ok;
+}
 
-void wxTCPEventHandler::ReceiveState::Compact()
+bool wxTCPEventHandler::DoSend(wxIPCMessageBase& msg, wxSocketBase* socket)
+{
+    if ( !socket || !socket->IsOk() || !socket->IsConnected() )
+        return false;
+
+    ConnectionState* const state = GetConnectionState(socket);
+    if ( !state )
+    {
+        // Not a connection yet: this is the CONNECT handshake, on a socket
+        // nothing else writes to, and the peer is waiting for exactly this
+        // message. Write it out directly, waiting if need be.
+        std::vector<char> bytes;
+        wxIPCMessageWriter out(bytes);
+        msg.WriteTo(out);
+
+        socket->Write(bytes.data(), static_cast<wxUint32>(bytes.size()));
+        return !socket->Error() && socket->LastWriteCount() == bytes.size();
+    }
+
+    if ( state->Backlog() > wxIPCMaxSendBacklog )
+    {
+        // The peer has not been reading for a long while.
+        wxLogDebug("IPC send queue full (%zu bytes), message not sent",
+                   state->Backlog());
+        return false;
+    }
+
+    wxIPCMessageWriter out(state->out);
+    msg.WriteTo(out);
+
+    return Flush(socket, *state);
+}
+
+bool wxTCPEventHandler::Flush(wxSocketBase* socket, ConnectionState& state)
+{
+    wxASSERT_MSG( wxThread::IsMain(), "IPC sockets are written on the main thread" );
+
+    if ( !state.Backlog() )
+        return true;
+
+    if ( !socket->IsOk() )
+        return false;
+
+    // Write with wxSOCKET_NOWAIT_WRITE: each Write() returns at once with what
+    // the socket took, and takes nothing when it would have to wait. Nothing
+    // can run inside a write this way, which is the point: a write that waited
+    // ran the event loop, and the handlers run by it wrote to the same socket
+    // from inside the write.
+    const wxSocketFlags flags = socket->GetFlags();
+    socket->SetFlags((flags & ~wxSOCKET_WAITALL_WRITE) | wxSOCKET_NOWAIT_WRITE);
+
+    bool ok = true;
+    while ( state.Backlog() )
+    {
+        socket->Write(state.out.data() + state.outRd,
+                      static_cast<wxUint32>(state.Backlog()));
+
+        const wxUint32 n = socket->LastWriteCount();
+        state.outRd += n;
+
+        if ( n == 0 )
+        {
+            // Either the socket would have had to wait, which Write() leaves
+            // behind as its last error, or it failed.
+            if ( socket->Error() && socket->LastError() != wxSOCKET_WOULDBLOCK )
+                ok = false;
+            break;
+        }
+    }
+
+    socket->SetFlags(flags);
+
+    if ( !ok )
+        return false;
+
+    state.CompactOut();
+
+    // Ask to be told when the socket can take more only while something is
+    // queued for it: it can take more most of the time, and would say so at
+    // every turn of the event loop.
+    wxSocketEventFlags notify = wxSOCKET_INPUT_FLAG | wxSOCKET_LOST_FLAG;
+    if ( state.Backlog() )
+        notify |= wxSOCKET_OUTPUT_FLAG;
+    socket->SetNotify(notify);
+
+    return true;
+}
+
+bool wxTCPEventHandler::FlushConnection(wxSocketBase* socket)
+{
+    ConnectionState* const state = GetConnectionState(socket);
+    if ( !state )
+        return true;
+
+    bool ok;
+    {
+        wxCRIT_SECT_LOCKER(lock, gs_critical_io);
+        ok = Flush(socket, *state);
+    }
+
+    if ( !ok )
+    {
+        if ( wxTCPConnection* const connection = GetConnection(socket) )
+            HandleDisconnect(connection);
+    }
+
+    return ok;
+}
+
+void wxTCPEventHandler::FlushBlocking(wxSocketBase* socket)
+{
+    RunOnMainThread( [&] {
+        wxStopWatch sw;
+        for ( ;; )
+        {
+            ConnectionState* const state = GetConnectionState(socket);
+            if ( !state )
+                return;
+
+            {
+                wxCRIT_SECT_LOCKER(lock, gs_critical_io);
+                if ( !Flush(socket, *state) )
+                    return;
+            }
+
+            if ( !state->Backlog() )
+                return;
+
+            const long remaining = wxIPCTimeout*1000 - sw.Time();
+            if ( remaining <= 0 )
+                return;
+
+            // This waits by running the event loop. The connection is being
+            // closed by its owner, so nothing is left to protect from the
+            // handlers run meanwhile, and they cannot nest a write: nothing
+            // waits inside one any more.
+            socket->WaitForWrite(0, std::min(remaining, 100L));
+        }
+    });
+}
+
+void wxTCPEventHandler::ConnectionState::Compact()
 {
     if ( rd == wr )
     {
@@ -2280,7 +2462,25 @@ void wxTCPEventHandler::ReceiveState::Compact()
     }
 }
 
-bool wxTCPEventHandler::Drain(wxSocketBase* socket, ReceiveState& state)
+void wxTCPEventHandler::ConnectionState::CompactOut()
+{
+    if ( outRd == out.size() )
+    {
+        out.clear();
+        outRd = 0;
+
+        // Don't keep a buffer sized for the biggest message ever sent.
+        if ( out.capacity() > 16*wxIPCReadChunk )
+            std::vector<char>().swap(out);
+    }
+    else if ( outRd >= out.size()/2 )
+    {
+        out.erase(out.begin(), out.begin() + outRd);
+        outRd = 0;
+    }
+}
+
+bool wxTCPEventHandler::Drain(wxSocketBase* socket, ConnectionState& state)
 {
     wxASSERT_MSG( wxThread::IsMain(), "IPC sockets are read on the main thread" );
 
@@ -2331,7 +2531,7 @@ bool wxTCPEventHandler::Drain(wxSocketBase* socket, ReceiveState& state)
 }
 
 wxTCPEventHandler::ParseResult
-wxTCPEventHandler::ParseMessage(ReceiveState& state,
+wxTCPEventHandler::ParseMessage(ConnectionState& state,
                                 wxSocketBase* socket,
                                 wxIPCMessageBase*& msg)
 {
@@ -2373,7 +2573,7 @@ wxTCPEventHandler::ParseMessage(ReceiveState& state,
 // stopped, or finds that the connection is gone.
 void wxTCPEventHandler::DrainAndDispatch(wxSocketBase* socket)
 {
-    ReceiveState* state = GetReceiveState(socket);
+    ConnectionState* state = GetConnectionState(socket);
     if ( !state )
         return;
 
@@ -2412,7 +2612,7 @@ void wxTCPEventHandler::DrainAndDispatch(wxSocketBase* socket)
 
         // The handler may have done anything, including deleting the
         // connection: start over from the registry.
-        state = GetReceiveState(socket);
+        state = GetConnectionState(socket);
         if ( !state )
             return;
 
@@ -2442,8 +2642,8 @@ wxTCPConnection* wxTCPEventHandler::GetConnection(wxSocketBase* socket)
     return static_cast<wxTCPConnection *>(socket->GetClientData());
 }
 
-wxTCPEventHandler::ReceiveState*
-wxTCPEventHandler::GetReceiveState(wxSocketBase* socket)
+wxTCPEventHandler::ConnectionState*
+wxTCPEventHandler::GetConnectionState(wxSocketBase* socket)
 {
     wxCRIT_SECT_LOCKER(lock, m_cs_connection_sockets);
     const auto it = m_connections.find(socket);
@@ -2453,7 +2653,7 @@ wxTCPEventHandler::GetReceiveState(wxSocketBase* socket)
 void wxTCPEventHandler::RegisterConnectionSocket(wxSocketBase* socket)
 {
     wxCRIT_SECT_LOCKER(lock, m_cs_connection_sockets);
-    m_connections[socket] = std::make_unique<ReceiveState>();
+    m_connections[socket] = std::make_unique<ConnectionState>();
 }
 
 void wxTCPEventHandler::UnregisterConnectionSocket(wxSocketBase* socket)

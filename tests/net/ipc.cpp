@@ -50,6 +50,11 @@ bool g_showMessageTiming = false;
 // raw arrival times.
 #include <iostream>
 
+// Set while a NestedRequestTimer (see below) is alive: called from OnAdvise()
+// for the "NestedPing" advise, which the server sends just before it replies to
+// a "ping via advise" request, i.e. from inside the wait for that reply.
+static void (*gs_onNestedPingAdvise)() = nullptr;
+
 // Test connection class used by the client.
 class IPCTestConnection : public wxConnection
 {
@@ -109,6 +114,12 @@ public:
             {
                 m_adviseComplete = true;
             }
+        }
+
+        else if ( item == "NestedPing" )
+        {
+            if ( gs_onNestedPingAdvise )
+                gs_onNestedPingAdvise();
         }
 
         else
@@ -1184,56 +1195,57 @@ public:
         }
     };
 
-    explicit NestedRequestTimer(IPCTestConnection& conn)
-        : m_conn(conn),
-          m_queued(std::make_shared<Counts>()),
+    NestedRequestTimer()
+        : m_queued(std::make_shared<Counts>()),
           m_alive(std::make_shared<bool>(true))
     {
+        ms_instance = this;
+        gs_onNestedPingAdvise = OnNestedPingAdvise;
     }
 
     virtual ~NestedRequestTimer()
     {
+        gs_onNestedPingAdvise = nullptr;
+        ms_instance = nullptr;
         *m_alive = false;
     }
 
     virtual void Notify() override
     {
-        // Request() pumps the event loop while it waits for its reply, so when
-        // the next tick comes round before the reply does, this handler runs
-        // again from inside that wait. Issue one more request from there: it
-        // queues behind the outer one and both must be answered. Stop at that
-        // depth, as every further tick would nest yet another request for as
-        // long as the server is busy, until wxWidgets refuses to nest deeper.
-        if ( m_depth >= 2 )
+        // Request() pumps the event loop while it waits for its reply, so this
+        // handler may run again from inside that wait. Don't issue another
+        // request from there: the nested one comes from the advise handler
+        // below, which is sure to run inside the wait on every port, while
+        // timer ticks are not delivered inside it everywhere.
+        if ( m_busy )
             return;
 
-        m_depth++;
+        // Look the connection up every time: wxWidgets deletes the connection
+        // object when the peer goes away, and the client clears this then.
+        IPCTestConnection* const conn = gs_client ? gs_client->m_conn : nullptr;
+        if ( !conn )
+            return;
 
-        if ( m_depth == 2 )
+        m_busy = true;
+
+        // The server sends the "NestedPing" advise just before it replies to
+        // this, so OnNestedPingAdvise() runs from inside this wait.
+        m_direct.Add(Ping(*conn, "ping via advise"));
+
+        // The queued copy may run after this timer is gone (the fixture drains
+        // pending events in its destructor), so it shares the counts and an
+        // "alive" flag with the timer instead of capturing it.
+        const std::shared_ptr<Counts> queued = m_queued;
+        const std::shared_ptr<bool> alive = m_alive;
+        wxTheApp->CallAfter([queued, alive]()
         {
-            m_nested.Add(Ping(m_conn, "ping"));
-        }
-        else
-        {
-            // The server holds this reply back for longer than a timer tick,
-            // so that the next tick is sure to find this request waiting.
-            m_direct.Add(Ping(m_conn, "slow ping 50"));
+            if ( !*alive || !gs_client || !gs_client->m_conn )
+                return;
 
-            // The queued copy may run after this timer is gone (the fixture
-            // drains pending events in its destructor), so it shares the counts
-            // and an "alive" flag with the timer instead of capturing it.
-            const std::shared_ptr<Counts> queued = m_queued;
-            const std::shared_ptr<bool> alive = m_alive;
-            wxTheApp->CallAfter([queued, alive]()
-            {
-                if ( !*alive || !gs_client || !gs_client->m_conn )
-                    return;
+            queued->Add(Ping(*gs_client->m_conn, "ping"));
+        });
 
-                queued->Add(Ping(*gs_client->m_conn, "ping"));
-            });
-        }
-
-        m_depth--;
+        m_busy = false;
     }
 
     const Counts& Direct() const { return m_direct; }
@@ -1247,8 +1259,20 @@ private:
         return (const char*) conn.Request(item, &size, wxIPC_PRIVATE);
     }
 
-    IPCTestConnection& m_conn;
-    int m_depth = 0;
+    // Runs from IPCTestConnection::OnAdvise() while a request from Notify()
+    // waits for its reply: issue a request from inside that wait. It queues
+    // behind the outer one and both must be answered.
+    static void OnNestedPingAdvise()
+    {
+        if ( !ms_instance || !gs_client || !gs_client->m_conn )
+            return;
+
+        ms_instance->m_nested.Add(Ping(*gs_client->m_conn, "ping"));
+    }
+
+    static NestedRequestTimer* ms_instance;
+
+    bool m_busy = false;
 
     Counts m_direct;
     Counts m_nested;
@@ -1257,6 +1281,8 @@ private:
 
     wxDECLARE_NO_COPY_CLASS(NestedRequestTimer);
 };
+
+NestedRequestTimer* NestedRequestTimer::ms_instance = nullptr;
 
 static wxString Describe(const NestedRequestTimer::Counts& c)
 {
@@ -1282,9 +1308,9 @@ static wxString Describe(const NestedRequestTimer::Counts& c)
 //
 // The server sends one advise too large to have arrived whole by the time its
 // header is seen, so the client has to wait for the rest, and a fast timer
-// issues Request()s throughout; the server delays its replies to those, so
-// that the timer also fires while one of them waits and issues a request from
-// there. A worker thread sends its own stream of requests on the same
+// issues Request()s throughout; the server answers each of those with an
+// advise first, whose handler issues a request from inside the wait for the
+// reply. A worker thread sends its own stream of requests on the same
 // connection at the same time. Every request must be answered; the advise
 // must arrive once and intact; and the connection must still work afterwards.
 TEST_CASE_METHOD(IPCFixture,
@@ -1307,7 +1333,7 @@ TEST_CASE_METHOD(IPCFixture,
     const unsigned long bytes = 64ul * 1024 * 1024;
     const wxString item = wxString::Format("BigAdvise test %lu", bytes);
 
-    NestedRequestTimer timer(conn);
+    NestedRequestTimer timer;
     MultiRequestThread worker("MultiRequest thread 1");
 
     CHECK( conn.StartAdvise(item) );
@@ -1349,10 +1375,9 @@ TEST_CASE_METHOD(IPCFixture,
     CHECK( timer.Queued().refused == 0 );
     CHECK( timer.Queued().bad == 0 );
 
-    // Ticks must have come while an earlier request was waiting for its reply
-    // (the server delays those replies past the timer resolution to make sure
-    // of it), and the requests issued from there must have been answered too.
-    CHECK( timer.Nested().fired > 0 );
+    // Each request from the timer had the "NestedPing" advise dispatched inside
+    // its wait, and the request issued from there must have been answered too.
+    CHECK( timer.Nested().fired == timer.Direct().fired );
     CHECK( timer.Nested().refused == 0 );
     CHECK( timer.Nested().bad == 0 );
 
@@ -1376,6 +1401,83 @@ TEST_CASE_METHOD(IPCFixture,
                                       wxIPC_PRIVATE);
     REQUIRE( data != nullptr );
     CHECK( wxString(data) == MESSAGE_ITERATIONS_STRING );
+
+    data = (const char*) conn.Request("get_error_string", &size, wxIPC_PRIVATE);
+    REQUIRE( data != nullptr );
+    INFO( wxString(data) );
+    CHECK( wxString(data).empty() );
+}
+
+// The mirror image of the test above, on the write side: the server stops
+// reading for a while, so a message larger than the socket buffers cannot be
+// written in one go, and a fast timer issues Request()s meanwhile. Before the
+// fix the write waited by running the event loop, and the timer's Request()
+// wrote to the socket from inside that wait: "write reentrancy?" in
+// wxSocketWriteGuard, and the request's bytes in the middle of the message
+// being written. Now the message is queued and everything leaves in order
+// once the server reads again. Every request must be answered; the server
+// must receive the message intact; and the connection must still work.
+TEST_CASE_METHOD(IPCFixture,
+                 "IPC::RequestDuringBlockedWrite", "[net][ipc][multi_command]")
+{
+    REQUIRE( PumpConnect("localhost", IPC_TEST_PORT, IPC_TEST_TOPIC) );
+    IPCTestConnection& conn = gs_client->GetConn();
+
+    AssertCounter asserts;
+
+    // Well above any socket buffer, so that the server cannot have taken all
+    // of it by the time it stops reading. Sent as two messages: Windows takes
+    // the first send on a socket whole, however large, and only the next one
+    // has to wait for room.
+    const size_t bytes = 16 * 1024 * 1024;
+    std::unique_ptr<char[]> buf(new char[bytes]);
+    for ( size_t n = 0; n < bytes; n++ )
+        buf[n] = static_cast<char>('A' + n % 26);
+
+    NestedRequestTimer timer;
+    timer.Start(1);
+
+    // The server sleeps in its handler for this poke and reads nothing
+    // meanwhile, so the next messages fill the buffers and then have to wait.
+    CHECK( conn.Poke("sleep 500", "x", 1, wxIPC_PRIVATE) );
+    CHECK( conn.Poke("big poke", buf.get(), bytes, wxIPC_PRIVATE) );
+    CHECK( conn.Poke("big poke", buf.get(), bytes, wxIPC_PRIVATE) );
+    REQUIRE( gs_client->m_conn == &conn );
+
+    // The server answers this only once it has read everything before it.
+    size_t size = 0;
+    const char* data = (const char*) conn.Request("big poke result", &size,
+                                                  wxIPC_PRIVATE);
+    timer.Stop();
+
+    REQUIRE( data != nullptr );
+    CHECK( wxString(data) == wxString::Format("%zu ok", 2*bytes) );
+
+    // Let any still queued requests run (at the top level now).
+    DrainPendingIPCEvents();
+
+    INFO( "from the timer: " << Describe(timer.Direct()) );
+    INFO( "nested in a request from the timer: " << Describe(timer.Nested()) );
+    INFO( "queued with CallAfter: " << Describe(timer.Queued()) );
+
+    INFO( "first assert: " << asserts.First() );
+    CHECK( asserts.Count() == 0 );
+
+    CHECK( timer.Direct().fired > 0 );
+    CHECK( timer.Direct().refused == 0 );
+    CHECK( timer.Direct().bad == 0 );
+    CHECK( timer.Queued().refused == 0 );
+    CHECK( timer.Queued().bad == 0 );
+
+    // Each request from the timer had the "NestedPing" advise dispatched inside
+    // its wait, and the request issued from there must have been answered too.
+    CHECK( timer.Nested().fired == timer.Direct().fired );
+    CHECK( timer.Nested().refused == 0 );
+    CHECK( timer.Nested().bad == 0 );
+
+    data = (const char*) conn.Request("ping", &size, wxIPC_PRIVATE);
+    REQUIRE( data != nullptr );
+    CHECK( wxString(data) == "pong" );
 
     data = (const char*) conn.Request("get_error_string", &size, wxIPC_PRIVATE);
     REQUIRE( data != nullptr );

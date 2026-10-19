@@ -61,6 +61,11 @@ public:
     }
 
     virtual bool OnExec(const wxString& topic, const wxString& data) override;
+    virtual bool OnPoke(const wxString& topic,
+                        const wxString& item,
+                        const void* data,
+                        size_t size,
+                        wxIPCFormat format) override;
     virtual bool OnDisconnect() override;
 
     virtual const void* OnRequest(const wxString& topic,
@@ -102,6 +107,8 @@ private:
     int m_nextAvailable;
 
     wxString m_lastExecute;
+    size_t m_bigPokeBytes = 0;
+    bool m_bigPokeBad = false;
 
     int m_threadRequestLastVal[3];
 
@@ -251,6 +258,49 @@ bool IPCServerConnection::OnExec(const wxString& topic, const wxString& data)
     return true;
 }
 
+bool IPCServerConnection::OnPoke(const wxString& topic,
+                                 const wxString& item,
+                                 const void* data,
+                                 size_t size,
+                                 wxIPCFormat format)
+{
+    if ( topic != IPC_TEST_TOPIC )
+        return false;
+
+    if ( item.StartsWith("sleep ") )
+    {
+        // "sleep <ms>": read nothing from the connection for that long (see
+        // IPC::RequestDuringBlockedWrite).
+        unsigned long ms = 0;
+        if ( !item.AfterLast(' ').ToULong(&ms) || ms > 10000 )
+            return false;
+
+        wxMilliSleep(ms);
+        return true;
+    }
+
+    if ( item == "big poke" )
+    {
+        // Same pattern as BigAdviseThread sends; the "big poke result" request
+        // reports the bytes received so far and whether all arrived intact.
+        const char* const p = static_cast<const char*>(data);
+        bool ok = format == wxIPC_PRIVATE && size > 0;
+        for ( size_t n = 0; ok && n < size; n++ )
+        {
+            if ( p[n] != static_cast<char>('A' + n % 26) )
+                ok = false;
+        }
+
+        m_bigPokeBytes += size;
+        if ( !ok )
+            m_bigPokeBad = true;
+        return true;
+    }
+
+    m_generalError += "Unknown Poke item: " + item + '\n';
+    return false;
+}
+
 bool IPCServerConnection::OnDisconnect()
 {
     // Clear the server's current-connection pointer only if *this* connection is
@@ -319,6 +369,24 @@ const void* IPCServerConnection::OnRequest(const wxString& topic,
     else if ( item == "get_thread3_request_counter")
     {
         s = wxString::Format("%d", m_threadRequestLastVal[2]);
+    }
+    else if ( item == "ping via advise" )
+    {
+        // Answer like "ping", but send an advise first: the client's handler
+        // for it issues a request from inside the wait for this reply (see
+        // NestedRequestTimer in ipc.cpp).
+        if ( format != wxIPC_PRIVATE )
+            return nullptr;
+
+        if ( !Advise("NestedPing", "go") )
+            m_generalError += "Advise(NestedPing) failed\n";
+
+        s = "pong";
+    }
+    else if ( item == "big poke result" )
+    {
+        s = wxString::Format("%zu %s", m_bigPokeBytes,
+                             m_bigPokeBad ? "bad" : "ok");
     }
     else if ( item == "get_error_string")
     {
